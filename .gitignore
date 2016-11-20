@@ -1,0 +1,6 @@
+*
+!.gitignore
+!rustfmt.toml
+!src/
+!shaders/
+!Cargo.toml
