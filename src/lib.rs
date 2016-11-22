@@ -1,10 +1,52 @@
-use std::fs::File;
-use std::io;
-use std::io::{Write, BufReader, Seek, Read};
+pub mod file_reader;
+pub mod repr;
+pub mod error;
+
+/* #[macro_use]
+extern crate error_chain; */
+
+
+use std::vec::Vec;
+
+// Thoughts...
+// Method 1
+// - We load string into memory
+// - We need runtime repr of xref table
+//         and store /Root
+// - When we need an object, just look in xref table and read it straight from the string
+//
+//
+// Method 2
+// But what about representing the whole PDF as a kind of struct?
+//  - It should be able to write back the exact file it reads in.
+//  - This means it will just be a tree of (Indirect) Objects, each Object containing any amount of items.
+
+
+// Remember:
+// Usually, there is an expected type of an object that is referenced.
+//  - except for example Stream /Filter, which can be a Name or a Dictionary.
+
+// Method 1
+//  - PDF is created for this kind of access:
+//      - xref table tells where things are, so we don't need to parse things
+//        before they are needed
+//      - modifying a PDF file is done by only writing to the very end of the file
+// Method 2
+//  - Allows construction easily
+//  - Will take less RAM
+//
+// Is there a way to make this library to support both ways? Start with method 1, later extend it
+// to method 2?
+// Let's be concerned only about reading & understanding a PDF file.
+// private methods `get_object(obj_nr, gen_nr)`
+//  - method 1 looks in xref table, then parses the file
+//  - method 2 just gives the object
+//  - Both methods will need to return something..
+
 
 #[cfg(test)]
 mod tests {
-    use PDF;
+use repr::PDF;
     #[test]
     fn it_works() {
         let pdf = PDF::read_from_file("example.pdf");
@@ -15,86 +57,5 @@ mod tests {
     }
 }
 
-/// Runtime representation of a PDF file.
-struct PDF {
-}
-impl PDF {
-    pub fn new() -> PDF {
-        PDF {
-        }
-    }
-    pub fn read_from_file(path: &str) -> Result<PDF,io::Error> {
-        let mut reader = FileReader::new(path)?;
-        let pdf = reader.read()?;
-        Ok(pdf)
-    }
-}
 
 
-///
-struct FileReader {
-    buf: BufReader<File>
-}
-impl FileReader {
-    pub fn new(path: &str) -> Result<FileReader, io::Error> {
-        let mut file  = try!(File::open(path));
-        Ok(FileReader {
-            buf: BufReader::new(file)
-        })
-    }
-    pub fn read(&mut self) -> Result<PDF, io::Error> {
-        println!("Whitespace chars: {} {} {}", b'\r', b'\n', b'\t'); 
-        self.buf.seek(io::SeekFrom::End(0));
-        self.find_backward(b"startxref").expect("Could not find startxref");
-        let w: Vec<u8> = self.read_word().unwrap();
-        println!("Word: {}", String::from_utf8(w).unwrap());
-
-        Ok(PDF::new())
-    }
-
-    /// Finds location of keyword by searching backward
-    /// Sets the location to the first character of this word
-    fn find_backward(&mut self, keyword: &[u8]) -> Result<(), io::Error> {
-        let mut c = [0; 1];
-
-        let mut matched = keyword.len();
-        loop {
-            self.buf.seek(io::SeekFrom::Current(-2))?;  // two steps backward
-            self.buf.read(&mut c)?;                     // one step ahead
-            if c[0] == keyword[matched - 1] {
-                matched -= 1;
-            } else {
-                matched = keyword.len();
-            }
-            if matched == 0 {
-                break;
-            }
-        }
-            self.buf.seek(io::SeekFrom::Current(-1))?;  // back to first character
-        Ok(())
-    }
-
-    /// Read until whitespace and return result. Leaves the position on the next non-whitespace
-    /// character.
-    fn read_word(&mut self) -> Result<Vec<u8>, io::Error> {
-        // Assumption: starts at beginning of current word.
-        let mut result = Vec::new();
-        let mut c = [0 as u8; 1];
-        loop {
-            self.buf.read(&mut c)?;
-            result.push(c[0]);
-            if c[0] == b' ' || c[0] == b'\r' || c[0] == b'\n' || c[0] == b'\t' {
-                break;
-            }
-        }
-        Ok(result)
-    }
-    fn get_file_pos(&mut self) -> u64 {
-        let n = self.buf.seek(io::SeekFrom::Current(0));
-        match n {
-            Ok(pos) => pos,
-            Err(_) => panic!("get_file_pos: something went wrong.")
-        }
-    }
-    // fn next_word() -
-}
