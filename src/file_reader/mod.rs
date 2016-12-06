@@ -8,6 +8,15 @@ use std::str::FromStr;
 use error::Error;
 use repr::*;
 
+// Thoughts
+// Could be better with immutable self, where it returns the next position?
+//  - calling function then may want to update self.pos.
+// No I think it's best we let self.pos update automatically in functions...
+
+// Thoughts on parsing
+// Drop words.. start thinking about tokens.
+// <</Name/lala>> has 4 tokens.
+
 
 pub struct FileReader {
     buf: Vec<u8>,
