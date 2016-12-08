@@ -6,7 +6,6 @@ pub mod error;
 extern crate error_chain; */
 
 
-use std::vec::Vec;
 
 // Thoughts...
 // Method 1
@@ -46,16 +45,64 @@ use std::vec::Vec;
 
 #[cfg(test)]
 mod tests {
-use repr::PDF;
+    use repr::PDF;
+
+    use std::io;
+    use std::fs::File;
+    use std::io::{Write, BufReader, Seek, Read};
+    use std::vec::Vec;
+    use file_reader::lexer::Lexer;
+    use std::io::SeekFrom;
+
+    const example_path: &'static str = "example.pdf";
+
     #[test]
-    fn it_works() {
-        let pdf = PDF::read_from_file("example.pdf");
-        match pdf {
-            Ok(_) => println!("Ok"),
-            Err(_) => panic!("Some error occured in reading the file.")
+    fn sequential_read() {
+        let buf = read_file(example_path);
+        println!("\nSEQUENTIAL READ\n");
+
+        let lexer = Lexer::new(buf);
+        let mut iter = lexer.iter();
+        let mut substr = None;
+        loop {
+            let lexeme = iter.next();
+            match lexeme {
+                None => break,
+                Some(lexeme) => {
+                    if lexeme.equals(b"%") {
+                        iter.seek_newline();
+                    } else if lexeme.equals(b"stream") {
+                        substr = Some(iter.seek_substr(b"endstream").unwrap());
+                    } else {
+                        println!("{}", lexeme.as_str());
+                    }
+                }
+            }
+        }
+        match substr {
+            None => println!("No substr.."),
+            Some(substr) => println!("Stream: {}", substr.as_str()),
         }
     }
+
+    #[test]
+    fn structured_read() {
+        let buf = read_file(example_path);
+        let lexer = Lexer::new(buf);
+        let mut iter = lexer.iter();
+        iter.seek(SeekFrom::End(0));
+    }
+
+
+    fn read_file(path: &str) -> Vec<u8> {
+        let path =  "example.pdf";
+        let mut file  = File::open(path).unwrap();
+        let length = file.seek(io::SeekFrom::End(0)).unwrap();
+        file.seek(io::SeekFrom::Start(0)).unwrap();
+        let mut buf: Vec<u8> = Vec::new();
+        buf.resize(length as usize, 0);
+        file.read(&mut buf); // Read entire file into memory
+
+        buf
+    }
 }
-
-
-

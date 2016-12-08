@@ -1,3 +1,5 @@
+pub mod lexer;
+
 use std;
 use std::io;
 use std::fs::File;
@@ -19,7 +21,7 @@ use repr::*;
 
 
 pub struct FileReader {
-    buf: Vec<u8>,
+    buf: Vec<u8>, // contents of entire file
     pos: usize,
     len: usize,
 }
