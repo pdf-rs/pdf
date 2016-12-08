@@ -8,38 +8,22 @@ use std::io::SeekFrom;
 //  - If Lexer only contains `buf`, then we might as well just have one Lexer type which is an
 //    Iterator and borrows rather than owns Vec<u8>
 
-pub struct Lexer {
-    buf: Vec<u8>,
+pub struct Lexer<'a> {
+    pos: usize,
+    buf: &'a Vec<u8>,
 }
 
-impl<'a> Lexer {
-    pub fn new(buf: Vec<u8>) -> Lexer {
+impl<'a> Lexer<'a> {
+    pub fn new(buf: &'a Vec<u8>) -> Lexer<'a> {
         Lexer {
+            pos: 0,
             buf: buf,
         }
     }
-    pub fn iter(&self) -> LexerIter {
-        LexerIter {
-            pos: 0,
-            lexer: self,
-        }
-    }
-}
 
-pub struct LexerIter<'a> {
-    pos: usize,
-    lexer: &'a Lexer,
-}
-impl<'a> LexerIter<'a> {
-    pub fn new(lexer: &'a Lexer) -> LexerIter<'a> {
-        LexerIter {
-            pos: 0,
-            lexer: lexer,
-        }
-    }
     pub fn new_substr(&self, range: Range<usize>) -> Substr<'a> {
         Substr {
-            slice: &self.lexer.buf[range],
+            slice: &self.buf[range],
         }
     }
 
@@ -47,7 +31,7 @@ impl<'a> LexerIter<'a> {
         let wanted_pos;
         match new_pos {
             SeekFrom::Start(offset) => wanted_pos = offset as usize,
-            SeekFrom::End(offset) => wanted_pos = self.lexer.buf.len() - offset as usize,
+            SeekFrom::End(offset) => wanted_pos = self.buf.len() - offset as usize,
             SeekFrom::Current(offset) => wanted_pos = self.pos + offset as usize,
         }
         self.pos = wanted_pos; // TODO restrict
@@ -56,11 +40,11 @@ impl<'a> LexerIter<'a> {
     /// Moves pos to start of next line. Returns the skipped-over substring.
     pub fn seek_newline(&mut self) -> Substr{
         let start = self.pos;
-        while self.lexer.buf[self.pos] != b'\n' 
+        while self.buf[self.pos] != b'\n' 
             && self.incr_pos() { }
         self.incr_pos();
 
-        Substr { slice: &self.lexer.buf[start..self.pos] }
+        self.new_substr(start..self.pos)
     }
 
     /// Moves pos to after the found `substr`. Returns Substr with traversed text if `substr` is found.
@@ -68,7 +52,7 @@ impl<'a> LexerIter<'a> {
         let start = self.pos;
         let mut matched = 0;
         loop {
-            if self.lexer.buf[self.pos] == substr[matched] {
+            if self.buf[self.pos] == substr[matched] {
                 matched += 1;
             } else {
                 matched = 0;
@@ -76,7 +60,7 @@ impl<'a> LexerIter<'a> {
             if matched == substr.len() {
                 break;
             }
-            if self.pos >= self.lexer.buf.len() {
+            if self.pos >= self.buf.len() {
                 return None
             }
             self.pos += 1;
@@ -107,7 +91,7 @@ impl<'a> LexerIter<'a> {
     */
 
     fn incr_pos(&mut self) -> bool {
-        if self.pos >= self.lexer.buf.len() - 1 {
+        if self.pos >= self.buf.len() - 1 {
             false
         } else {
             self.pos += 1;
@@ -115,36 +99,36 @@ impl<'a> LexerIter<'a> {
         }
     }
     fn is_whitespace(&self, pos: usize) -> bool {
-        if pos >= self.lexer.buf.len() {
+        if pos >= self.buf.len() {
             false
         } else {
-            self.lexer.buf[pos] == b' ' ||
-            self.lexer.buf[pos] == b'\r' ||
-            self.lexer.buf[pos] == b'\n' ||
-            self.lexer.buf[pos] == b'\t'
+            self.buf[pos] == b' ' ||
+            self.buf[pos] == b'\r' ||
+            self.buf[pos] == b'\n' ||
+            self.buf[pos] == b'\t'
         }
     }
 
     fn is_delimiter(&self, pos: usize) -> bool {
-        if pos >= self.lexer.buf.len() {
+        if pos >= self.buf.len() {
             false
         } else {
-            self.lexer.buf[pos] == b'(' ||
-            self.lexer.buf[pos] == b')' ||
-            self.lexer.buf[pos] == b'<' ||
-            self.lexer.buf[pos] == b'>' ||
-            self.lexer.buf[pos] == b'[' ||
-            self.lexer.buf[pos] == b']' ||
-            self.lexer.buf[pos] == b'{' ||
-            self.lexer.buf[pos] == b'}' ||
-            self.lexer.buf[pos] == b'/' ||
-            self.lexer.buf[pos] == b'%'
+            self.buf[pos] == b'(' ||
+            self.buf[pos] == b')' ||
+            self.buf[pos] == b'<' ||
+            self.buf[pos] == b'>' ||
+            self.buf[pos] == b'[' ||
+            self.buf[pos] == b']' ||
+            self.buf[pos] == b'{' ||
+            self.buf[pos] == b'}' ||
+            self.buf[pos] == b'/' ||
+            self.buf[pos] == b'%'
         }
     }
 }
 
 
-impl<'a> Iterator for LexerIter<'a> {
+impl<'a> Iterator for Lexer<'a> {
     type Item = Substr<'a>;
 
     /// As a start, the only thing separating lexemes is whitespace.
@@ -160,18 +144,18 @@ impl<'a> Iterator for LexerIter<'a> {
         // If first character is delimiter, this lexeme only contains that character.
         //  - except << and >> which go together
         if self.is_delimiter(self.pos) {
-            if self.lexer.buf[self.pos] == b'<' && self.lexer.buf[self.pos+1] == b'<'
-                || self.lexer.buf[self.pos] == b'>' && self.lexer.buf[self.pos+1] == b'>' {
+            if self.buf[self.pos] == b'<' && self.buf[self.pos+1] == b'<'
+                || self.buf[self.pos] == b'>' && self.buf[self.pos+1] == b'>' {
                 self.incr_pos();
             }
             self.incr_pos();
-            return Some(Substr { slice: &self.lexer.buf[start_pos..self.pos] } );
+            return Some(self.new_substr(start_pos..self.pos) );
         }
 
         // Read to past the end of lexeme
         while !self.is_whitespace(self.pos) && !self.is_delimiter(self.pos) && self.incr_pos() {
         }
-        Some(Substr { slice: &self.lexer.buf[start_pos..self.pos] } )
+        Some(self.new_substr(start_pos..self.pos) )
     }
 
 }
