@@ -1,4 +1,5 @@
 use std;
+use std::str::FromStr;
 use std::ops::Range;
 use std::io::SeekFrom;
 // Item = a range + a reference to the buffer.
@@ -31,7 +32,7 @@ impl<'a> Lexer<'a> {
         let wanted_pos;
         match new_pos {
             SeekFrom::Start(offset) => wanted_pos = offset as usize,
-            SeekFrom::End(offset) => wanted_pos = self.buf.len() - offset as usize,
+            SeekFrom::End(offset) => wanted_pos = self.buf.len() - offset as usize - 1,
             SeekFrom::Current(offset) => wanted_pos = self.pos + offset as usize,
         }
         self.pos = wanted_pos; // TODO restrict
@@ -68,27 +69,29 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         Some(self.new_substr(start..(self.pos - substr.len())))
     }
-    /* 
+
+    /// Searches for string backward. Moves to after the found `substr`, returns the traversed
+    /// Substr if found.
     pub fn seek_substr_back(&mut self, substr: &[u8]) -> Option<Substr<'a>> {
         let start = self.pos;
         let mut matched = substr.len();
         loop {
-            if self.buf[self.pos] == keyword[matched - 1] {
+            if self.buf[self.pos] == substr[matched - 1] {
                 matched -= 1;
             } else {
-                matched = keyword.len();
+                matched = substr.len();
             }
             if matched == 0 {
                 break;
             }
             if self.pos == 0 {
-                return Err(Error::from("Keyword not found"));
+                return None;
             }
             self.pos -= 1;
         }
-        self.read_word();
+        self.pos += substr.len();
+        Some(self.new_substr(self.pos..start))
     }
-    */
 
     fn incr_pos(&mut self) -> bool {
         if self.pos >= self.buf.len() - 1 {
@@ -171,6 +174,9 @@ impl<'a> Substr<'a> {
         unsafe {
             std::str::from_utf8_unchecked(self.slice)
         }
+    }
+    pub fn to<T: FromStr>(&self) -> T {
+        std::str::from_utf8(self.slice).unwrap().parse::<T>().ok().unwrap()
     }
     pub fn equals(&self, other: &[u8]) -> bool {
         self.slice == other

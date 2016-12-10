@@ -58,6 +58,7 @@ mod tests {
 
     #[test]
     fn sequential_read() {
+        return;
         let buf = read_file(example_path);
         println!("\nSEQUENTIAL READ\n");
 
@@ -84,15 +85,27 @@ mod tests {
         }
     }
 
-    /*
     #[test]
     fn structured_read() {
         let buf = read_file(example_path);
-        let lexer = Lexer::new(buf);
-        let mut iter = lexer.iter();
-        iter.seek(SeekFrom::End(0));
+        let mut lexer = Lexer::new(&buf);
+
+        // Find startxref
+        lexer.seek(SeekFrom::End(0));
+        let substr = lexer.seek_substr_back(b"startxref").expect("Could not find startxref!");
+        let startxref = lexer.next().expect("no startxref entry").to::<usize>();
+
+        // Read xref
+        lexer.seek(SeekFrom::Start(startxref as u64));
+        let word = lexer.next().unwrap();
+        assert!(word.as_str() == "xref");
+
+        let start_id = lexer.next().unwrap().to::<usize>();
+        let num_ids = lexer.next().unwrap().to::<usize>();
+
+        for id in start_id..(start_id+num_ids) {
+        }
     }
-    */
 
 
     fn read_file(path: &str) -> Vec<u8> {

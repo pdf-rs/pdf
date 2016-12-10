@@ -2,7 +2,7 @@
 
 use std::io;
 use std::vec::Vec;
-use file_reader::FileReader;
+use file_reader::lexer::Lexer;
 
 /// Runtime representation of a PDF file.
 pub struct PDF {
@@ -13,11 +13,6 @@ impl PDF {
     pub fn new() -> PDF {
         PDF {
         }
-    }
-    pub fn read_from_file(path: &str) -> Result<PDF,io::Error> {
-        let mut reader = FileReader::new(path)?;
-        let pdf = reader.read()?;
-        Ok(pdf)
     }
 }
 
