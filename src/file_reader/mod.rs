@@ -1,5 +1,7 @@
 pub mod lexer;
 
+use repr::XrefTable;
+
 use self::lexer::Lexer;
 use std::vec::Vec;
 use std::io::SeekFrom;
@@ -39,6 +41,8 @@ impl PdfReader {
 
         let start_id = lexer.next().unwrap().to::<usize>();
         let num_ids = lexer.next().unwrap().to::<usize>();
+
+        let xref_table = XrefTable::new(start_id);
 
         for id in start_id..(start_id+num_ids) {
             // TODO 

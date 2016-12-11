@@ -1,0 +1,57 @@
+%PDF-1.7
+%µí®û
+3 0 obj
+<< /Length 4 0 R >>
+stream
+/DeviceRGB cs /DeviceRGB CS
+0 0 0.972549 SC
+21.68 194 136.64 26 re
+10 10 m 20 20 l S
+BT
+/F0 24 Tf
+25.68 200 Td
+(Hello World!) Tj
+ET
+endstream
+endobj
+4 0 obj
+132
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Type /Page
+   /Parent 2 0 R
+   /Resources << /Font << /F0 5 0 R >> >>
+   /MediaBox [ 0 0 180 240 ]
+   /Contents 3 0 R
+>>
+endobj
+2 0 obj
+<< /Type /Pages
+   /Count 1
+   /Kids [ 6 0 R ]
+>>
+endobj
+1 0 obj
+<< /Type /Catalog
+   /Pages 2 0 R
+>>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000522 00000 n 
+0000000457 00000 n 
+0000000015 00000 n 
+0000000199 00000 n 
+0000000218 00000 n 
+0000000317 00000 n 
+trailer
+<< /Size 7
+   /Root 1 0 R
+>>
+startxref
+574
+%%EOF

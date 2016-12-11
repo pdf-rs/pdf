@@ -18,14 +18,22 @@ impl PDF {
 
 
 /* Cross-reference table */
-#[derive(Default)]
 pub struct XrefTable {
-    pub first_entry: usize,
+    pub first_id: usize,
     pub entries: Vec<XrefEntry>,
 }
 pub enum XrefEntry {
     Free{obj_num: usize, next_free: usize},
     InUse{pos: usize, gen_num: usize},
+}
+
+impl XrefTable {
+    pub fn new(first_id: usize) -> XrefTable {
+        XrefTable {
+            first_id: first_id,
+            entries: Vec::new(),
+        }
+    }
 }
 
 /* Objects */
