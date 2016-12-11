@@ -13,23 +13,36 @@ use std::fs::File;
 //
 // So I think it is best to first store nothing but important findings such as xref position...
 
-pub struct PdfReader<'a> {
-    xref_pos: usize,
-    lexer: Lexer<'a>,
+pub struct PdfReader {
+    startxref: usize,
+    buf: Vec<u8>,
 }
 
 
-impl<'a> PdfReader<'a> {
-    /*
+impl PdfReader {
     pub fn new(path: &str) -> PdfReader {
-        PdfReader {
-            xref_pos: 0,
-            lexer: Lexer::new(read_file(path)),
-        }
+        let buf = read_file(path);
+        let mut result = PdfReader {
+            startxref: 0,
+            buf: buf,
+        };
+        result.read_trailer();
+        result
     }
 
-    pub fn read(&mut self) {
+    pub fn read_xref(&mut self) {
+        let mut lexer = Lexer::new(&self.buf);
+        // Read xref
+        lexer.seek(SeekFrom::Start(self.startxref as u64));
+        let word = lexer.next().unwrap();
+        assert!(word.as_str() == "xref");
 
+        let start_id = lexer.next().unwrap().to::<usize>();
+        let num_ids = lexer.next().unwrap().to::<usize>();
+
+        for id in start_id..(start_id+num_ids) {
+            // TODO 
+        }
     }
 
     fn read_trailer(&mut self) {
@@ -37,10 +50,9 @@ impl<'a> PdfReader<'a> {
 
         // Find startxref
         lexer.seek(SeekFrom::End(0));
-        let substr = lexer.seek_substr_back(b"startxref").expect("Could not find startxref!");
-        let startxref = lexer.next().expect("no startxref entry").to::<usize>();
+        let _ = lexer.seek_substr_back(b"startxref").expect("Could not find startxref!");
+        self.startxref = lexer.next().expect("no startxref entry").to::<usize>();
     }
-    */
 }
 
 fn read_file(path: &str) -> Vec<u8> {

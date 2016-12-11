@@ -2,12 +2,7 @@ use std;
 use std::str::FromStr;
 use std::ops::Range;
 use std::io::SeekFrom;
-// Item = a range + a reference to the buffer.
-//   - contains methods to convert to number or string.
 
-// Thoughts (maybe TODO)
-//  - If Lexer only contains `buf`, then we might as well just have one Lexer type which is an
-//    Iterator and borrows rather than owns Vec<u8>
 
 pub struct Lexer<'a> {
     pos: usize,
@@ -134,7 +129,7 @@ impl<'a> Lexer<'a> {
 impl<'a> Iterator for Lexer<'a> {
     type Item = Substr<'a>;
 
-    /// As a start, the only thing separating lexemes is whitespace.
+    /// Gives the next lexeme
     fn next(&mut self) -> Option<Substr<'a>> {
         // Move away from eventual whitespace
         while self.is_whitespace(self.pos) {

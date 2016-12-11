@@ -2,9 +2,6 @@ pub mod file_reader;
 pub mod repr;
 pub mod error;
 
-/* #[macro_use]
-extern crate error_chain; */
-
 
 
 // Thoughts...
@@ -21,10 +18,9 @@ extern crate error_chain; */
 //  - This means it will just be a tree of (Indirect) Objects, each Object containing any amount of items.
 
 
-// Remember:
-// Usually, there is an expected type of an object that is referenced.
-//  - except for example Stream /Filter, which can be a Name or a Dictionary.
 
+// Pros/cons
+//
 // Method 1
 //  - PDF is created for this kind of access:
 //      - xref table tells where things are, so we don't need to parse things
@@ -33,19 +29,15 @@ extern crate error_chain; */
 // Method 2
 //  - Allows construction easily
 //  - Will take less RAM
-//
-// Is there a way to make this library to support both ways? Start with method 1, later extend it
-// to method 2?
-// Let's be concerned only about reading & understanding a PDF file.
-// private methods `get_object(obj_nr, gen_nr)`
-//  - method 1 looks in xref table, then parses the file
-//  - method 2 just gives the object
-//  - Both methods will need to return something..
+
+// Plan:
+// First don't care about storing structures. Just use Lexer to parse things whenever needed.
 
 
 #[cfg(test)]
 mod tests {
     use repr::PDF;
+    use file_reader::PdfReader;
 
     use std::io;
     use std::fs::File;
@@ -87,29 +79,12 @@ mod tests {
 
     #[test]
     fn structured_read() {
-        let buf = read_file(example_path);
-        let mut lexer = Lexer::new(&buf);
-
-        // Find startxref
-        lexer.seek(SeekFrom::End(0));
-        let substr = lexer.seek_substr_back(b"startxref").expect("Could not find startxref!");
-        let startxref = lexer.next().expect("no startxref entry").to::<usize>();
-
-        // Read xref
-        lexer.seek(SeekFrom::Start(startxref as u64));
-        let word = lexer.next().unwrap();
-        assert!(word.as_str() == "xref");
-
-        let start_id = lexer.next().unwrap().to::<usize>();
-        let num_ids = lexer.next().unwrap().to::<usize>();
-
-        for id in start_id..(start_id+num_ids) {
-        }
+        let mut reader = PdfReader::new(example_path);
+        reader.read_xref();
     }
 
 
     fn read_file(path: &str) -> Vec<u8> {
-        let path =  "example.pdf";
         let mut file  = File::open(path).unwrap();
         let length = file.seek(io::SeekFrom::End(0)).unwrap();
         file.seek(io::SeekFrom::Start(0)).unwrap();

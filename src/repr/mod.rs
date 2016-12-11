@@ -18,7 +18,9 @@ impl PDF {
 
 
 /* Cross-reference table */
+#[derive(Default)]
 pub struct XrefTable {
+    pub first_entry: usize,
     pub entries: Vec<XrefEntry>,
 }
 pub enum XrefEntry {
