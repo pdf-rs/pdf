@@ -23,8 +23,8 @@ pub struct XrefTable {
     pub entries: Vec<XrefEntry>,
 }
 pub enum XrefEntry {
-    Free{obj_num: usize, next_free: usize},
-    InUse{pos: usize, gen_num: usize},
+    Free{obj_nr: usize, next_free: usize},
+    InUse{pos: usize, gen_nr: usize},
 }
 
 impl XrefTable {
@@ -33,6 +33,12 @@ impl XrefTable {
             first_id: first_id,
             entries: Vec::new(),
         }
+    }
+    pub fn add_free_entry(&mut self, obj_nr: usize, next_free: usize) {
+        self.entries.push(XrefEntry::Free{obj_nr: obj_nr, next_free: next_free});
+    }
+    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: usize) {
+        self.entries.push(XrefEntry::InUse{pos: pos, gen_nr: gen_nr});
     }
 }
 
@@ -53,7 +59,27 @@ pub enum Object {
     Reference {obj_nr: i32, gen_nr: i32},
     Null,
 }
-pub struct Name(String); // Is technically an object but I keep it outside for now
+
+impl Object {
+    /// `self` must be an `Object::Dictionary`.
+    pub fn dictionary_get<'a>(&'a self, key: Name) -> Option<&'a Object> {
+        match self {
+            &Object::Dictionary(ref dictionary) => {
+                for &(ref name, ref object) in dictionary {
+                    if key.0 == name.0 {
+                        return Some(object);
+                    }
+                }
+                None
+            },
+            _ => {
+                panic!("dictionary_get called on an Object that is not Object::Dictionary.");
+            }
+        }
+    }
+}
+
+pub struct Name(pub String); // Is technically an object but I keep it outside for now
 // TODO Name could be an enum if Names are really a known finite set. Easy comparision
 
 pub enum StringType {

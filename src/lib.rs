@@ -36,8 +36,8 @@ pub mod error;
 
 #[cfg(test)]
 mod tests {
-    use repr::PDF;
     use file_reader::PdfReader;
+    use repr::*;
 
     use std::io;
     use std::fs::File;
@@ -80,7 +80,14 @@ mod tests {
     #[test]
     fn structured_read() {
         let mut reader = PdfReader::new(example_path);
-        reader.read_xref();
+        let val = reader.trailer.dictionary_get(Name(String::from("Root")));
+        match val {
+            Some(obj) => {
+                println!("trailer.Root exists!");
+                // TODO function to print an Object - at the very least what variant it is
+            },
+            None => panic!("val = None"),
+        }
     }
 
 

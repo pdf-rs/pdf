@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::io::SeekFrom;
 
 
+#[derive(Copy, Clone)]
 pub struct Lexer<'a> {
     pos: usize,
     buf: &'a Vec<u8>,
@@ -15,6 +16,10 @@ impl<'a> Lexer<'a> {
             pos: 0,
             buf: buf,
         }
+    }
+
+    pub fn get_pos(&self) -> usize {
+        self.pos
     }
 
     pub fn new_substr(&self, range: Range<usize>) -> Substr<'a> {
@@ -86,6 +91,17 @@ impl<'a> Lexer<'a> {
         }
         self.pos += substr.len();
         Some(self.new_substr(self.pos..start))
+    }
+
+    /// Read and return slice of at most n bytes.
+    pub fn read_n(&mut self, n: usize) -> Substr<'a> {
+        let start_pos = self.pos;
+        self.pos += n;
+        if self.pos >= self.buf.len() {
+            self.pos = self.buf.len() - 1;
+        }
+        self.new_substr(start_pos..self.pos)
+
     }
 
     fn incr_pos(&mut self) -> bool {
@@ -170,9 +186,16 @@ impl<'a> Substr<'a> {
             std::str::from_utf8_unchecked(self.slice)
         }
     }
-    pub fn to<T: FromStr>(&self) -> T {
-        std::str::from_utf8(self.slice).unwrap().parse::<T>().ok().unwrap()
+    pub fn to<T: FromStr>(&self) -> Option<T> {
+        std::str::from_utf8(self.slice).unwrap().parse::<T>().ok()
     }
+    pub fn is_integer(&self) -> bool {
+        match self.to::<i32>() {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
     pub fn equals(&self, other: &[u8]) -> bool {
         self.slice == other
     }
