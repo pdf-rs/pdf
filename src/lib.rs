@@ -8,6 +8,7 @@ extern crate slog_json;
 extern crate slog_scope;
 extern crate slog_stream;
 extern crate slog_term;
+extern crate isatty;
 
 pub mod file_reader;
 pub mod repr;
@@ -49,6 +50,7 @@ mod tests {
     use file_reader::PdfReader;
     use repr::*;
 
+    use std;
     use std::io;
     use std::fs::File;
     use std::io::{Write, BufReader, Seek, Read};
@@ -56,8 +58,8 @@ mod tests {
     use file_reader::lexer::Lexer;
     use std::io::SeekFrom;
     use slog;
-    use slog::DrainExt;
-    use slog_term;
+    use slog::{DrainExt, Level};
+    use {slog_term, slog_stream, isatty, slog_json, slog_scope};
 
     const example_path: &'static str = "example.pdf";
 
