@@ -70,6 +70,7 @@ impl PdfReader {
 
     /// Needs to be called before any other functions on the PdfReader
     fn read_trailer(&mut self) {
+        info!("Reading trailer!"; "hei" -> "hoi");
         let mut lexer = Lexer::new(&self.buf);
 
         // Find startxref

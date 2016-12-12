@@ -5,3 +5,8 @@ authors = ["Erlend Hofstad Langseth <3rlendhl@gmail.com>"]
 
 [dependencies]
 error-chain = "0.6.1"
+slog = { version = "1", features = ["max_level_trace", "release_max_level_trace"] }
+slog-json = "1"
+slog-scope = "0"
+slog-stream = "1"
+slog-term = "1"

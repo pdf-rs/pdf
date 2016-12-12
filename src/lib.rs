@@ -1,7 +1,17 @@
+// #![feature(plugin)]
+// #![plugin(clippy)]
+
+#[macro_use (o, slog_log, slog_trace, slog_debug, slog_info, slog_warn, slog_error)]
+extern crate slog;
+extern crate slog_json;
+#[macro_use]
+extern crate slog_scope;
+extern crate slog_stream;
+extern crate slog_term;
+
 pub mod file_reader;
 pub mod repr;
 pub mod error;
-
 
 
 // Thoughts...
@@ -45,6 +55,9 @@ mod tests {
     use std::vec::Vec;
     use file_reader::lexer::Lexer;
     use std::io::SeekFrom;
+    use slog;
+    use slog::DrainExt;
+    use slog_term;
 
     const example_path: &'static str = "example.pdf";
 
@@ -79,6 +92,8 @@ mod tests {
 
     #[test]
     fn structured_read() {
+        setup_logger();
+
         let mut reader = PdfReader::new(example_path);
         let val = reader.trailer.dictionary_get(Name(String::from("Root")));
         match val {
@@ -100,5 +115,22 @@ mod tests {
         file.read(&mut buf); // Read entire file into memory
 
         buf
+    }
+
+    fn setup_logger() {
+        let logger = if isatty::stderr_isatty() {
+            let drain = slog_term::streamer()
+                .async()
+                .stderr()
+                .full()
+                .use_utc_timestamp()
+                .build();
+            let d = slog::level_filter(Level::Trace, drain);
+            slog::Logger::root(d.fuse(), o![])
+        } else {
+            slog::Logger::root(slog_stream::stream(std::io::stderr(), slog_json::default()).fuse(),
+                               o![])
+        };
+        slog_scope::set_global_logger(logger);
     }
 }
