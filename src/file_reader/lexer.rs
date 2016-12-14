@@ -23,6 +23,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn new_substr(&self, range: Range<usize>) -> Substr<'a> {
+        let a = 0;
         Substr {
             slice: &self.buf[range],
         }
@@ -199,13 +200,4 @@ impl<'a> Substr<'a> {
     pub fn equals(&self, other: &[u8]) -> bool {
         self.slice == other
     }
-}
-
-
-
-
-
-
-fn to_str(bytes: &[u8]) -> &str {
-    std::str::from_utf8(bytes).unwrap()
 }

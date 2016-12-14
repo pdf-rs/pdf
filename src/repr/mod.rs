@@ -2,6 +2,7 @@
 
 use std::io;
 use std::vec::Vec;
+use std::string;
 use file_reader::lexer::Lexer;
 
 /// Runtime representation of a PDF file.
@@ -53,7 +54,7 @@ pub enum Object {
     RealNumber(f32),
     Boolean(bool),
     String(StringType, String),
-    Stream {filters: Vec<Name>, dictionary: Vec<(Name, Object)>, contents: String},
+    Stream {filters: Vec<Name>, dictionary: Vec<(Name, Object)>, content: String},
     Dictionary(Vec<(Name, Object)>),
     Array(Vec<Object>),
     Reference {obj_nr: i32, gen_nr: i32},
@@ -75,6 +76,27 @@ impl Object {
             _ => {
                 panic!("dictionary_get called on an Object that is not Object::Dictionary.");
             }
+        }
+    }
+}
+
+// TODO should this also be used for writing objects to file? - or should that be Debug or Display
+// trait?
+impl ToString for Object {
+    fn to_string(&self) -> String {
+        match self {
+            &Object::Integer(n) => n.to_string(),
+            &Object::RealNumber(n) => n.to_string(),
+            &Object::Boolean(b) => b.to_string(),
+            &Object::String(ref t, ref s) => {
+                match t {
+                    &StringType::HEX => "HexString(".to_string() + s.as_str() +")",
+                    &StringType::UTF8 => "UtfString(".to_string() + s.as_str() + ")",
+                }
+            },
+            &Object::Stream{filters: _, dictionary: _, content: ref content} => "Stream(".to_string() + content.as_str() + ")",
+            &Object::Dictionary(_) => "Object::Dictionary".to_string(),
+            _ => "Some other object".to_string(),
         }
     }
 }

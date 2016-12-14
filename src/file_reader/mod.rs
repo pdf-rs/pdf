@@ -54,7 +54,7 @@ impl PdfReader {
 
         let mut table = XrefTable::new(start_id);
 
-        for id in start_id..(start_id+num_ids) {
+        for _ in start_id..(start_id+num_ids) {
             let w1 = lexer.next().unwrap();
             let w2 = lexer.next().unwrap();
             let w3 = lexer.next().unwrap();
@@ -70,7 +70,6 @@ impl PdfReader {
 
     /// Needs to be called before any other functions on the PdfReader
     fn read_trailer(&mut self) {
-        info!("Reading trailer!"; "hei" => "hoi");
         let mut lexer = Lexer::new(&self.buf);
 
         // Find startxref
@@ -95,7 +94,6 @@ impl PdfReader {
                 let delimiter = lexer.next().unwrap();
                 if delimiter.equals(b"/") {
                     let name = Name(String::from(lexer.next().unwrap().as_str()));
-                    println!("Read object for {}", name.0);
                     let obj = self.read_object(lexer);
                     dictionary.push( (name, obj) );
                 } else if delimiter.equals(b">>") {

@@ -1,5 +1,6 @@
 // #![feature(plugin)]
 // #![plugin(clippy)]
+// //
 
 #[macro_use (o, slog_log, slog_trace, slog_debug, slog_info, slog_warn, slog_error)]
 extern crate slog;
@@ -60,6 +61,8 @@ mod tests {
     use slog;
     use slog::{DrainExt, Level};
     use {slog_term, slog_stream, isatty, slog_json, slog_scope};
+    use std::fmt;
+    use std::fmt::{Formatter, Display};
 
     const example_path: &'static str = "example.pdf";
 
@@ -96,12 +99,12 @@ mod tests {
     fn structured_read() {
         setup_logger();
 
+        info!("lala"; "lala" => "lala");
         let mut reader = PdfReader::new(example_path);
         let val = reader.trailer.dictionary_get(Name(String::from("Root")));
         match val {
             Some(obj) => {
-                println!("trailer.Root exists!");
-                // TODO function to print an Object - at the very least what variant it is
+                info!("Trailer"; "trailer" => obj.to_string());
             },
             None => panic!("val = None"),
         }
