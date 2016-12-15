@@ -23,7 +23,6 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn new_substr(&self, range: Range<usize>) -> Substr<'a> {
-        let a = 0;
         Substr {
             slice: &self.buf[range],
         }
@@ -51,6 +50,8 @@ impl<'a> Lexer<'a> {
 
     /// Moves pos to after the found `substr`. Returns Substr with traversed text if `substr` is found.
     pub fn seek_substr(&mut self, substr: &[u8]) -> Option<Substr<'a>> {
+        info!("Seeksubstr");
+        //
         let start = self.pos;
         let mut matched = 0;
         loop {

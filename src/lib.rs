@@ -54,22 +54,18 @@ mod tests {
     use std;
     use std::io;
     use std::fs::File;
-    use std::io::{Write, BufReader, Seek, Read};
+    use std::io::{Seek, Read};
     use std::vec::Vec;
     use file_reader::lexer::Lexer;
-    use std::io::SeekFrom;
     use slog;
     use slog::{DrainExt, Level};
     use {slog_term, slog_stream, isatty, slog_json, slog_scope};
-    use std::fmt;
-    use std::fmt::{Formatter, Display};
 
-    const example_path: &'static str = "example.pdf";
+    const EXAMPLE_PATH: &'static str = "example.pdf";
 
-    #[test]
+    //#[test]
     fn sequential_read() {
-        return;
-        let buf = read_file(example_path);
+        let buf = read_file(EXAMPLE_PATH);
         println!("\nSEQUENTIAL READ\n");
 
         let mut lexer = Lexer::new(&buf);
@@ -99,8 +95,7 @@ mod tests {
     fn structured_read() {
         setup_logger();
 
-        info!("lala"; "lala" => "lala");
-        let mut reader = PdfReader::new(example_path);
+        let reader = PdfReader::new(EXAMPLE_PATH);
         let val = reader.trailer.dictionary_get(Name(String::from("Root")));
         match val {
             Some(obj) => {
@@ -117,7 +112,7 @@ mod tests {
         file.seek(io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         buf.resize(length as usize, 0);
-        file.read(&mut buf); // Read entire file into memory
+        let _ = file.read(&mut buf); // Read entire file into memory
 
         buf
     }

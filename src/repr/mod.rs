@@ -1,9 +1,6 @@
 //! Runtime representation of a PDF file.
 
-use std::io;
 use std::vec::Vec;
-use std::string;
-use file_reader::lexer::Lexer;
 
 /// Runtime representation of a PDF file.
 pub struct PDF {
@@ -94,7 +91,7 @@ impl ToString for Object {
                     &StringType::UTF8 => "UtfString(".to_string() + s.as_str() + ")",
                 }
             },
-            &Object::Stream{filters: _, dictionary: _, content: ref content} => "Stream(".to_string() + content.as_str() + ")",
+            &Object::Stream{filters: _, dictionary: _, ref content} => "Stream(".to_string() + content.as_str() + ")",
             &Object::Dictionary(_) => "Object::Dictionary".to_string(),
             _ => "Some other object".to_string(),
         }

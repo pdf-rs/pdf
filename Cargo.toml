@@ -1,5 +1,5 @@
 [package]
-name = "pdf-read"
+name = "pdf"
 version = "0.1.0"
 authors = ["Erlend Hofstad Langseth <3rlendhl@gmail.com>"]
 
@@ -11,3 +11,6 @@ slog-scope = "0"
 slog-stream = "1"
 slog-term = "1"
 isatty = "0.1"
+
+[lib]
+doctest = false

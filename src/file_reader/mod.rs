@@ -132,7 +132,7 @@ impl PdfReader {
         Object::Null
     }
 
-    fn read_indirect_object(&mut self, start_pos: usize) -> IndirectObject {
+    pub fn read_indirect_object(&mut self, start_pos: usize) -> IndirectObject {
         let mut lexer = Lexer::new(&self.buf);
         lexer.seek(SeekFrom::Start(start_pos as u64));
         let obj_nr = lexer.next().unwrap().to::<i32>().unwrap();
@@ -154,13 +154,12 @@ impl PdfReader {
 }
 
 fn read_file(path: &str) -> Vec<u8> {
-    let path =  "example.pdf";
     let mut file  = File::open(path).unwrap();
     let length = file.seek(SeekFrom::End(0)).unwrap();
     file.seek(SeekFrom::Start(0)).unwrap();
     let mut buf: Vec<u8> = Vec::new();
     buf.resize(length as usize, 0);
-    file.read(&mut buf); // Read entire file into memory
+    let _ = file.read(&mut buf); // Read entire file into memory
 
     buf
 }
