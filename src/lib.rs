@@ -52,11 +52,6 @@ mod tests {
     use repr::*;
 
     use std;
-    use std::io;
-    use std::fs::File;
-    use std::io::{Seek, Read};
-    use std::vec::Vec;
-    use file_reader::lexer::Lexer;
     use slog;
     use slog::{DrainExt, Level};
     use {slog_term, slog_stream, isatty, slog_json, slog_scope};
@@ -70,13 +65,12 @@ mod tests {
 
         let reader = PdfReader::new(EXAMPLE_PATH);
         let val = reader.trailer.dictionary_get(Name(String::from("Root")));
-        match val {
-            Some(obj) => {
-                info!("Trailer"; "trailer" => obj.to_string());
-            },
-            None => panic!("val = None"),
+        if let Some(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
+        } else {
+            panic!("Wrong Trailer::Root!");
         }
     }
+
 
     fn setup_logger() {
         let logger = if isatty::stderr_isatty() {
