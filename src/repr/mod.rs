@@ -93,7 +93,9 @@ impl ToString for Object {
             },
             &Object::Stream{filters: _, dictionary: _, ref content} => "Stream(".to_string() + content.as_str() + ")",
             &Object::Dictionary(_) => "Object::Dictionary".to_string(),
-            _ => "Some other object".to_string(),
+            &Object::Array(_) => "Object::Array".to_string(),
+            &Object::Reference{obj_nr: _, gen_nr: _} => "Object::Reference".to_string(),
+            &Object::Null => "Object::Null".to_string(),
         }
     }
 }

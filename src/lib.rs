@@ -63,33 +63,6 @@ mod tests {
 
     const EXAMPLE_PATH: &'static str = "example.pdf";
 
-    //#[test]
-    fn sequential_read() {
-        let buf = read_file(EXAMPLE_PATH);
-        println!("\nSEQUENTIAL READ\n");
-
-        let mut lexer = Lexer::new(&buf);
-        let mut substr = None;
-        loop {
-            let lexeme = lexer.next();
-            match lexeme {
-                None => break,
-                Some(lexeme) => {
-                    if lexeme.equals(b"%") {
-                        lexer.seek_newline();
-                    } else if lexeme.equals(b"stream") {
-                        substr = Some(lexer.seek_substr(b"endstream").unwrap());
-                    } else {
-                        println!("{}", lexeme.as_str());
-                    }
-                }
-            }
-        }
-        match substr {
-            None => println!("No substr.."),
-            Some(substr) => println!("Stream: {}", substr.as_str()),
-        }
-    }
 
     #[test]
     fn structured_read() {
@@ -103,18 +76,6 @@ mod tests {
             },
             None => panic!("val = None"),
         }
-    }
-
-
-    fn read_file(path: &str) -> Vec<u8> {
-        let mut file  = File::open(path).unwrap();
-        let length = file.seek(io::SeekFrom::End(0)).unwrap();
-        file.seek(io::SeekFrom::Start(0)).unwrap();
-        let mut buf: Vec<u8> = Vec::new();
-        buf.resize(length as usize, 0);
-        let _ = file.read(&mut buf); // Read entire file into memory
-
-        buf
     }
 
     fn setup_logger() {
