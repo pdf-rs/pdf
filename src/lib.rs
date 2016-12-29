@@ -1,6 +1,5 @@
 // #![feature(plugin)]
 // #![plugin(clippy)]
-// //
 
 #[macro_use (o, slog_log, slog_trace, slog_debug, slog_info, slog_warn, slog_error)]
 extern crate slog;
@@ -11,44 +10,29 @@ extern crate slog_stream;
 extern crate slog_term;
 extern crate isatty;
 
-pub mod file_reader;
+pub mod reader;
 pub mod repr;
 pub mod error;
 
-
-// Thoughts...
-// Method 1
-// - We load string into memory
-// - We need runtime repr of xref table
-//         and store /Root
-// - When we need an object, just look in xref table and read it straight from the string
-//
-//
-// Method 2
-// But what about representing the whole PDF as a kind of struct?
-//  - It should be able to write back the exact file it reads in.
-//  - This means it will just be a tree of (Indirect) Objects, each Object containing any amount of items.
-
-
-
-// Pros/cons
-//
-// Method 1
-//  - PDF is created for this kind of access:
-//      - xref table tells where things are, so we don't need to parse things
-//        before they are needed
-//      - modifying a PDF file is done by only writing to the very end of the file
-// Method 2
-//  - Allows construction easily
-//  - Will take less RAM
 
 // Plan:
 // First don't care about storing structures. Just use Lexer to parse things whenever needed.
 
 
+// Need goals!
+// - Read Root/catalog
+// - Read Pages
+// - 
+
+
+// Let's say a chain from Trailer - Catalog - Pages - Page
+// can be make it optional whether we save each step and how far we follow the chain?
+//  - PdfReader has higher-level functions. Implementation dictates whether it follows chain or
+//  saves stuff!
+
 #[cfg(test)]
 mod tests {
-    use file_reader::PdfReader;
+    use reader::PdfReader;
     use repr::*;
 
     use std;
@@ -63,12 +47,18 @@ mod tests {
     fn structured_read() {
         setup_logger();
 
-        let reader = PdfReader::new(EXAMPLE_PATH);
-        let val = reader.trailer.dictionary_get(Name(String::from("Root")));
-        if let Some(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
-        } else {
-            panic!("Wrong Trailer::Root!");
+        let mut reader = PdfReader::new(EXAMPLE_PATH).unwrap();
+
+        {
+            let val = reader.trailer.dictionary_get(String::from("Root"));
+
+            if let Some(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
+            } else {
+                panic!("Wrong Trailer::Root!");
+            }
         }
+
+        let obj3 = reader.read_indirect_object(3);
     }
 
 

@@ -17,25 +17,27 @@ impl PDF {
 
 /* Cross-reference table */
 pub struct XrefTable {
-    pub first_id: usize,
+    pub first_id: u32,
     pub entries: Vec<XrefEntry>,
 }
+
+#[derive(Copy,Clone)]
 pub enum XrefEntry {
-    Free{obj_nr: usize, next_free: usize},
-    InUse{pos: usize, gen_nr: usize},
+    Free{next_obj_nr: u32, gen_nr: u16},
+    InUse{pos: usize, gen_nr: u16},
 }
 
 impl XrefTable {
-    pub fn new(first_id: usize) -> XrefTable {
+    pub fn new(first_id: u32) -> XrefTable {
         XrefTable {
             first_id: first_id,
             entries: Vec::new(),
         }
     }
-    pub fn add_free_entry(&mut self, obj_nr: usize, next_free: usize) {
-        self.entries.push(XrefEntry::Free{obj_nr: obj_nr, next_free: next_free});
+    pub fn add_free_entry(&mut self, next_obj_nr: u32, gen_nr: u16) {
+        self.entries.push(XrefEntry::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});
     }
-    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: usize) {
+    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
         self.entries.push(XrefEntry::InUse{pos: pos, gen_nr: gen_nr});
     }
 }
@@ -46,6 +48,8 @@ pub struct IndirectObject {
     pub gen_nr: i32,
     pub object: Object,
 }
+
+#[derive(Clone)]
 pub enum Object {
     Integer(i32),
     RealNumber(f32),
@@ -60,11 +64,11 @@ pub enum Object {
 
 impl Object {
     /// `self` must be an `Object::Dictionary`.
-    pub fn dictionary_get<'a>(&'a self, key: Name) -> Option<&'a Object> {
+    pub fn dictionary_get<'a>(&'a self, key: String) -> Option<&'a Object> {
         match self {
             &Object::Dictionary(ref dictionary) => {
                 for &(ref name, ref object) in dictionary {
-                    if key.0 == name.0 {
+                    if key == name.0 {
                         return Some(object);
                     }
                 }
@@ -100,12 +104,15 @@ impl ToString for Object {
     }
 }
 
+#[derive(Clone)]
 pub struct Name(pub String); // Is technically an object but I keep it outside for now
 // TODO Name could be an enum if Names are really a known finite set. Easy comparision
 
+#[derive(Clone)]
 pub enum StringType {
     HEX, UTF8
 }
+#[derive(Clone)]
 pub enum Filter {
     ASCIIHexDecode,
     ASCII85Decode,
