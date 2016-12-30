@@ -1,6 +1,7 @@
 //! Runtime representation of a PDF file.
 
 use std::vec::Vec;
+use error::{Error, Result};
 
 /// Runtime representation of a PDF file.
 pub struct PDF {
@@ -64,15 +65,15 @@ pub enum Object {
 
 impl Object {
     /// `self` must be an `Object::Dictionary`.
-    pub fn dictionary_get<'a>(&'a self, key: String) -> Option<&'a Object> {
+    pub fn dictionary_get<'a>(&'a self, key: String) -> Result<&'a Object> {
         match self {
             &Object::Dictionary(ref dictionary) => {
                 for &(ref name, ref object) in dictionary {
                     if key == name.0 {
-                        return Some(object);
+                        return Ok(object);
                     }
                 }
-                None
+                Err(Error::NotFound {word: key})
             },
             _ => {
                 panic!("dictionary_get called on an Object that is not Object::Dictionary.");

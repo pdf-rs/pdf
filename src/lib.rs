@@ -52,10 +52,13 @@ mod tests {
         {
             let val = reader.trailer.dictionary_get(String::from("Root"));
 
-            if let Some(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
+            if let Ok(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
             } else {
                 panic!("Wrong Trailer::Root!");
             }
+        }
+
+        {
         }
 
         let _ = reader.read_indirect_object(3).unwrap();

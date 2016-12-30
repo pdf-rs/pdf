@@ -108,8 +108,7 @@ impl PdfReader {
             if lexer.next()?.equals(b"stream") {
                 // (TODO but does it really have to have /Length?)
                 // Get length
-                let length_obj = dict.dictionary_get(String::from("Length"))
-                    .expect("No length of stream specified."); // TODO error handling
+                let length_obj = dict.dictionary_get(String::from("Length"))?;
 
                 let length = // TODO shorten
                     if let &Object::Reference{ obj_nr, gen_nr:_ } = length_obj {

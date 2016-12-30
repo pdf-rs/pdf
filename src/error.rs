@@ -1,6 +1,5 @@
 use std;
 use std::result;
-use std::error;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -39,7 +38,7 @@ impl From<&'static str> for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self, f);
+        let _ = std::fmt::Debug::fmt(&self, f)?;
         Ok(())
     }
 }
