@@ -118,7 +118,7 @@ impl<'a> Lexer<'a> {
 
     /// Searches for string backward. Moves to after the found `substr`, returns the traversed
     /// Substr if found.
-    pub fn seek_substr_back(&mut self, substr: &[u8]) -> Option<Substr<'a>> {
+    pub fn seek_substr_back(&mut self, substr: &[u8]) -> Result<Substr<'a>> {
         let start = self.pos;
         let mut matched = substr.len();
         loop {
@@ -131,12 +131,12 @@ impl<'a> Lexer<'a> {
                 break;
             }
             if self.pos == 0 {
-                return None;
+                return Err(Error::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())});
             }
             self.pos -= 1;
         }
         self.pos += substr.len();
-        Some(self.new_substr(self.pos..start))
+        Ok(self.new_substr(self.pos..start))
     }
 
     /// Read and return slice of at most n bytes.
@@ -200,9 +200,12 @@ impl<'a> Substr<'a> {
             std::str::from_utf8_unchecked(self.slice)
         }
     }
+    pub fn as_string(&self) -> String {
+        String::from(self.as_str())
+    }
     pub fn to<T: FromStr>(&self) -> Result<T> {
         std::str::from_utf8(self.slice).unwrap().parse::<T>()
-            .map_err(|_| Error::ParseError(String::from(self.as_str())))
+            .map_err(|_| Error::ParseError{word: String::from(self.as_str())})
     }
     pub fn is_integer(&self) -> bool {
         match self.to::<i32>() {

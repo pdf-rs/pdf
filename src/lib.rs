@@ -47,7 +47,7 @@ mod tests {
     fn structured_read() {
         setup_logger();
 
-        let mut reader = PdfReader::new(EXAMPLE_PATH).unwrap();
+        let reader = PdfReader::new(EXAMPLE_PATH).unwrap();
 
         {
             let val = reader.trailer.dictionary_get(String::from("Root"));
@@ -58,7 +58,7 @@ mod tests {
             }
         }
 
-        let obj3 = reader.read_indirect_object(3);
+        let _ = reader.read_indirect_object(3).unwrap();
     }
 
 
