@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Erlend Hofstad Langseth <3rlendhl@gmail.com>"]
 
 [dependencies]
-error-chain = "0.6.1"
+error-chain = "0.7.2"
 slog = { version = "1", features = ["max_level_trace", "release_max_level_trace"] }
 slog-json = "1"
 slog-scope = "0"

@@ -9,10 +9,13 @@ extern crate slog_scope;
 extern crate slog_stream;
 extern crate slog_term;
 extern crate isatty;
+#[macro_use]
+extern crate error_chain;
 
 pub mod reader;
 pub mod repr;
-pub mod error;
+pub mod err;
+
 
 
 // Plan:
@@ -22,7 +25,6 @@ pub mod error;
 // Need goals!
 // - Read Root/catalog
 // - Read Pages
-// - 
 
 
 // Let's say a chain from Trailer - Catalog - Pages - Page
@@ -34,6 +36,7 @@ pub mod error;
 mod tests {
     use reader::PdfReader;
     use repr::*;
+use err::*;
 
     use std;
     use slog;
@@ -47,21 +50,37 @@ mod tests {
     fn structured_read() {
         setup_logger();
 
-        let reader = PdfReader::new(EXAMPLE_PATH).unwrap();
+        let reader = unwrap(PdfReader::new(EXAMPLE_PATH));
 
         {
-            let val = reader.trailer.dictionary_get(String::from("Root"));
+            let val = reader.trailer.dict_get(String::from("Root"));
 
             if let Ok(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
             } else {
-                panic!("Wrong Trailer::Root!");
+                println!("Wrong Trailer::Root!");
+                unwrap(val);
             }
         }
 
         {
         }
 
-        let _ = reader.read_indirect_object(3).unwrap();
+        unwrap(reader.read_indirect_object(3));
+    }
+
+    /// Prints the error if it is an Error
+    fn unwrap<T>(err: Result<T>) -> T {
+        match err {
+            Ok(ok) => {ok},
+            Err(err) => {
+                println!("\n === \nError: {}", err);
+                for e in err.iter().skip(1) {
+                    println!("  caused by: {}", e);
+                }
+                println!(" === \n");
+                panic!("Exiting");
+            },
+        }
     }
 
 

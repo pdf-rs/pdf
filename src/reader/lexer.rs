@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::ops::Range;
 use std::io::SeekFrom;
 
-use error::{Result, Error};
+use err::*;
 
 
 #[derive(Copy, Clone)]
@@ -26,7 +26,7 @@ impl<'a> Lexer<'a> {
         // Move away from eventual whitespace
         while self.is_whitespace(self.pos) {
             if !self.incr_pos() {
-                return Err(Error::EOF);
+                bail!(ErrorKind::EOF);
             }
         }
         let start_pos = self.pos;
@@ -131,7 +131,7 @@ impl<'a> Lexer<'a> {
                 break;
             }
             if self.pos == 0 {
-                return Err(Error::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())});
+                bail!(ErrorKind::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())});
             }
             self.pos -= 1;
         }
@@ -205,7 +205,9 @@ impl<'a> Substr<'a> {
     }
     pub fn to<T: FromStr>(&self) -> Result<T> {
         std::str::from_utf8(self.slice).unwrap().parse::<T>()
-            .map_err(|_| Error::ParseError{word: String::from(self.as_str())})
+            .map_err(|_| ErrorKind::ParseError {
+                    word: String::from(self.as_str())
+                }.into())
     }
     pub fn is_integer(&self) -> bool {
         match self.to::<i32>() {

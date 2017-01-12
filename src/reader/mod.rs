@@ -2,7 +2,7 @@ mod lexer;
 
 use repr::*;
 
-use error::{Result, Error};
+use err::*;
 
 use self::lexer::Lexer;
 use std::vec::Vec;
@@ -14,39 +14,146 @@ use std::fs::File;
 // TODO in the whole file: proper error handling with Result.
 
 pub struct PdfReader {
-    pub trailer: Object,
+    // Contents
     startxref: usize,
     xref_table: XrefTable,
+    pub trailer: Object,
+    root: Object,
+    pages_root: Object, // the root of the tree of pages
+
     buf: Vec<u8>,
 }
 
 
 impl PdfReader {
-    // TODO what if it's not created by new()? Do we need to invalidate it?
     pub fn new(path: &str) -> Result<PdfReader> {
-        let buf = read_file(path);
+        let buf = read_file(path)?;
         let mut pdf_reader = PdfReader {
-            trailer: Object::Null,
-            xref_table: XrefTable::new(0),
             startxref: 0,
-            buf: buf?,
+            xref_table: XrefTable::new(0),
+            trailer: Object::Null,
+            root: Object::Null,
+            pages_root: Object::Null,
+            buf: buf,
         };
-        pdf_reader.read_trailer()?;
-
+        pdf_reader.startxref = pdf_reader.read_startxref()?;
         let start = pdf_reader.startxref;
         pdf_reader.xref_table = pdf_reader.read_xref(start)?;
+        pdf_reader.trailer = pdf_reader.read_trailer()?;
+        pdf_reader.root = pdf_reader.read_root()?;
+        pdf_reader.pages_root = pdf_reader.read_pages()?;
 
         Ok(pdf_reader)
     }
+    /// `reference` must be an `Object::Reference`
+    pub fn dereference(&self, reference: &Object) -> Result<Object> {
+        match reference {
+            &Object::Reference {obj_nr, gen_nr:_} => {
+                Ok(self.read_indirect_object(obj_nr)?.object)
+            },
+            _ => {
+                Err(ErrorKind::WrongObjectType.into())
+            }
+        }
+    }
+    pub fn read_indirect_object(&self, obj_nr: i32) -> Result<IndirectObject> {
+        info!("Read ind object"; "#" => obj_nr);
+        let xref_entry = self.xref_table.entries[(obj_nr - self.xref_table.first_id as i32) as usize];
+        match xref_entry {
+            XrefEntry::Free{next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
+            XrefEntry::InUse{pos, gen_nr: _} => self.read_indirect_object_from(pos),
+        }
+    }
 
-    pub fn read_xref(&mut self, start: usize) -> Result<XrefTable> {
+    pub fn get_num_pages(&self) -> i32 {
+        let result = self.pages_root.dict_get("Count".into());
+        match result {
+            Ok(&Object::Integer(n)) => n,
+            _ => 0,
+        }
+    }
+
+    /// Returns Dictionary, with /Type = Page.
+    /// page_nr must be smaller than `self.get_num_pages()`
+    pub fn get_page_contents(&self, page_nr: i32) -> Result<Object> {
+        if page_nr >= self.get_num_pages() {
+            return Err(ErrorKind::OutOfBounds.into());
+        }
+        self.dereference(&self.find_page(page_nr, 0, &self.pages_root)?.unwrap()) // TODO.. matching
+    }
+    /// Returns a Reference.
+    /// `node` is a Reference.
+    fn find_page(&self, page_nr: i32, mut progress: i32, node: &Object ) -> Result<Option<Object>> {
+        // TODO MUT PROGRESS INDEED
+        if progress > page_nr {
+            // Search has already passed the correct one...
+            return Ok(None); // TODO error?
+        }
+
+        if let Ok(&Object::Name(ref t)) = node.dict_get("Type".into()) {
+            if *t == "Pages".to_string() {
+                // It is an intermediate node
+                let count = if let &Object::Integer(n) = node.dict_get("Count".into())? {
+                        n
+                    } else {
+                        bail!("No Count.");
+                    };
+                // Check if the page is one of its descendants
+                if progress + count < page_nr {
+                    let kids = if let &Object::Array(ref kids) = node.dict_get("Kids".into())? { // TODO iterator?
+                            kids
+                        } else {
+                            bail!("No Kids.");
+                        };
+                    for kid in kids {
+                        // Reference to one of its kids...
+                        let result = self.find_page(page_nr, progress, &self.dereference(&kid)?);
+                        if let Ok(Some(_)) = result {
+                            return result;
+                        }
+                    }
+                    Ok(None)
+                } else {
+                    Ok(None)
+                }
+
+
+            } else if *t == "Page".to_string() {
+                if page_nr == progress {
+                    Ok(Some(node.clone()))
+                } else {
+                    Ok(None)
+                }
+            } else {
+                Err("".into())
+            }
+        } else {
+            Err("No type".into())
+        }
+    }
+
+
+    //////////////
+    // Private: //
+    //////////////
+
+    fn read_startxref(&mut self) -> Result<usize> {
+        let mut lexer = Lexer::new(&self.buf);
+
+        // Find startxref
+        lexer.seek(SeekFrom::End(0));
+        let _ = lexer.seek_substr_back(b"startxref")?;
+        Ok(lexer.next_as::<usize>()?)
+    }
+
+    fn read_xref(&mut self, start: usize) -> Result<XrefTable> {
         let mut lexer = Lexer::new(&self.buf);
 
         // Read xref
         lexer.seek(SeekFrom::Start(start as u64));
         let word = lexer.next()?;
         if word.as_str() != "xref" {
-            return Err(Error::InvalidXref{pos: lexer.get_pos()});
+            bail!(ErrorKind::InvalidXref{pos: lexer.get_pos()});
         }
 
         let start_id = lexer.next_as::<u32>()?;
@@ -70,7 +177,7 @@ impl PdfReader {
     }
 
     /// Needs to be called before any other functions on the PdfReader
-    fn read_trailer(&mut self) -> Result<()> {
+    fn read_trailer(&mut self) -> Result<Object> {
         let mut lexer = Lexer::new(&self.buf);
 
         // Find startxref
@@ -80,12 +187,21 @@ impl PdfReader {
 
         // Find trailer start
         let _ = lexer.seek_substr_back(b"trailer")?;
-        self.trailer = self.read_object(&mut lexer)?;
-        Ok(())
+        Ok(self.read_object(&mut lexer)?)
+    }
+
+    fn read_root(&self) -> Result<Object> {
+        // Read the Root/Catalog object
+        self.dereference(self.trailer.dict_get("Root".to_string())?)
+    }
+
+    fn read_pages(&self) -> Result<Object> {
+        self.dereference(self.root.dict_get("Pages".to_string())?)
     }
 
     /// Reads object starting at where the `Lexer` is currently at.
     fn read_object(&self, lexer: &mut Lexer) -> Result<Object> {
+        // TODO I'M HERE
         let first_lexeme = lexer.next()?;
 
         if first_lexeme.equals(b"<<") {
@@ -94,21 +210,21 @@ impl PdfReader {
                 // Expect a Name (and Object) or the '>>' delimiter
                 let delimiter = lexer.next()?;
                 if delimiter.equals(b"/") {
-                    let name = Name(String::from(lexer.next()?.as_str()));
+                    let key = lexer.next()?.as_string();
+                    debug!("READ KEY"; "Key" => key);
                     let obj = self.read_object(lexer)?;
-                    dictionary.push( (name, obj) );
+                    dictionary.push( (key, obj) );
                 } else if delimiter.equals(b">>") {
                     break;
                 } else {
-                    return Err(Error::UnexpectedToken{ pos: lexer.get_pos(), token: delimiter.as_string(), expected: "/ or >>"});
+                    bail!(ErrorKind::UnexpectedToken{ pos: lexer.get_pos(), token: delimiter.as_string(), expected: "/ or >>"});
                 }
             }
-            // It might just be the dictionary in from of a stream.
+            // It might just be the dictionary in front of a stream.
             let dict = Object::Dictionary(dictionary.clone());
             if lexer.next()?.equals(b"stream") {
-                // (TODO but does it really have to have /Length?)
                 // Get length
-                let length_obj = dict.dictionary_get(String::from("Length"))?;
+                let length_obj = dict.dict_get(String::from("Length"))?;
 
                 let length = // TODO shorten
                     if let &Object::Reference{ obj_nr, gen_nr:_ } = length_obj {
@@ -116,18 +232,18 @@ impl PdfReader {
                             length
                         } else {
                             // Expected integer
-                            return Err(Error::UnexpectedType{ pos: lexer.get_pos()});
+                            bail!(ErrorKind::UnexpectedType{ pos: lexer.get_pos()});
                         }
                     } else {
                         // Expected reference.
-                        return Err(Error::UnexpectedType{ pos: lexer.get_pos()})
+                        bail!(ErrorKind::UnexpectedType{ pos: lexer.get_pos()})
                     };
                 // Read the stream
                 let content = lexer.seek(SeekFrom::Current(length as i64));
                 // Finish
                 let endstream_literal = lexer.next()?;
                 if !endstream_literal.equals(b"endstream") {
-                    return Err(Error::UnexpectedToken {pos: lexer.get_pos(), token: endstream_literal.as_string(), expected: "endstream"} );
+                    bail!(ErrorKind::UnexpectedToken {pos: lexer.get_pos(), token: endstream_literal.as_string(), expected: "endstream"} );
                 }
 
                 Ok(Object::Stream {
@@ -154,26 +270,22 @@ impl PdfReader {
                     })
                 } else {
                     // The reference is incomplete
-                    return Err(Error::UnexpectedToken {pos: lexer.get_pos(), token: third_lexeme.as_string(), expected: "R"});
+                    bail!(ErrorKind::UnexpectedToken {pos: lexer.get_pos(), token: third_lexeme.as_string(), expected: "R"});
                 }
             } else {
                 // It is but a number
                 lexer.seek(SeekFrom::Start(pos_bk as u64)); // (roll back the lexer first)
                 Ok(Object::Integer(first_lexeme.to::<i32>()?))
             }
+        } else if first_lexeme.equals(b"/") {
+            let s = lexer.next()?.as_string();
+            debug!("READ NAME"; "Name" => s);
+            Ok(Object::Name(s))
         } else {
             Ok(Object::Null)
         }
     }
 
-    pub fn read_indirect_object(&self, obj_nr: i32) -> Result<IndirectObject> {
-        info!("Read ind object"; "#" => obj_nr);
-        let xref_entry = self.xref_table.entries[(obj_nr - self.xref_table.first_id as i32) as usize];
-        match xref_entry {
-            XrefEntry::Free{next_obj_nr: _, gen_nr:_} => Err(Error::FreeObject {obj_nr: obj_nr}),
-            XrefEntry::InUse{pos, gen_nr: _} => self.read_indirect_object_from(pos),
-        }
-    }
 
     fn read_indirect_object_from(&self, start_pos: usize) -> Result<IndirectObject> {
         let mut lexer = Lexer::new(&self.buf);
@@ -182,7 +294,7 @@ impl PdfReader {
         let gen_nr = lexer.next()?.to::<i32>()?;
         let obj_literal = lexer.next()?;
         if !obj_literal.equals(b"obj") {
-            return Err(Error::UnexpectedToken {pos: lexer.get_pos(), token: obj_literal.as_string(), expected: "obj"});
+            bail!(ErrorKind::UnexpectedToken {pos: lexer.get_pos(), token: obj_literal.as_string(), expected: "obj"});
         }
 
         let obj = self.read_object(&mut lexer)?;
@@ -190,7 +302,7 @@ impl PdfReader {
         info!("Read ind object from"; "Object" => obj.to_string());
         let endobj_literal = lexer.next()?;
         if !endobj_literal.equals(b"endobj") {
-            return Err(Error::UnexpectedToken {pos: lexer.get_pos(), token: endobj_literal.as_string(), expected: "endobj"});
+            bail!(ErrorKind::UnexpectedToken {pos: lexer.get_pos(), token: endobj_literal.as_string(), expected: "endobj"});
         }
 
         Ok(IndirectObject {
@@ -199,6 +311,7 @@ impl PdfReader {
             object: obj,
         })
     }
+
 }
 
 fn read_file(path: &str) -> Result<Vec<u8>> {

@@ -1,7 +1,7 @@
 //! Runtime representation of a PDF file.
 
 use std::vec::Vec;
-use error::{Error, Result};
+use err::*;
 
 /// Runtime representation of a PDF file.
 pub struct PDF {
@@ -52,31 +52,32 @@ pub struct IndirectObject {
 
 #[derive(Clone)]
 pub enum Object {
-    Integer(i32),
-    RealNumber(f32),
-    Boolean(bool),
+    Integer (i32),
+    RealNumber (f32),
+    Boolean (bool),
     String(StringType, String),
-    Stream {filters: Vec<Name>, dictionary: Vec<(Name, Object)>, content: String},
-    Dictionary(Vec<(Name, Object)>),
-    Array(Vec<Object>),
+    Stream {filters: Vec<String>, dictionary: Vec<(String, Object)>, content: String},
+    Dictionary (Vec<(String, Object)>),
+    Array (Vec<Object>),
     Reference {obj_nr: i32, gen_nr: i32},
+    Name (String),
     Null,
 }
 
 impl Object {
     /// `self` must be an `Object::Dictionary`.
-    pub fn dictionary_get<'a>(&'a self, key: String) -> Result<&'a Object> {
+    pub fn dict_get<'a>(&'a self, key: String) -> Result<&'a Object> {
         match self {
             &Object::Dictionary(ref dictionary) => {
                 for &(ref name, ref object) in dictionary {
-                    if key == name.0 {
+                    if key == *name {
                         return Ok(object);
                     }
                 }
-                Err(Error::NotFound {word: key})
+                Err(ErrorKind::NotFound {word: key}.into())
             },
             _ => {
-                panic!("dictionary_get called on an Object that is not Object::Dictionary.");
+                Err(ErrorKind::WrongObjectType.into())
             }
         }
     }
@@ -100,14 +101,17 @@ impl ToString for Object {
             &Object::Dictionary(_) => "Object::Dictionary".to_string(),
             &Object::Array(_) => "Object::Array".to_string(),
             &Object::Reference{obj_nr: _, gen_nr: _} => "Object::Reference".to_string(),
+            &Object::Name (_) => "Object::Name".to_string(),
             &Object::Null => "Object::Null".to_string(),
         }
     }
 }
 
+/*
 #[derive(Clone)]
 pub struct Name(pub String); // Is technically an object but I keep it outside for now
 // TODO Name could be an enum if Names are really a known finite set. Easy comparision
+*/
 
 #[derive(Clone)]
 pub enum StringType {
