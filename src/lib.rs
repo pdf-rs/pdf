@@ -85,7 +85,7 @@ use err::*;
     fn setup_logger() {
         let logger = if isatty::stderr_isatty() {
             let drain = slog_term::streamer()
-                .async()
+                .sync()
                 .stderr()
                 .full()
                 .use_utc_timestamp()
