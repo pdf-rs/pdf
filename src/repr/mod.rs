@@ -3,7 +3,7 @@
 use std::vec::Vec;
 use err::*;
 use std;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Display, Debug, Formatter};
 
 /// Runtime representation of a PDF file.
 pub struct PDF {
@@ -85,53 +85,41 @@ impl Object {
     }
 }
 
-// TODO should this also be used for writing objects to file? - or should that be Debug or Display
-// trait?
-impl ToString for Object {
-    fn to_string(&self) -> String {
-        match self {
-            &Object::Integer(n) => n.to_string(),
-            &Object::RealNumber(n) => n.to_string(),
-            &Object::Boolean(b) => b.to_string(),
-            &Object::String(ref t, ref s) => {
-                match t {
-                    &StringType::HEX => "HexString(".to_string() + s.as_str() +")",
-                    &StringType::UTF8 => "UtfString(".to_string() + s.as_str() + ")",
-                }
-            },
-            &Object::Stream{filters: _, dictionary: _, ref content} => "Stream(".to_string() + content.as_str() + ")",
-            &Object::Dictionary(_) => "Object::Dictionary".to_string(),
-            &Object::Array(_) => "Object::Array".to_string(),
-            &Object::Reference{obj_nr: _, gen_nr: _} => "Object::Reference".to_string(),
-            &Object::Name (_) => "Object::Name".to_string(),
-            &Object::Null => "Object::Null".to_string(),
-        }
-    }
-}
-
-/*
-impl Debug for Object {
+impl Display for Object {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            &Object::Integer(n) => write!(f, "Int({})", n),
-            &Object::RealNumber(n) => write!(f, "Real({})", n),
-            &Object::Boolean(b) => write!(f, "Bool({})", b),
+            &Object::Integer(n) => write!(f, "{}", n),
+            &Object::RealNumber(n) => write!(f, "{}", n),
+            &Object::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
             &Object::String(ref t, ref s) => {
                 match t {
-                    &StringType::HEX => write!(f, "HexString({})", s.as_str()),
-                    &StringType::UTF8 => write!(f, "UtfString({})", s.as_str()),
+                    &StringType::HEX => write!(f, "({})", s.as_str()),
+                    &StringType::UTF8 => write!(f, "({})", s.as_str()),
                 }
             },
-            &Object::Stream{filters: _, dictionary: _, ref content} => "Stream(".to_string() + content.as_str() + ")",
-            &Object::Dictionary(_) => "Object::Dictionary".to_string(),
-            &Object::Array(_) => "Object::Array".to_string(),
-            &Object::Reference{obj_nr: _, gen_nr: _} => "Object::Reference".to_string(),
-            &Object::Name (_) => "Object::Name".to_string(),
-            &Object::Null => "Object::Null".to_string(),
+            &Object::Stream{filters: _, dictionary: _, ref content} => write!(f, "stream\n{}\nendstream\n", content.as_str()),
+            &Object::Dictionary(ref d) => {
+                write!(f, "<< ")?;
+                for e in d {
+                    write!(f, "/{} {}", e.0, e.1)?;
+                }
+                write!(f, ">>\n")
+            },
+            &Object::Array(ref a) => {
+                write!(f, "[")?;
+                for e in a {
+                    write!(f, "{}", e)?;
+                }
+                write!(f, "]")
+            },
+            &Object::Reference{obj_nr, gen_nr} => {
+                write!(f, "{} {} R", obj_nr, gen_nr)
+            },
+            &Object::Name (ref name) => write!(f, "/{}", name),
+            &Object::Null => write!(f, "Null"),
         }
     }
 }
-*/
 
 /*
 #[derive(Clone)]

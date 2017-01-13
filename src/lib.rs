@@ -17,20 +17,18 @@ pub mod repr;
 pub mod err;
 
 
-
-// Plan:
-// First don't care about storing structures. Just use Lexer to parse things whenever needed.
-
-
-// Need goals!
-// - Read Root/catalog
-// - Read Pages
-
-
 // Let's say a chain from Trailer - Catalog - Pages - Page
-// can be make it optional whether we save each step and how far we follow the chain?
+// can be made it optional whether we save each step and how far we follow the chain?
 //  - PdfReader has higher-level functions. Implementation dictates whether it follows chain or
-//  saves stuff!
+//  saves stuff?
+
+
+
+// Thoughts
+// Object is similar to some serializable object. We need a function to decode from byte stream,
+// and to encode into byte stream.
+// However, at the moment, this is very manual and error-prone, and implemented in two different
+// places: Lexer and `Display for Object`
 
 #[cfg(test)]
 mod tests {
