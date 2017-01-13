@@ -50,7 +50,7 @@ use err::*;
     fn structured_read() {
         setup_logger();
 
-        let reader = unwrap(PdfReader::new(EXAMPLE_PATH));
+        let reader = unwrap(PdfReader::new(EXAMPLE_PATH).chain_err(|| "Error creating PdfReader."));
 
         {
             let val = reader.trailer.dict_get(String::from("Root"));
@@ -65,7 +65,7 @@ use err::*;
         {
         }
 
-        unwrap(reader.read_indirect_object(3));
+        unwrap(reader.read_indirect_object(3).chain_err(|| "Read ind obj 3"));
     }
 
     /// Prints the error if it is an Error

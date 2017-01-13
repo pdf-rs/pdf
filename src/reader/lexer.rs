@@ -48,6 +48,16 @@ impl<'a> Lexer<'a> {
         Ok(self.new_substr(start_pos..self.pos) )
     }
 
+    /// Look at the next lexeme
+    // TODO this should not be &mut self - next() and peek() should use the same immutable
+    // function!
+    pub fn peek(&mut self) -> Result<Substr<'a>> {
+        let pos = self.pos;
+        let lexeme = self.next();
+        self.pos = pos;
+        lexeme
+    }
+
     pub fn next_as<T: FromStr>(&mut self) -> Result<T> {
         self.next().and_then(|word| word.to::<T>())
     }

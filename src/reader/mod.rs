@@ -11,6 +11,7 @@ use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
 
+
 // TODO in the whole file: proper error handling with Result.
 
 pub struct PdfReader {
@@ -36,12 +37,12 @@ impl PdfReader {
             pages_root: Object::Null,
             buf: buf,
         };
-        pdf_reader.startxref = pdf_reader.read_startxref()?;
+        pdf_reader.startxref = pdf_reader.read_startxref().chain_err(|| "Error reading startxref.")?;
         let start = pdf_reader.startxref;
-        pdf_reader.xref_table = pdf_reader.read_xref(start)?;
-        pdf_reader.trailer = pdf_reader.read_trailer()?;
-        pdf_reader.root = pdf_reader.read_root()?;
-        pdf_reader.pages_root = pdf_reader.read_pages()?;
+        pdf_reader.xref_table = pdf_reader.read_xref(start).chain_err(|| "Error reading xref table.")?;
+        pdf_reader.trailer = pdf_reader.read_trailer().chain_err(|| "Error reading trailer.")?;
+        pdf_reader.root = pdf_reader.read_root().chain_err(|| "Error reading root.")?;
+        pdf_reader.pages_root = pdf_reader.read_pages().chain_err(|| "Error reading pages.")?;
 
         Ok(pdf_reader)
     }
@@ -200,8 +201,9 @@ impl PdfReader {
     }
 
     /// Reads object starting at where the `Lexer` is currently at.
+    // TODO: Notice how sometimes we peek(), and in one branch we do next() in order to move
+    // forward. Consider having a back() instead of next()?
     fn read_object(&self, lexer: &mut Lexer) -> Result<Object> {
-        // TODO I'M HERE
         let first_lexeme = lexer.next()?;
 
         if first_lexeme.equals(b"<<") {
@@ -217,16 +219,19 @@ impl PdfReader {
                 } else if delimiter.equals(b">>") {
                     break;
                 } else {
+                    println!("Dicionary in progress: {:?}", dictionary);
                     bail!(ErrorKind::UnexpectedToken{ pos: lexer.get_pos(), token: delimiter.as_string(), expected: "/ or >>"});
                 }
             }
             // It might just be the dictionary in front of a stream.
             let dict = Object::Dictionary(dictionary.clone());
-            if lexer.next()?.equals(b"stream") {
+            if lexer.peek()?.equals(b"stream") {
+                lexer.next()?;
+
                 // Get length
                 let length_obj = dict.dict_get(String::from("Length"))?;
 
-                let length = // TODO shorten
+                let length = // TODO How to shorten?
                     if let &Object::Reference{ obj_nr, gen_nr:_ } = length_obj {
                         if let Object::Integer(length) = self.read_indirect_object(obj_nr)?.object {
                             length
@@ -255,7 +260,8 @@ impl PdfReader {
                 Ok(dict)
             }
         } else if first_lexeme.is_integer() {
-            // Test to see if this is a reference rather than integer.
+            // May be Integer or Reference
+
             // First backup position
             let pos_bk = lexer.get_pos();
             
@@ -269,8 +275,9 @@ impl PdfReader {
                         gen_nr: second_lexeme.to::<i32>()?,
                     })
                 } else {
-                    // The reference is incomplete
-                    bail!(ErrorKind::UnexpectedToken {pos: lexer.get_pos(), token: third_lexeme.as_string(), expected: "R"});
+                    // We are probably in an array of numbers - it's not a reference anyway
+                    lexer.seek(SeekFrom::Start(pos_bk as u64)); // (roll back the lexer first)
+                    Ok(Object::Integer(first_lexeme.to::<i32>()?))
                 }
             } else {
                 // It is but a number
@@ -278,11 +285,26 @@ impl PdfReader {
                 Ok(Object::Integer(first_lexeme.to::<i32>()?))
             }
         } else if first_lexeme.equals(b"/") {
+            // Name
             let s = lexer.next()?.as_string();
-            debug!("READ NAME"; "Name" => s);
             Ok(Object::Name(s))
+        } else if first_lexeme.equals(b"[") {
+            let mut array = Vec::new();
+            // Array
+            loop {
+                let element = self.read_object(lexer)?;
+                array.push(element);
+
+                // Exit if closing delimiter
+                if lexer.peek()?.equals(b"]") {
+                    break;
+                }
+            }
+            lexer.next()?; // Move beyond closing delimiter
+
+            Ok(Object::Array (array))
         } else {
-            Ok(Object::Null)
+            bail!("Can't recognize type.");
         }
     }
 
@@ -298,8 +320,8 @@ impl PdfReader {
         }
 
         let obj = self.read_object(&mut lexer)?;
+        println!("Read indirect obj: {:?}", obj);
 
-        info!("Read ind object from"; "Object" => obj.to_string());
         let endobj_literal = lexer.next()?;
         if !endobj_literal.equals(b"endobj") {
             bail!(ErrorKind::UnexpectedToken {pos: lexer.get_pos(), token: endobj_literal.as_string(), expected: "endobj"});

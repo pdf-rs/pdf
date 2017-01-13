@@ -2,6 +2,8 @@
 
 use std::vec::Vec;
 use err::*;
+use std;
+use std::fmt::{Debug, Formatter};
 
 /// Runtime representation of a PDF file.
 pub struct PDF {
@@ -50,7 +52,7 @@ pub struct IndirectObject {
     pub object: Object,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Object {
     Integer (i32),
     RealNumber (f32),
@@ -108,12 +110,36 @@ impl ToString for Object {
 }
 
 /*
+impl Debug for Object {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            &Object::Integer(n) => write!(f, "Int({})", n),
+            &Object::RealNumber(n) => write!(f, "Real({})", n),
+            &Object::Boolean(b) => write!(f, "Bool({})", b),
+            &Object::String(ref t, ref s) => {
+                match t {
+                    &StringType::HEX => write!(f, "HexString({})", s.as_str()),
+                    &StringType::UTF8 => write!(f, "UtfString({})", s.as_str()),
+                }
+            },
+            &Object::Stream{filters: _, dictionary: _, ref content} => "Stream(".to_string() + content.as_str() + ")",
+            &Object::Dictionary(_) => "Object::Dictionary".to_string(),
+            &Object::Array(_) => "Object::Array".to_string(),
+            &Object::Reference{obj_nr: _, gen_nr: _} => "Object::Reference".to_string(),
+            &Object::Name (_) => "Object::Name".to_string(),
+            &Object::Null => "Object::Null".to_string(),
+        }
+    }
+}
+*/
+
+/*
 #[derive(Clone)]
 pub struct Name(pub String); // Is technically an object but I keep it outside for now
 // TODO Name could be an enum if Names are really a known finite set. Easy comparision
 */
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum StringType {
     HEX, UTF8
 }
