@@ -11,9 +11,6 @@ use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
 
-
-// TODO in the whole file: proper error handling with Result.
-
 pub struct PdfReader {
     // Contents
     startxref: usize,
@@ -80,56 +77,69 @@ impl PdfReader {
         if page_nr >= self.get_num_pages() {
             return Err(ErrorKind::OutOfBounds.into());
         }
-        self.dereference(&self.find_page(page_nr, 0, &self.pages_root)?.unwrap()) // TODO.. matching
+        let page = self.find_page(page_nr)?;
+        // self.dereference(&page)
+        Ok(page)
     }
     /// Returns a Reference.
-    /// `node` is a Reference.
-    fn find_page(&self, page_nr: i32, mut progress: i32, node: &Object ) -> Result<Option<Object>> {
-        // TODO MUT PROGRESS INDEED
-        if progress > page_nr {
+    fn find_page(&self, page_nr: i32) -> Result<Object> {
+        let result = self.find_page_internal(page_nr, &mut 0, &self.pages_root)?;
+        match result {
+            Some(page) => Ok(page),
+            None => bail!("Failed to find page"),
+        }
+    }
+
+    /// `page_nr`: the number of the wanted page
+    /// `progress` is the page number of the first leaf of the current tree
+    /// A recursive process which returns a page if found, and in any case, the number of pages
+    /// traversed (i32)
+    fn find_page_internal(&self, page_nr: i32, progress: &mut i32, node: &Object ) -> Result<Option<Object>> {
+        if *progress > page_nr {
             // Search has already passed the correct one...
-            return Ok(None); // TODO error?
+            bail!("Search has passed the page nr, without finding the page.");
         }
 
         if let Ok(&Object::Name(ref t)) = node.dict_get("Type".into()) {
-            if *t == "Pages".to_string() {
-                // It is an intermediate node
+            if *t == "Pages".to_string() { // Intermediate node
+                // Number of leaf nodes (pages) in this subtree
                 let count = if let &Object::Integer(n) = node.dict_get("Count".into())? {
                         n
                     } else {
                         bail!("No Count.");
                     };
-                // Check if the page is one of its descendants
-                if progress + count < page_nr {
-                    let kids = if let &Object::Array(ref kids) = node.dict_get("Kids".into())? { // TODO iterator?
+
+                // If the target page is a descendant of the intermediate node
+                if *progress + count > page_nr {
+                    let kids = if let &Object::Array(ref kids) = node.dict_get("Kids".into())? {
                             kids
                         } else {
-                            bail!("No Kids.");
+                            bail!("No Kids entry in Pages object.");
                         };
+                    // Traverse children of node.
                     for kid in kids {
-                        // Reference to one of its kids...
-                        let result = self.find_page(page_nr, progress, &self.dereference(&kid)?);
-                        if let Ok(Some(_)) = result {
-                            return result;
-                        }
+                        let result = self.find_page_internal(page_nr, progress, &self.dereference(&kid)?)?;
+                        match result {
+                            Some(found_page) => return Ok(Some(found_page)),
+                            None => {},
+                        };
                     }
                     Ok(None)
                 } else {
                     Ok(None)
                 }
-
-
-            } else if *t == "Page".to_string() {
-                if page_nr == progress {
+            } else if *t == "Page".to_string() { // Leaf node
+                if page_nr == *progress {
                     Ok(Some(node.clone()))
                 } else {
+                    *progress += 1;
                     Ok(None)
                 }
             } else {
-                Err("".into())
+                Err("Dictionary is not of Type Page nor Pages".into())
             }
         } else {
-            Err("No type".into())
+            Err("Dictionary has no Type attribute".into())
         }
     }
 

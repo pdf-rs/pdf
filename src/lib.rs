@@ -16,25 +16,23 @@ pub mod reader;
 pub mod repr;
 pub mod err;
 
-
-// Let's say a chain from Trailer - Catalog - Pages - Page
-// can be made it optional whether we save each step and how far we follow the chain?
-//  - PdfReader has higher-level functions. Implementation dictates whether it follows chain or
-//  saves stuff?
-
+// TODO Plan
+// * Fix find_page()
+// * Construct runtime xref table repr by reading the [list of] xrefs and keep only the newest of
+// each object.
 
 
-// Thoughts
-// Object is similar to some serializable object. We need a function to decode from byte stream,
-// and to encode into byte stream.
-// However, at the moment, this is very manual and error-prone, and implemented in two different
-// places: Lexer and `Display for Object`
+// Is it possible to store it fully as intermediate repr? What are the pros/cons?
+//  * takes less space
+//  * throws any error only at beginning
+
+// Later there should be an option to read directly from file
 
 #[cfg(test)]
 mod tests {
     use reader::PdfReader;
     use repr::*;
-use err::*;
+    use err::*;
 
     use std;
     use slog;
@@ -48,37 +46,42 @@ use err::*;
     fn structured_read() {
         setup_logger();
 
-        let reader = unwrap(PdfReader::new(EXAMPLE_PATH).chain_err(|| "Error creating PdfReader."));
+        let reader = PdfReader::new(EXAMPLE_PATH).chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
 
         {
-            let val = reader.trailer.dict_get(String::from("Root"));
+            let val = reader.trailer.dict_get(String::from("Root")).unwrap_or_else(|e| print_err(e));
 
-            if let Ok(&Object::Reference{obj_nr: 1, gen_nr: 0}) = val {
-            } else {
-                println!("Wrong Trailer::Root!");
-                unwrap(val);
+            match val {
+                &Object::Reference{obj_nr: 1, gen_nr: 0} => {},
+                _ => error!("Wrong Trailer::Root!"),
             }
+
         }
 
         {
         }
 
-        unwrap(reader.read_indirect_object(3).chain_err(|| "Read ind obj 3"));
+        reader.read_indirect_object(3).chain_err(|| "Read ind obj 3").unwrap_or_else(|e| print_err(e));
+
+        let n = reader.get_num_pages();
+        let page = reader.get_page_contents(0).chain_err(|| "Get page 0").unwrap_or_else(|e| print_err(e));
+
     }
 
     /// Prints the error if it is an Error
-    fn unwrap<T>(err: Result<T>) -> T {
-        match err {
-            Ok(ok) => {ok},
-            Err(err) => {
-                println!("\n === \nError: {}", err);
-                for e in err.iter().skip(1) {
-                    println!("  caused by: {}", e);
-                }
-                println!(" === \n");
-                panic!("Exiting");
-            },
+    fn print_err<T>(err: Error) -> T {
+        println!("\n === \nError: {}", err);
+        for e in err.iter().skip(1) {
+            println!("  caused by: {}", e);
         }
+        println!(" === \n");
+
+        if let Some(backtrace) = err.backtrace() {
+            println!("backtrace: {:?}", backtrace);
+        }
+
+        println!(" === \n");
+        panic!("Exiting");
     }
 
 
