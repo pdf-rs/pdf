@@ -1,49 +1,14 @@
 //! Runtime representation of a PDF file.
 
+mod xref;
+
+pub use self::xref::*;
+
 use std::vec::Vec;
 use err::*;
 use std;
 use std::fmt::{Display, Debug, Formatter};
 
-/// Runtime representation of a PDF file.
-pub struct PDF {
-    // Thoughts...
-    // xref tables are kind of interleaved with other things..
-}
-impl PDF {
-    pub fn new() -> PDF {
-        PDF {
-        }
-    }
-}
-
-
-/* Cross-reference table */
-pub struct XrefTable {
-    pub first_id: u32,
-    pub entries: Vec<XrefEntry>,
-}
-
-#[derive(Copy,Clone)]
-pub enum XrefEntry {
-    Free{next_obj_nr: u32, gen_nr: u16},
-    InUse{pos: usize, gen_nr: u16},
-}
-
-impl XrefTable {
-    pub fn new(first_id: u32) -> XrefTable {
-        XrefTable {
-            first_id: first_id,
-            entries: Vec::new(),
-        }
-    }
-    pub fn add_free_entry(&mut self, next_obj_nr: u32, gen_nr: u16) {
-        self.entries.push(XrefEntry::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});
-    }
-    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
-        self.entries.push(XrefEntry::InUse{pos: pos, gen_nr: gen_nr});
-    }
-}
 
 /* Objects */
 pub struct IndirectObject {
@@ -79,6 +44,15 @@ impl Object {
                 Err(ErrorKind::NotFound {word: key}.into())
             },
             _ => {
+                Err(ErrorKind::WrongObjectType.into())
+            }
+        }
+    }
+    pub fn unwrap_integer(&self) -> Result<i32> {
+        match self {
+            &Object::Integer(n) => Ok(n),
+            _ => {
+                // Err(ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
                 Err(ErrorKind::WrongObjectType.into())
             }
         }

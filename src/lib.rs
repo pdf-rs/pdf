@@ -18,8 +18,8 @@ pub mod err;
 
 // TODO Plan
 // * Fix find_page()
-// * Construct runtime xref table repr by reading the [list of] xrefs and keep only the newest of
-// each object.
+// * Display the PDF model for debugging
+// * Write back to file - that means keeping track of what has changed
 
 
 // Is it possible to store it fully as intermediate repr? What are the pros/cons?
@@ -30,7 +30,9 @@ pub mod err;
 
 #[cfg(test)]
 mod tests {
+    use reader;
     use reader::PdfReader;
+    use reader::lexer::Lexer;
     use repr::*;
     use err::*;
 
@@ -39,15 +41,36 @@ mod tests {
     use slog::{DrainExt, Level};
     use {slog_term, slog_stream, isatty, slog_json, slog_scope};
 
-    const EXAMPLE_PATH: &'static str = "example.pdf";
-
+    //#[test]
+    fn sequential_read() {
+        setup_logger();
+        let buf = reader::read_file("edited_example.pdf").chain_err(|| "Cannot read file.").unwrap_or_else(|e| print_err(e));
+        let mut lexer = Lexer::new(&buf);
+        loop {
+            let pos = lexer.get_pos();
+            let next = match lexer.next() {
+                Ok(next) => next,
+                Err(Error (ErrorKind::EOF, _)) => break,
+                Err(e) => print_err(e),
+            };
+            println!("{}\t{}", pos, next.as_string());
+        }
+        /*
+        loop {
+            let next = match lexer.back() {
+                Ok(next) => next,
+                Err(Error (ErrorKind::EOF, _)) => break,
+                Err(e) => print_err(e),
+            };
+            println!("word: {}", next.as_string());
+        }
+        */
+    }
 
     #[test]
     fn structured_read() {
         setup_logger();
-
-        let reader = PdfReader::new(EXAMPLE_PATH).chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
-
+        let reader = PdfReader::new("edited_example.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
         {
             let val = reader.trailer.dict_get(String::from("Root")).unwrap_or_else(|e| print_err(e));
 
@@ -57,15 +80,10 @@ mod tests {
             }
 
         }
-
-        {
-        }
-
         reader.read_indirect_object(3).chain_err(|| "Read ind obj 3").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
         let page = reader.get_page_contents(0).chain_err(|| "Get page 0").unwrap_or_else(|e| print_err(e));
-
     }
 
     /// Prints the error if it is an Error

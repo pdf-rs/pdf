@@ -33,13 +33,13 @@ error_chain! {
             description("Parse error")
             display("Parse error - word: {}", word)
         }
-        UnexpectedToken {pos: usize, token: String, expected: &'static str} {
-            description("Unexpected token in dictionary (expected name or close delimiter)")
-            display("Unexpected token '{}' at {} in dictionary (expected '{}')", token, pos, expected)
+        UnexpectedLexeme {pos: usize, lexeme: String, expected: &'static str} {
+            description("Unexpected token.")
+            display("Unexpected token '{}' at {} - expected '{}'", lexeme, pos, expected)
         }
-        UnexpectedType {pos: usize} {
+        UnwrapInteger {pos: usize} {
             description("Expected integer...")
-            display("Expected integer...")
+            display("Expected integer at {}", pos)
         }
         NotFound {word: String} {
             description("Word not found.")
@@ -52,6 +52,11 @@ error_chain! {
         WrongObjectType {
             description("Function called on object of wrong type.")
             display("Function called on object of wrong type.")
+        }
+        /// Should be chained after WrongObjectType.
+        ExpectedType {expected: &'static str} {
+            description("Expected type")
+            display("Expected type: {}", expected)
         }
         /// Page out of bounds / doesn't exist
         OutOfBounds {

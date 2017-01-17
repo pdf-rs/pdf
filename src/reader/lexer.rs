@@ -21,41 +21,88 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Gives the next lexeme
+    /// Returns next lexeme. Lexer moves to the next byte after the lexeme.
     pub fn next(&mut self) -> Result<Substr<'a>> {
-        // Move away from eventual whitespace
-        while self.is_whitespace(self.pos) {
-            if !self.incr_pos() {
-                bail!(ErrorKind::EOF);
-            }
+        let (lexeme, pos) = self.next_word(true)?;
+        self.pos = pos;
+        Ok(lexeme)
+    }
+
+    /// Gives previous lexeme. Lexer moves to the first byte of this lexeme.
+    pub fn back(&mut self) -> Result<Substr<'a>> {
+        let (lexeme, pos) = self.next_word(false)?;
+        self.pos = pos;
+        Ok(lexeme)
+    }
+
+    /// Look at the next lexeme.
+    pub fn peek(&self) -> Result<Substr<'a>> {
+        Ok(self.next_word(true)?.0)
+    }
+    pub fn peek_back(&self) -> Result<Substr<'a>> {
+        Ok(self.next_word(false)?.0)
+    }
+
+    pub fn next_expect(&mut self, expected: &'static str) -> Result<()> {
+        let word = self.next()?;
+        if word.equals(expected.as_bytes()) {
+            Ok(())
+        } else {
+            Err(ErrorKind::UnexpectedLexeme {pos: self.pos, lexeme: word.as_string(), expected: expected}.into())
         }
-        let start_pos = self.pos;
+    }
+
+    /// Used by next, peek and back - returns substring and new position
+    /// If forward, places pointer at the next character after the lexeme
+    /// If backward, places pointer at the start of the current word.
+    fn next_word(&self, forward: bool) -> Result<(Substr<'a>, usize)> {
+        let mut pos = self.pos;
+        // Move away from eventual whitespace
+        while self.is_whitespace(pos) {
+            pos = self.advance_pos(pos, forward)?;
+        }
+        let start_pos = pos;
 
         // If first character is delimiter, this lexeme only contains that character.
         //  - except << and >> which go together
-        if self.is_delimiter(self.pos) {
-            if self.buf[self.pos] == b'<' && self.buf[self.pos+1] == b'<'
-                || self.buf[self.pos] == b'>' && self.buf[self.pos+1] == b'>' {
-                self.incr_pos();
+        if self.is_delimiter(pos) {
+            // TODO +- 1
+            if self.buf[pos] == b'<' && self.buf[pos+1] == b'<'
+                || self.buf[pos] == b'>' && self.buf[pos+1] == b'>' {
+                pos = self.advance_pos(pos, forward)?;
+
             }
-            self.incr_pos();
-            return Ok(self.new_substr(start_pos..self.pos) );
+            pos = self.advance_pos(pos, forward)?;
+            return Ok((self.new_substr(start_pos..pos), pos));
         }
 
         // Read to past the end of lexeme
-        while !self.is_whitespace(self.pos) && !self.is_delimiter(self.pos) && self.incr_pos() {
+        while !self.is_whitespace(pos) && !self.is_delimiter(pos) {
+            let mut new_pos = self.advance_pos(pos, forward)?;
+            if new_pos == pos {
+                break;
+            } else {
+                pos = new_pos;
+            }
         }
-        Ok(self.new_substr(start_pos..self.pos) )
+        Ok((self.new_substr(start_pos..pos), pos))
     }
 
-    /// Look at the next lexeme
-    // TODO this should not be &mut self - next() and peek() should use the same immutable
-    // function!
-    pub fn peek(&mut self) -> Result<Substr<'a>> {
-        let pos = self.pos;
-        let lexeme = self.next();
-        self.pos = pos;
-        lexeme
+    /// Just a helper for next_word.
+    fn advance_pos(&self, pos: usize, forward: bool) -> Result<usize> {
+        if forward {
+            if pos < self.buf.len() {
+                Ok(pos + 1)
+            } else {
+                bail!(ErrorKind::EOF);
+            }
+        } else {
+            if pos > 0 {
+                Ok(pos - 1)
+            } else {
+                bail!(ErrorKind::EOF);
+            }
+        }
     }
 
     pub fn next_as<T: FromStr>(&mut self) -> Result<T> {
@@ -66,7 +113,15 @@ impl<'a> Lexer<'a> {
         self.pos
     }
 
-    pub fn new_substr(&self, range: Range<usize>) -> Substr<'a> {
+    pub fn new_substr(&self, mut range: Range<usize>) -> Substr<'a> {
+        // if the range is backward, fix it
+        // start is inclusive, end is exclusive. keep that in mind
+        if range.start > range.end {
+            let new_end = range.start + 1;
+            range.start = range.end + 1;
+            range.end = new_end;
+        }
+
         Substr {
             slice: &self.buf[range],
         }
@@ -101,10 +156,11 @@ impl<'a> Lexer<'a> {
         self.new_substr(start..self.pos)
     }
 
+
+    // TODO: seek_substr and seek_substr_back should use next() or back()?
     /// Moves pos to after the found `substr`. Returns Substr with traversed text if `substr` is found.
     #[allow(dead_code)]
     pub fn seek_substr(&mut self, substr: &[u8]) -> Option<Substr<'a>> {
-        info!("Seeksubstr");
         //
         let start = self.pos;
         let mut matched = 0;
@@ -126,6 +182,8 @@ impl<'a> Lexer<'a> {
         Some(self.new_substr(start..(self.pos - substr.len())))
     }
 
+
+    //TODO perhaps seek_substr_back should, like back(), move to the first letter of the substr.
     /// Searches for string backward. Moves to after the found `substr`, returns the traversed
     /// Substr if found.
     pub fn seek_substr_back(&mut self, substr: &[u8]) -> Result<Substr<'a>> {
