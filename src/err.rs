@@ -15,7 +15,7 @@ error_chain! {
     //
     // Optionally, some attributes can be added to a variant.
     foreign_links {
-        Io(::std::io::Error) #[cfg(unix)];
+        Io(::std::io::Error);
     }
     // Define additional `ErrorKind` variants. The syntax here is
     // the same as `quick_error!`, but the `from()` and `cause()`

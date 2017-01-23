@@ -82,7 +82,7 @@ impl Display for Object {
             &Object::Array(ref a) => {
                 write!(f, "[")?;
                 for e in a {
-                    write!(f, "{}", e)?;
+                    write!(f, "{} ", e)?;
                 }
                 write!(f, "]")
             },

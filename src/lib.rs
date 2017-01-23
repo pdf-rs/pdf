@@ -17,6 +17,8 @@ pub mod repr;
 pub mod err;
 
 // TODO Plan
+// * Might have no `trailer`!!! Look at 'cross-reference streams'
+//  - question: What happens with incremental update?
 // * Fix find_page()
 // * Display the PDF model for debugging
 // * Write back to file - that means keeping track of what has changed
@@ -68,22 +70,25 @@ mod tests {
     }
 
     #[test]
-    fn structured_read() {
+    fn read_pages() {
         setup_logger();
-        let reader = PdfReader::new("edited_example.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
-        {
-            let val = reader.trailer.dict_get(String::from("Root")).unwrap_or_else(|e| print_err(e));
-
-            match val {
-                &Object::Reference{obj_nr: 1, gen_nr: 0} => {},
-                _ => error!("Wrong Trailer::Root!"),
-            }
-
-        }
-        reader.read_indirect_object(3).chain_err(|| "Read ind obj 3").unwrap_or_else(|e| print_err(e));
+        let reader = PdfReader::new("r.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
-        let page = reader.get_page_contents(0).chain_err(|| "Get page 0").unwrap_or_else(|e| print_err(e));
+        for i in 0..n {
+            info!("Reading page {}", i);
+            let page = reader.get_page_contents(i).chain_err(|| format!("Get page {}", i)).unwrap_or_else(|e| print_err(e));
+            /*
+            match page {
+                Object::Dictionary (ref dictionary) => {
+                    for &(ref name, ref object) in dictionary {
+                        println!("Key {}:\n\n{}\n\n", name, object);
+                    }
+                },
+                _ => panic!("Not dicionary"),
+            }
+            */
+        }
     }
 
     /// Prints the error if it is an Error

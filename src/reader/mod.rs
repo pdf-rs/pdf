@@ -80,10 +80,9 @@ impl PdfReader {
             return Err(ErrorKind::OutOfBounds.into());
         }
         let page = self.find_page(page_nr)?;
-        // self.dereference(&page)
         Ok(page)
     }
-    /// Returns a Reference.
+    /// Find a page looking in the page tree. Return the Object.
     fn find_page(&self, page_nr: i32) -> Result<Object> {
         let result = self.find_page_internal(page_nr, &mut 0, &self.pages_root)?;
         match result {
