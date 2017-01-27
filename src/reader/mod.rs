@@ -34,8 +34,12 @@ impl PdfReader {
             pages_root: Object::Null,
             buf: buf,
         };
-        let (trailer, startxref) = pdf_reader.read_last_trailer().chain_err(|| "Error reading trailer.")?;
+        let startxref = pdf_reader.read_startxref()?;
+        pdf_reader.startxref = startxref;
+
+        let trailer = pdf_reader.read_last_trailer().chain_err(|| "Error reading trailer.")?;
         pdf_reader.trailer = trailer;
+
         pdf_reader.startxref = startxref;
         pdf_reader.xref_table = pdf_reader.gather_xref().chain_err(|| "Error reading xref table.")?;
         pdf_reader.root = pdf_reader.read_root().chain_err(|| "Error reading root.")?;
@@ -155,13 +159,37 @@ impl PdfReader {
         Ok(lexer.next_as::<usize>()?)
     }
 
-    /// Read an xref table at a position - return a Vec of the sections
-    fn read_xref_at(&self, start: usize) -> Result<Vec<XrefSection>> {
+    /// Reads xref and trailer at some byte position `start`.
+    /// `start` should point to the `xref` keyword of an xref table, or to the start of an xref
+    /// stream.
+    fn read_xref_and_trailer_at(&self, start: usize) -> Result<(Vec<XrefSection>, Object)> {
         let mut lexer = Lexer::new(&self.buf);
         lexer.seek(SeekFrom::Start(start as u64));
 
-        lexer.next_expect("xref")?;
-        
+        let next_word = lexer.next()?;
+        if next_word.equals(b"xref") {
+            // Read classic xref table
+            
+            let sections = self.read_xref_table(&mut lexer)?;
+            // TODO: Read Trailer!
+            Ok((sections, Object::Null))
+        } else {
+            // Read xref stream
+
+            lexer.back()?;
+            self.read_xref_stream(&mut lexer)
+        }
+    }
+
+    fn read_xref_stream(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
+        // TODO We receive &mut Lexer, but only read the pos... Consistency!
+        let obj = self.read_indirect_object_from(lexer.get_pos()).chain_err(|| "Reading Xref stream")?.object;
+        // TODO Finish this function. Not trivial.
+        // For now, writing out to see what's in the eventual Xref stream.
+        println!("Xref stream obj: {:?}", obj);
+        panic!("Exit");
+    }
+    fn read_xref_table(&self, lexer: &mut Lexer) -> Result<Vec<XrefSection>> {
         let mut sections = Vec::new();
         
         // Keep reading subsections until we hit `trailer`
@@ -183,12 +211,14 @@ impl PdfReader {
                     bail!(ErrorKind::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.as_string(), expected: "f or n"});
                 }
             }
-
             sections.push(section);
         }
         Ok(sections)
     }
-    /// Gathers all xref sections in the file to an XrefTable
+
+    /// Gathers all xref sections in the file to an XrefTable.
+    /// Agnostic about whether there are xref tables or xref streams. (but haven't thought about
+    /// hybrid ones)
     fn gather_xref(&self) -> Result<XrefTable> {
         let num_objects = match self.trailer.dict_get("Size".into()) {
             Ok(&Object::Integer (n)) => n,
@@ -199,15 +229,15 @@ impl PdfReader {
 
         let mut table = XrefTable::new(num_objects as usize);
         
-        let startxref = self.startxref;
-        for section in self.read_xref_at(startxref)? {
+        let (sections, _) = self.read_xref_and_trailer_at(self.startxref)?;
+        for section in sections {
             table.add_entries_from(section);
         }
 
         let mut lexer = Lexer::new(&self.buf);
 
-        let mut next_trailer_start = self.trailer.dict_get("Prev".into())
-            .and_then(|x| Ok(x.unwrap_integer()?)).ok();
+        let mut next_trailer_start: Option<i32>
+            = self.trailer.dict_get("Prev".into()).and_then(|x| Ok(x.unwrap_integer()?)).ok();
         
         while let Some(trailer_start) = next_trailer_start {
             // - jump to next `trailer`
@@ -217,7 +247,9 @@ impl PdfReader {
             next_trailer_start = trailer.dict_get("Prev".into())
                 .and_then(|x| Ok(x.unwrap_integer()?)).ok();
             // - read xref table
-            for section in self.read_xref_at(startxref)? {
+            let (sections, _) = self.read_xref_and_trailer_at(trailer_start as usize)?;
+            // TODO trailer start?? not Xref start??
+            for section in sections {
                 table.add_entries_from(section);
             }
         }
@@ -225,16 +257,12 @@ impl PdfReader {
 
     }
 
+
     /// Needs to be called before any other functions on the PdfReader
     /// Reads the last trailer in the file
-    fn read_last_trailer(&mut self) -> Result<(Object, usize)> {
-        let mut lexer = Lexer::new(&self.buf);
-        lexer.seek(SeekFrom::End (0));
-
-        // Find trailer start
-        let _ = lexer.seek_substr_back(b"trailer")?;
-        lexer.back();
-        Ok(self.read_trailer_at(&mut lexer)?)
+    fn read_last_trailer(&mut self) -> Result<Object> {
+        let (_, trailer) = self.read_xref_and_trailer_at(self.startxref)?;
+        Ok(trailer)
     }
     /// Returns the trailer dictionary and startxref
     fn read_trailer_at(&self, lexer: &mut Lexer) -> Result<(Object, usize)> {
@@ -348,7 +376,10 @@ impl PdfReader {
 
             Ok(Object::Array (array))
         } else {
-            bail!("Can't recognize type.");
+            bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
+                  lexer.get_pos(),
+                  first_lexeme.as_string(),
+                  lexer.read_n(50).as_string());
         }
     }
 

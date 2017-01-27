@@ -24,6 +24,11 @@ pub mod err;
 // * Write back to file - that means keeping track of what has changed
 
 
+// TODO Thoughts
+
+// Classifying ("tokenizing") mostly happens in reader/mod.rs. Maybe it should be integrated into
+// Lexer...
+
 // Is it possible to store it fully as intermediate repr? What are the pros/cons?
 //  * takes less space
 //  * throws any error only at beginning
