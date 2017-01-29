@@ -187,10 +187,11 @@ impl PdfReader {
     fn read_xref_stream(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
         // TODO We receive &mut Lexer, but only read the pos... Consistency!
         let obj = self.read_indirect_object_from(lexer.get_pos()).chain_err(|| "Reading Xref stream")?.object;
-        // TODO Finish this function. Not trivial.
-        // For now, writing out to see what's in the eventual Xref stream.
-        println!("Xref stream obj: {:?}", obj);
+        // println!("Xref stream obj: {:?}", obj);
+        info!("Read xref stream"; "Xref stream" => format!("{}", obj));
         panic!("Exit");
+
+        // TODO Finish this function. Not trivial.
     }
     fn read_xref_table(&self, lexer: &mut Lexer) -> Result<Vec<XrefSection>> {
         let mut sections = Vec::new();
@@ -334,7 +335,7 @@ impl PdfReader {
                 Object::Stream {
                     filters: Vec::new(),
                     dictionary: dictionary,
-                    content: String::from(content.as_str()),
+                    content: content.to_vec(),
                 }
             } else {
                 dict
@@ -398,7 +399,9 @@ impl PdfReader {
 
             Object::String (string)
         } else if first_lexeme.equals(b"<") {
-            bail!("Hex string found, but havent implemented parser for it.");
+            let hex_str = lexer.next()?.to_vec();
+            lexer.next_expect(">")?;
+            Object::HexString (hex_str)
         } else {
             bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
                   lexer.get_pos(),

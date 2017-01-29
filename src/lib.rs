@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn read_pages() {
         setup_logger();
-        let reader = PdfReader::new("r.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
+        let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
         for i in 0..n {

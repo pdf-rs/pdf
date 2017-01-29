@@ -8,7 +8,7 @@ use std::vec::Vec;
 use err::*;
 use std;
 use std::str::from_utf8;
-use std::fmt::{Display, Debug, Formatter};
+use std::fmt::{Display, Formatter};
 
 
 /* Objects */
@@ -24,7 +24,8 @@ pub enum Object {
     RealNumber (f32),
     Boolean (bool),
     String (Vec<u8>),
-    Stream {filters: Vec<String>, dictionary: Vec<(String, Object)>, content: String},
+    HexString (Vec<u8>), // each byte is 0-15
+    Stream {filters: Vec<String>, dictionary: Vec<(String, Object)>, content: Vec<u8>},
     Dictionary (Vec<(String, Object)>),
     Array (Vec<Object>),
     Reference {obj_nr: i32, gen_nr: i32},
@@ -80,7 +81,22 @@ impl Display for Object {
                     }
                 }
             },
-            &Object::Stream{filters: _, dictionary: _, ref content} => write!(f, "stream\n{}\nendstream\n", content.as_str()),
+            &Object::HexString (ref s) => {
+                for c in s {
+                    write!(f, "{},", c)?;
+                }
+                Ok(())
+            }
+            &Object::Stream{filters: _, dictionary: _, ref content} => {
+                let decoded = from_utf8(content);
+                match decoded {
+                    Ok(decoded) => write!(f, "stream\n{}\nendstream\n", decoded),
+                    Err(_) => {
+                        // Write out bytes as numbers.
+                        write!(f, "stream\n{:?}\nendstream\n", content)
+                    }
+                }
+            }
             &Object::Dictionary(ref d) => {
                 write!(f, "<< ")?;
                 for e in d {

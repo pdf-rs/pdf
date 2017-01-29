@@ -296,6 +296,10 @@ impl<'a> Substr<'a> {
         }
     }
 
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.slice.to_vec()
+    }
+
     pub fn equals(&self, other: &[u8]) -> bool {
         self.slice == other
     }
