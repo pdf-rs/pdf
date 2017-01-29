@@ -11,6 +11,7 @@ extern crate slog_term;
 extern crate isatty;
 #[macro_use]
 extern crate error_chain;
+extern crate num_traits;
 
 pub mod reader;
 pub mod repr;
@@ -40,6 +41,7 @@ mod tests {
     use reader;
     use reader::PdfReader;
     use reader::lexer::Lexer;
+    use reader::lexer::StringLexer;
     use repr::*;
     use err::*;
 
@@ -93,6 +95,16 @@ mod tests {
                 _ => panic!("Not dicionary"),
             }
             */
+        }
+    }
+
+    // #[test]
+    fn read_string() {
+        let s: &[u8] = "(\\2670\\331\\346\\nZ\\356\\215n\\273\\264\\350d \\013t\\2670\\331\\346\\nZ\\356\\215n\\273\\264\\350d\n \\013t\\\n)".as_bytes();
+        let mut lexer = StringLexer::new(s);
+        for c in lexer.iter() {
+            let c = c.unwrap_or_else(|e| print_err(e));
+            print!("{}, ", c);
         }
     }
 

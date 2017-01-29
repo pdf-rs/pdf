@@ -5,6 +5,9 @@ use std::io::SeekFrom;
 
 use err::*;
 
+mod str;
+pub use self::str::StringLexer;
+
 
 #[derive(Copy, Clone)]
 #[allow(dead_code)]
@@ -52,9 +55,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
+
     /// Used by next, peek and back - returns substring and new position
-    /// If forward, places pointer at the next character after the lexeme
+    /// If forward, places pointer at the next non-whitespace character.
     /// If backward, places pointer at the start of the current word.
+    // TODO ^ backward case is actually not tested or.. thought about that well.
     fn next_word(&self, forward: bool) -> Result<(Substr<'a>, usize)> {
         let mut pos = self.pos;
         // Move away from eventual whitespace
@@ -85,13 +90,20 @@ impl<'a> Lexer<'a> {
                 pos = new_pos;
             }
         }
-        Ok((self.new_substr(start_pos..pos), pos))
+
+        let result = self.new_substr(start_pos..pos);
+
+        // Move away from whitespace again
+        while self.is_whitespace(pos) {
+            pos = self.advance_pos(pos, forward)?;
+        }
+        Ok((result, pos))
     }
 
     /// Just a helper for next_word.
     fn advance_pos(&self, pos: usize, forward: bool) -> Result<usize> {
         if forward {
-            if pos < self.buf.len() {
+            if pos < self.buf.len() - 1 {
                 Ok(pos + 1)
             } else {
                 bail!(ErrorKind::EOF);

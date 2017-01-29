@@ -7,6 +7,7 @@ pub use self::xref::*;
 use std::vec::Vec;
 use err::*;
 use std;
+use std::str::from_utf8;
 use std::fmt::{Display, Debug, Formatter};
 
 
@@ -22,7 +23,7 @@ pub enum Object {
     Integer (i32),
     RealNumber (f32),
     Boolean (bool),
-    String(StringType, String),
+    String (Vec<u8>),
     Stream {filters: Vec<String>, dictionary: Vec<(String, Object)>, content: String},
     Dictionary (Vec<(String, Object)>),
     Array (Vec<Object>),
@@ -65,10 +66,18 @@ impl Display for Object {
             &Object::Integer(n) => write!(f, "{}", n),
             &Object::RealNumber(n) => write!(f, "{}", n),
             &Object::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
-            &Object::String(ref t, ref s) => {
-                match t {
-                    &StringType::HEX => write!(f, "({})", s.as_str()),
-                    &StringType::UTF8 => write!(f, "({})", s.as_str()),
+            &Object::String (ref s) => {
+                let decoded = from_utf8(s);
+                match decoded {
+                    Ok(decoded) => write!(f, "({})", decoded),
+                    Err(_) => {
+                        // Write out bytes as numbers.
+                        write!(f, "encoded(")?;
+                        for c in s {
+                            write!(f, "{},", c)?;
+                        }
+                        write!(f, ")")
+                    }
                 }
             },
             &Object::Stream{filters: _, dictionary: _, ref content} => write!(f, "stream\n{}\nendstream\n", content.as_str()),

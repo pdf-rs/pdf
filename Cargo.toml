@@ -11,6 +11,7 @@ slog-scope = "0"
 slog-stream = "1"
 slog-term = "1"
 isatty = "0.1"
+num-traits = "*"
 
 [lib]
 doctest = false
