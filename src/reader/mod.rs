@@ -10,6 +10,7 @@ use std::io::SeekFrom;
 use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
+use inflate::InflateStream;
 
 pub struct PdfReader {
     // Contents
@@ -189,6 +190,28 @@ impl PdfReader {
         let obj = self.read_indirect_object_from(lexer.get_pos()).chain_err(|| "Reading Xref stream")?.object;
         // println!("Xref stream obj: {:?}", obj);
         info!("Read xref stream"; "Xref stream" => format!("{}", obj));
+        info!(" == Attempt to decode ==");
+        let data = if let Object::Stream {filters: _, dictionary: _, content} = obj {
+            content
+        } else {
+            bail!("Object is not stream..");
+        };
+
+        let mut inflater = InflateStream::new();
+        let mut out = Vec::<u8>::new();
+        let mut n = 0;
+        while n < data.len() {
+            let res = inflater.update(&data[n..]);
+            if let Ok((num_bytes_read, result)) = res {
+                n += num_bytes_read;
+                out.extend(result);
+            } else {
+                res.unwrap();
+            }
+        }
+        info!("Decoded"; "Data" => format!("{:?}", out));
+
+
         panic!("Exit");
 
         // TODO Finish this function. Not trivial.

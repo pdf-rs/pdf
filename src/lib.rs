@@ -12,13 +12,20 @@ extern crate isatty;
 #[macro_use]
 extern crate error_chain;
 extern crate num_traits;
+extern crate inflate;
 
 pub mod reader;
 pub mod repr;
 pub mod err;
 
+// TODO Most immediate plan
+
+// - Find out how to properly decode FlatDecode filter in Lexer::read_xref_stream. Using `inflate`
+// crate?
+
 // TODO Plan
-// * Might have no `trailer`!!! Look at 'cross-reference streams'
+
+// * Cross-reference streams
 //  - question: What happens with incremental update?
 // * Fix find_page()
 // * Display the PDF model for debugging

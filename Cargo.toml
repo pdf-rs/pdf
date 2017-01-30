@@ -12,6 +12,7 @@ slog-stream = "1"
 slog-term = "1"
 isatty = "0.1"
 num-traits = "*"
+inflate = "0.1.1"
 
 [lib]
 doctest = false
