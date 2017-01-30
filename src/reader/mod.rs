@@ -197,7 +197,7 @@ impl PdfReader {
             bail!("Object is not stream..");
         };
 
-        let mut inflater = InflateStream::new();
+        let mut inflater = InflateStream::from_zlib();
         let mut out = Vec::<u8>::new();
         let mut n = 0;
         while n < data.len() {
@@ -210,7 +210,6 @@ impl PdfReader {
             }
         }
         info!("Decoded"; "Data" => format!("{:?}", out));
-
 
         panic!("Exit");
 
