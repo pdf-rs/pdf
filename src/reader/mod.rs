@@ -68,8 +68,9 @@ impl PdfReader {
     pub fn read_indirect_object(&self, obj_nr: i32) -> Result<IndirectObject> {
         let xref_entry = self.xref_table.get(obj_nr as usize)?;
         match xref_entry {
-            XrefEntry::Free{next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
-            XrefEntry::InUse{pos, gen_nr: _} => self.read_indirect_object_from(pos),
+            XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
+            XrefEntry::InUse {pos, gen_nr: _} => self.read_indirect_object_from(pos),
+            XrefEntry::InStream {stream_obj_nr, index} => /* TODO */ Err("NOT IMPLEMENTED".into()),
         }
     }
 
@@ -187,33 +188,38 @@ impl PdfReader {
 
     fn read_xref_stream(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
         // TODO We receive &mut Lexer, but only read the pos... Consistency!
-        let obj = self.read_indirect_object_from(lexer.get_pos()).chain_err(|| "Reading Xref stream")?.object;
-        // println!("Xref stream obj: {:?}", obj);
-        info!("Read xref stream"; "Xref stream" => format!("{}", obj));
-        info!(" == Attempt to decode ==");
-        let data = if let Object::Stream {filters: _, dictionary: _, content} = obj {
-            content
+        let xref_stream = self.read_indirect_object_from(lexer.get_pos()).chain_err(|| "Reading Xref stream")?.object;
+
+        // Get 'W' as array of integers
+        let width = xref_stream.dict_get("W")?.unwrap_integer_array()?;
+        let entry_size = width.iter().fold(0, |x, &y| x + y);
+        let num_entries = xref_stream.dict_get("Size")?.unwrap_integer()?;
+
+        let indices = xref_stream.dict_get("Index");
+        let indices: Vec<(i32, i32)> = match indices {
+            Ok(obj) => obj.unwrap_integer_array()?,
+            Err(_) => vec![0, num_entries],
+        }.chunks(2).map(|c| (c[0], c[1])).collect(); // TODO panics if odd number of elements - how to handle it?
+        
+        let (dict, data) = if let Object::Stream {filters: _, dictionary: ref dict, ref content} = xref_stream {
+            (dict, content)
         } else {
             bail!("Object is not stream..");
         };
 
-        let mut inflater = InflateStream::from_zlib();
-        let mut out = Vec::<u8>::new();
-        let mut n = 0;
-        while n < data.len() {
-            let res = inflater.update(&data[n..]);
-            if let Ok((num_bytes_read, result)) = res {
-                n += num_bytes_read;
-                out.extend(result);
-            } else {
-                res.unwrap();
-            }
+        let data = flat_decode(&data);
+
+        let mut data_left = &data[..];
+
+        let mut sections = Vec::new();
+        for (first_id, num_objects) in indices {
+            let section = XrefSection::new_from_xref_stream(first_id, num_entries, &width, &mut data_left)?;
+            sections.push(section);
         }
-        info!("Decoded"; "Data" => format!("{:?}", out));
+        debug!("Xref stream"; "Sections" => format!("{:?}", sections));
 
-        panic!("Exit");
-
-        // TODO Finish this function. Not trivial.
+        // TODO Shouldn't be necessary to clone as we don't use xref_stream anymore.
+        Ok((sections, Object::Dictionary (dict.clone())))
     }
     fn read_xref_table(&self, lexer: &mut Lexer) -> Result<Vec<XrefSection>> {
         let mut sections = Vec::new();
@@ -308,11 +314,11 @@ impl PdfReader {
 
     /// Read the Root/Catalog object
     fn read_root(&self) -> Result<Object> {
-        self.dereference(self.trailer.dict_get("Root".to_string())?.clone())
+        self.dereference(self.trailer.dict_get("Root")?.clone())
     }
 
     fn read_pages(&self) -> Result<Object> {
-        self.dereference(self.root.dict_get("Pages".to_string())?.clone())
+        self.dereference(self.root.dict_get("Pages")?.clone())
     }
 
     /// Reads object starting at where the `Lexer` is currently at.
@@ -468,4 +474,20 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
     let _ = file.read(&mut buf); // Read entire file into memory
 
     Ok(buf)
+}
+
+fn flat_decode(data: &Vec<u8>) -> Vec<u8> {
+    let mut inflater = InflateStream::from_zlib();
+    let mut out = Vec::<u8>::new();
+    let mut n = 0;
+    while n < data.len() {
+        let res = inflater.update(&data[n..]);
+        if let Ok((num_bytes_read, result)) = res {
+            n += num_bytes_read;
+            out.extend(result);
+        } else {
+            res.unwrap();
+        }
+    }
+    out
 }

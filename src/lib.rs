@@ -20,6 +20,8 @@ pub mod err;
 
 // TODO Most immediate plan
 
+// - Parse xref stream
+// - Implement read_indirect_object for InStream.
 // - Find out how to properly decode FlatDecode filter in Lexer::read_xref_stream. Using `inflate`
 // crate?
 

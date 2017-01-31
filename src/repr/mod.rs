@@ -34,30 +34,48 @@ pub enum Object {
 }
 
 impl Object {
-    /// `self` must be an `Object::Dictionary`.
-    pub fn dict_get<'a>(&'a self, key: String) -> Result<&'a Object> {
+    /// `self` must be an `Object::Dictionary` or an `Object::Stream`.
+    pub fn dict_get<'a>(&'a self, key: &'static str) -> Result<&'a Object> {
         match self {
-            &Object::Dictionary(ref dictionary) => {
+            &Object::Dictionary (ref dictionary) => {
                 for &(ref name, ref object) in dictionary {
                     if key == *name {
                         return Ok(object);
                     }
                 }
-                Err(ErrorKind::NotFound {word: key}.into())
+                Err (ErrorKind::NotFound {word: key.to_string()}.into())
             },
+            &Object::Stream {filters: _, ref dictionary, content: _} => {
+                for &(ref name, ref object) in dictionary {
+                    if key == *name {
+                        return Ok(object);
+                    }
+                }
+                Err (ErrorKind::NotFound {word: key.to_string()}.into())
+            }
             _ => {
-                Err(ErrorKind::WrongObjectType.into())
+                Err (ErrorKind::WrongObjectType.into())
             }
         }
     }
     pub fn unwrap_integer(&self) -> Result<i32> {
         match self {
-            &Object::Integer(n) => Ok(n),
+            &Object::Integer (n) => Ok(n),
             _ => {
-                // Err(ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
-                Err(ErrorKind::WrongObjectType.into())
+                // Err (ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
+                Err (ErrorKind::WrongObjectType.into())
             }
         }
+    }
+    pub fn unwrap_array(&self) -> Result<&Vec<Object>> {
+        match self {
+            &Object::Array (ref v) => Ok(v),
+            _ => Err (ErrorKind::WrongObjectType.into())
+        }
+    }
+    pub fn unwrap_integer_array(&self) -> Result<Vec<i32>> {
+        self.unwrap_array()?.iter()
+            .map(|x| Ok(x.unwrap_integer()?)).collect::<Result<Vec<_>>>()
     }
 }
 

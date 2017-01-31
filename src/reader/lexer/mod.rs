@@ -276,6 +276,7 @@ pub struct Substr<'a> {
 }
 impl<'a> Substr<'a> {
     pub fn as_str(&self) -> &str {
+        // TODO use from_utf8_lossy - it's safe
         unsafe {
             std::str::from_utf8_unchecked(self.slice)
         }
