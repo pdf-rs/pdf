@@ -178,18 +178,16 @@ impl PdfReader {
         if next_word.equals(b"xref") {
             // Read classic xref table
             
-            let sections = PdfReader::parse_xref_table(lexer)?;
-            // TODO: Read Trailer!
-            Ok((sections, Object::Null))
+            PdfReader::parse_xref_table_and_trailer(lexer)
         } else {
             // Read xref stream
 
             lexer.back()?;
-            PdfReader::parse_xref_stream(lexer)
+            PdfReader::parse_xref_stream_and_trailer(lexer)
         }
     }
 
-    fn parse_xref_stream(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
+    fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
         let xref_stream = IndirectObject::parse_from(lexer).chain_err(|| "Reading Xref stream")?.object;
 
         // Get 'W' as array of integers
@@ -223,7 +221,9 @@ impl PdfReader {
         // TODO Shouldn't be necessary to clone as we don't use xref_stream anymore.
         Ok((sections, Object::Dictionary (dict.clone())))
     }
-    fn parse_xref_table(lexer: &mut Lexer) -> Result<Vec<XrefSection>> {
+
+    /// Reads xref table
+    fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
         let mut sections = Vec::new();
         
         // Keep reading subsections until we hit `trailer`
@@ -247,45 +247,36 @@ impl PdfReader {
             }
             sections.push(section);
         }
-        Ok(sections)
+        // Read trailer
+        lexer.next_expect("trailer")?;
+        let trailer = Object::parse_from(lexer)?;
+     
+        Ok((sections, trailer))
+
     }
 
     /// Gathers all xref sections in the file to an XrefTable.
     /// Agnostic about whether there are xref tables or xref streams. (but haven't thought about
     /// hybrid ones)
     fn gather_xref(&self) -> Result<XrefTable> {
-        let num_objects = match self.trailer.dict_get("Size".into()) {
-            Ok(&Object::Integer (n)) => n,
-            Ok(_) => bail!("Trailer /Size is not Integer."),
-            Err(Error (ErrorKind::NotFound {word:_}, _)) => bail!("Trailer /Size not found."),
-            Err(_) => bail!("Trailer is not Dictionary {:?}", self.trailer),
-        };
+        let mut lexer = Lexer::new(&self.buf);
+        let num_objects = self.trailer.dict_get("Size".into())?.unwrap_integer()?;
 
         let mut table = XrefTable::new(num_objects as usize);
-        
-        let (sections, _) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
-        for section in sections {
-            table.add_entries_from(section);
-        }
 
-        let mut lexer = Lexer::new(&self.buf);
-
-        let mut next_trailer_start: Option<i32>
-            = self.trailer.dict_get("Prev".into()).and_then(|x| Ok(x.unwrap_integer()?)).ok();
+        let mut next_xref_start: Option<i32> = Some(self.startxref as i32);
         
-        while let Some(trailer_start) = next_trailer_start {
-            // - jump to next `trailer`
-            lexer.seek(SeekFrom::Start(trailer_start as u64));
-            // - read that trailer to gather next trailer start and startxref
-            let (trailer, startxref) = PdfReader::read_trailer_at(&mut lexer)?;
-            next_trailer_start = trailer.dict_get("Prev".into())
-                .and_then(|x| Ok(x.unwrap_integer()?)).ok();
-            // - read xref table
-            let (sections, _) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(trailer_start as usize))?;
-            // TODO trailer start?? not Xref start??
+        while let Some(xref_start) = next_xref_start {
+            // Jump to next `trailer`
+            lexer.seek(SeekFrom::Start(xref_start as u64));
+            // Add sections
+            let (sections, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(xref_start as usize))?;
             for section in sections {
                 table.add_entries_from(section);
             }
+            // Find position of eventual next xref & trailer
+            next_xref_start = trailer.dict_get("Prev".into())
+                .and_then(|x| Ok(x.unwrap_integer()?)).ok();
         }
         Ok(table)
 
@@ -299,16 +290,6 @@ impl PdfReader {
         let (_, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
         trace!("_ read_last_trailer");
         Ok(trailer)
-    }
-    /// Returns the trailer dictionary and startxref
-    fn read_trailer_at(lexer: &mut Lexer) -> Result<(Object, usize)> {
-        // Read trailer
-        lexer.next_expect("trailer")?;
-        let trailer = Object::parse_from(lexer)?;
-        // Read startxref
-        lexer.next_expect("startxref")?;
-        let startxref = lexer.next_as::<usize>()?;
-        Ok((trailer, startxref))
     }
 
     /// Read the Root/Catalog object
