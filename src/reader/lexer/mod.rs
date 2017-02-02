@@ -228,7 +228,10 @@ impl<'a> Lexer<'a> {
             self.pos = self.buf.len() - 1;
         }
         self.new_substr(start_pos..self.pos)
+    }
 
+    pub fn get_remaining_slice(&self) -> &[u8] {
+        &self.buf[self.pos..]
     }
 
     fn incr_pos(&mut self) -> bool {

@@ -148,3 +148,7 @@ impl XrefSection {
         self.entries.push(XrefEntry::InUse{pos: pos, gen_nr: gen_nr});
     }
 }
+
+// read_xref_table
+// read_xref_stream
+// read_xref_and_trailer_at
