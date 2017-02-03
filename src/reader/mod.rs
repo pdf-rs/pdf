@@ -16,9 +16,9 @@ pub struct PdfReader {
     // Contents
     startxref: usize,
     xref_table: XrefTable,
-    root: Object,
-    pub trailer: Object, // only the last trailer in the file
-    pages_root: Object, // the root of the tree of pages
+    root: Dictionary,
+    pub trailer: Dictionary, // only the last trailer in the file
+    pages_root: Dictionary, // the root of the tree of pages
 
     buf: Vec<u8>,
 }
@@ -30,9 +30,9 @@ impl PdfReader {
         let mut pdf_reader = PdfReader {
             startxref: 0,
             xref_table: XrefTable::new(0),
-            root: Object::Null,
-            trailer: Object::Null,
-            pages_root: Object::Null,
+            root: Dictionary::new(),
+            trailer: Dictionary::new(),
+            pages_root: Dictionary::new(),
             buf: buf,
         };
         let startxref = pdf_reader.read_startxref()?;
@@ -54,10 +54,10 @@ impl PdfReader {
     /// is a reference.
     pub fn dereference(&self, obj: Object) -> Result<Object> {
         match obj {
-            Object::Reference {obj_nr, gen_nr:_} => {
+            Object::Reference (id) => {
                 Ok(
                     // Recursively dereference...
-                    self.dereference(self.read_indirect_object(obj_nr)?.object)?
+                    self.dereference(self.read_indirect_object(id.obj_nr)?.object)?
                 )
             },
             _ => {
@@ -65,8 +65,8 @@ impl PdfReader {
             }
         }
     }
-    pub fn read_indirect_object(&self, obj_nr: i32) -> Result<IndirectObject> {
-        let xref_entry = self.xref_table.get(obj_nr as usize)?;
+    pub fn read_indirect_object(&self, obj_nr: u32) -> Result<IndirectObject> {
+        let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
             XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
             XrefEntry::InUse {pos, gen_nr: _} => {
@@ -79,7 +79,8 @@ impl PdfReader {
     }
 
     pub fn get_num_pages(&self) -> i32 {
-        let result = self.pages_root.dict_get("Count".into());
+
+        let result = self.pages_root.get("Count");
         match result {
             Ok(&Object::Integer(n)) => n,
             _ => 0,
@@ -88,7 +89,7 @@ impl PdfReader {
 
     /// Returns Dictionary, with /Type = Page.
     /// page_nr must be smaller than `self.get_num_pages()`
-    pub fn get_page_contents(&self, page_nr: i32) -> Result<Object> {
+    pub fn get_page_contents(&self, page_nr: i32) -> Result<Dictionary> {
         if page_nr >= self.get_num_pages() {
             return Err(ErrorKind::OutOfBounds.into());
         }
@@ -96,7 +97,7 @@ impl PdfReader {
         Ok(page)
     }
     /// Find a page looking in the page tree. Return the Object.
-    fn find_page(&self, page_nr: i32) -> Result<Object> {
+    fn find_page(&self, page_nr: i32) -> Result<Dictionary> {
         let result = self.find_page_internal(page_nr, &mut 0, &self.pages_root)?;
         match result {
             Some(page) => Ok(page),
@@ -108,16 +109,16 @@ impl PdfReader {
     /// `progress` is the page number of the first leaf of the current tree
     /// A recursive process which returns a page if found, and in any case, the number of pages
     /// traversed (i32)
-    fn find_page_internal(&self, page_nr: i32, progress: &mut i32, node: &Object ) -> Result<Option<Object>> {
+    fn find_page_internal(&self, page_nr: i32, progress: &mut i32, node: &Dictionary ) -> Result<Option<Dictionary>> {
         if *progress > page_nr {
             // Search has already passed the correct one...
             bail!("Search has passed the page nr, without finding the page.");
         }
 
-        if let Ok(&Object::Name(ref t)) = node.dict_get("Type".into()) {
+        if let Ok(&Object::Name(ref t)) = node.get("Type") {
             if *t == "Pages".to_string() { // Intermediate node
                 // Number of leaf nodes (pages) in this subtree
-                let count = if let &Object::Integer(n) = node.dict_get("Count".into())? {
+                let count = if let &Object::Integer(n) = node.get("Count")? {
                         n
                     } else {
                         bail!("No Count.");
@@ -125,14 +126,14 @@ impl PdfReader {
 
                 // If the target page is a descendant of the intermediate node
                 if *progress + count > page_nr {
-                    let kids = if let &Object::Array(ref kids) = node.dict_get("Kids".into())? {
+                    let kids = if let &Object::Array(ref kids) = node.get("Kids")? {
                             kids
                         } else {
                             bail!("No Kids entry in Pages object.");
                         };
                     // Traverse children of node.
                     for kid in kids {
-                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid.clone())?)?;
+                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid.clone())?.unwrap_dictionary()?)?;
                         match result {
                             Some(found_page) => return Ok(Some(found_page)),
                             None => {},
@@ -173,7 +174,7 @@ impl PdfReader {
     /// Reads xref and trailer at some byte position `start`.
     /// `start` should point to the `xref` keyword of an xref table, or to the start of an xref
     /// stream.
-    fn read_xref_and_trailer_at(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
+    fn read_xref_and_trailer_at(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
         let next_word = lexer.next()?;
         if next_word.equals(b"xref") {
             // Read classic xref table
@@ -187,25 +188,23 @@ impl PdfReader {
         }
     }
 
-    fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
-        let xref_stream = IndirectObject::parse_from(lexer).chain_err(|| "Reading Xref stream")?.object;
+    fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+        let xref_stream = IndirectObject::parse_from(lexer).chain_err(|| "Reading Xref stream")?.object.unwrap_stream()?;
 
         // Get 'W' as array of integers
-        let width = xref_stream.dict_get("W")?.unwrap_integer_array()?;
+        let width = xref_stream.dictionary.get("W")?.unwrap_integer_array()?;
         let entry_size = width.iter().fold(0, |x, &y| x + y);
-        let num_entries = xref_stream.dict_get("Size")?.unwrap_integer()?;
+        let num_entries = xref_stream.dictionary.get("Size")?.unwrap_integer()?;
 
-        let indices = xref_stream.dict_get("Index");
-        let indices: Vec<(i32, i32)> = match indices {
-            Ok(obj) => obj.unwrap_integer_array()?,
-            Err(_) => vec![0, num_entries],
-        }.chunks(2).map(|c| (c[0], c[1])).collect(); // TODO panics if odd number of elements - how to handle it?
-        
-        let (dict, data) = if let Object::Stream {dictionary: ref dict, ref content} = xref_stream {
-            (dict, content)
-        } else {
-            bail!("Object is not stream..");
+        let indices: Vec<(i32, i32)> = {
+            match xref_stream.dictionary.get("Index") {
+                Ok(obj) => obj.unwrap_integer_array()?,
+                Err(_) => vec![0, num_entries],
+            }.chunks(2).map(|c| (c[0], c[1])).collect()
+            // ^^ TODO panics if odd number of elements - how to handle it?
         };
+        
+        let (dict, data) = (xref_stream.dictionary, xref_stream.content);
 
         let data = flat_decode(&data);
 
@@ -219,11 +218,11 @@ impl PdfReader {
         debug!("Xref stream"; "Sections" => format!("{:?}", sections));
 
         // TODO Shouldn't be necessary to clone as we don't use xref_stream anymore.
-        Ok((sections, Object::Dictionary (dict.clone())))
+        Ok((sections, dict))
     }
 
     /// Reads xref table
-    fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Object)> {
+    fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
         let mut sections = Vec::new();
         
         // Keep reading subsections until we hit `trailer`
@@ -249,7 +248,7 @@ impl PdfReader {
         }
         // Read trailer
         lexer.next_expect("trailer")?;
-        let trailer = Object::parse_from(lexer)?;
+        let trailer = Object::parse_from(lexer)?.unwrap_dictionary()?;
      
         Ok((sections, trailer))
 
@@ -260,7 +259,7 @@ impl PdfReader {
     /// hybrid ones)
     fn gather_xref(&self) -> Result<XrefTable> {
         let mut lexer = Lexer::new(&self.buf);
-        let num_objects = self.trailer.dict_get("Size".into())?.unwrap_integer()?;
+        let num_objects = self.trailer.get("Size")?.unwrap_integer()?;
 
         let mut table = XrefTable::new(num_objects as usize);
 
@@ -275,7 +274,7 @@ impl PdfReader {
                 table.add_entries_from(section);
             }
             // Find position of eventual next xref & trailer
-            next_xref_start = trailer.dict_get("Prev".into())
+            next_xref_start = trailer.get("Prev")
                 .and_then(|x| Ok(x.unwrap_integer()?)).ok();
         }
         Ok(table)
@@ -285,7 +284,7 @@ impl PdfReader {
 
     /// Needs to be called before any other functions on the PdfReader
     /// Reads the last trailer in the file
-    fn read_last_trailer(&mut self) -> Result<Object> {
+    fn read_last_trailer(&mut self) -> Result<Dictionary> {
         trace!("-> read_last_trailer");
         let (_, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
         trace!("_ read_last_trailer");
@@ -293,12 +292,12 @@ impl PdfReader {
     }
 
     /// Read the Root/Catalog object
-    fn read_root(&self) -> Result<Object> {
-        self.dereference(self.trailer.dict_get("Root")?.clone())
+    fn read_root(&self) -> Result<Dictionary> {
+        self.dereference(self.trailer.get("Root")?.clone())?.unwrap_dictionary()
     }
 
-    fn read_pages(&self) -> Result<Object> {
-        self.dereference(self.root.dict_get("Pages")?.clone())
+    fn read_pages(&self) -> Result<Dictionary> {
+        self.dereference(self.root.get("Pages")?.clone())?.unwrap_dictionary()
     }
 
 }

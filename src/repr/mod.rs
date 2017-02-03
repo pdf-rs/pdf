@@ -14,12 +14,12 @@ use std;
 use std::str::from_utf8;
 use std::fmt::{Display, Formatter};
 use std::io::SeekFrom;
+use std::collections::HashMap;
 
 
 /* Objects */
 pub struct IndirectObject {
-    pub obj_nr: i32,
-    pub gen_nr: i32,
+    pub id: ObjectId,
     pub object: Object,
 }
 
@@ -30,19 +30,36 @@ pub enum Object {
     Boolean (bool),
     String (Vec<u8>),
     HexString (Vec<u8>), // each byte is 0-15
-    Stream {dictionary: Vec<(String, Object)>, content: Vec<u8>},
-    Dictionary (Vec<(String, Object)>),
+    Stream (Stream),
+    Dictionary (Dictionary),
     Array (Vec<Object>),
-    Reference {obj_nr: i32, gen_nr: i32},
+    Reference (ObjectId),
     Name (String),
     Null,
 }
 
+#[derive(Clone, Debug)]
+pub struct Dictionary (HashMap<String, Object>);
+
+#[derive(Clone, Debug)]
+pub struct Stream {
+    pub dictionary: Dictionary,
+    pub content: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ObjectId {
+    pub obj_nr: u32,
+    pub gen_nr: u16,
+}
+
+
+
 impl IndirectObject {
     pub fn parse_from(lexer: &mut Lexer) -> Result<IndirectObject> {
         trace!("-> read_indirect_object_from");
-        let obj_nr = lexer.next()?.to::<i32>()?;
-        let gen_nr = lexer.next()?.to::<i32>()?;
+        let obj_nr = lexer.next()?.to::<u32>()?;
+        let gen_nr = lexer.next()?.to::<u16>()?;
         lexer.next_expect("obj")?;
 
         let obj = Object::parse_from(lexer)?;
@@ -51,38 +68,31 @@ impl IndirectObject {
 
         trace!("- read_indirect_object_from");
         Ok(IndirectObject {
-            obj_nr: obj_nr,
-            gen_nr: gen_nr,
+            id: ObjectId {obj_nr: obj_nr, gen_nr: gen_nr},
             object: obj,
         })
     }
 }
 
-impl Object {
-    /// `self` must be an `Object::Dictionary` or an `Object::Stream`.
-    pub fn dict_get<'a>(&'a self, key: &'static str) -> Result<&'a Object> {
-        match self {
-            &Object::Dictionary (ref dictionary) => {
-                for &(ref name, ref object) in dictionary {
-                    if key == *name {
-                        return Ok(object);
-                    }
-                }
-                Err (ErrorKind::NotFound {word: key.to_string()}.into())
-            },
-            &Object::Stream {ref dictionary, content: _} => {
-                for &(ref name, ref object) in dictionary {
-                    if key == *name {
-                        return Ok(object);
-                    }
-                }
-                Err (ErrorKind::NotFound {word: key.to_string()}.into())
-            }
-            _ => {
-                Err (ErrorKind::WrongObjectType.into())
-            }
-        }
+impl Dictionary {
+    pub fn new() -> Dictionary {
+        Dictionary (HashMap::new())
     }
+    pub fn get<'a, K>(&'a self, key: K) -> Result<&'a Object>
+        where K: Into<String>
+    {
+        let key = key.into();
+        self.0.get(&key).ok_or(ErrorKind::NotFound {word: key}.into())
+    }
+    pub fn set<K, V>(&mut self, key: K, value: V)
+		where K: Into<String>,
+		      V: Into<Object>
+	{
+		let _ = self.0.insert(key.into(), value.into());
+	}
+}
+
+impl Object {
     pub fn unwrap_integer(&self) -> Result<i32> {
         match self {
             &Object::Integer (n) => Ok(n),
@@ -103,50 +113,57 @@ impl Object {
             .map(|x| Ok(x.unwrap_integer()?)).collect::<Result<Vec<_>>>()
     }
 
-    // TODO: Notice how sometimes we peek(), and in one branch we do next() in order to move
-    // forward. Consider having a back() instead of next()?
+    pub fn unwrap_dictionary(self) -> Result<Dictionary> {
+        match self {
+            Object::Dictionary (dict) => Ok(dict),
+            _ => Err (ErrorKind::WrongObjectType.into())
+        }
+    }
+
+    pub fn unwrap_stream(self) -> Result<Stream> {
+        match self {
+            Object::Stream (s) => Ok(s),
+            _ => Err (ErrorKind::WrongObjectType.into()),
+        }
+    }
+
     pub fn parse_from(lexer: &mut Lexer) -> Result<Object> {
         let first_lexeme = lexer.next()?;
 
         let obj = if first_lexeme.equals(b"<<") {
-            let mut dictionary = Vec::new();
+
+            let mut dict = Dictionary::new();
             loop {
                 // Expect a Name (and Object) or the '>>' delimiter
                 let delimiter = lexer.next()?;
                 if delimiter.equals(b"/") {
                     let key = lexer.next()?.as_string();
-                    trace!("Dict add"; "Key" => key);
                     let obj = Object::parse_from(lexer)?;
-                    trace!("Dict add"; "Obj" => obj.to_string());
-                    dictionary.push( (key, obj) );
+                    dict.set(key, obj);
                 } else if delimiter.equals(b">>") {
                     break;
                 } else {
-                    println!("Dicionary in progress: {:?}", dictionary);
                     bail!(ErrorKind::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.as_string(), expected: "/ or >>"});
                 }
             }
             // It might just be the dictionary in front of a stream.
-            let dict = Object::Dictionary(dictionary.clone());
             if lexer.peek()?.equals(b"stream") {
                 lexer.next()?;
 
                 // Get length
-                let length_obj = dict.dict_get("Length".into())?;
-
-                let length = length_obj.unwrap_integer()?;
+                let length = { dict.get("Length")?.unwrap_integer()? };
                 // Read the stream
                 let content = lexer.seek(SeekFrom::Current(length as i64));
                 debug!("Stream"; "contents" => content.as_string());
                 // Finish
                 lexer.next_expect("endstream")?;
 
-                Object::Stream {
-                    dictionary: dictionary,
+                Object::Stream (Stream {
+                    dictionary: dict,
                     content: content.to_vec(),
-                }
+                })
             } else {
-                dict
+                Object::Dictionary (dict)
             }
         } else if first_lexeme.is_integer() {
             // May be Integer or Reference
@@ -159,10 +176,10 @@ impl Object {
                 let third_lexeme = lexer.next()?;
                 if third_lexeme.equals(b"R") {
                     // It is indeed a reference to an indirect object
-                    Object::Reference {
-                        obj_nr: first_lexeme.to::<i32>()?,
-                        gen_nr: second_lexeme.to::<i32>()?,
-                    }
+                    Object::Reference (ObjectId {
+                        obj_nr: first_lexeme.to::<u32>()?,
+                        gen_nr: second_lexeme.to::<u16>()?,
+                    })
                 } else {
                     // We are probably in an array of numbers - it's not a reference anyway
                     lexer.seek(SeekFrom::Start(pos_bk as u64)); // (roll back the lexer first)
@@ -251,7 +268,7 @@ impl Display for Object {
                 }
                 Ok(())
             }
-            &Object::Stream{dictionary: _, ref content} => {
+            &Object::Stream (Stream {dictionary: _, ref content}) => {
                 let decoded = from_utf8(content);
                 match decoded {
                     Ok(decoded) => write!(f, "stream\n{}\nendstream\n", decoded),
@@ -261,7 +278,7 @@ impl Display for Object {
                     }
                 }
             }
-            &Object::Dictionary(ref d) => {
+            &Object::Dictionary(Dictionary(ref d)) => {
                 write!(f, "<< ")?;
                 for e in d {
                     write!(f, "/{} {}", e.0, e.1)?;
@@ -275,7 +292,7 @@ impl Display for Object {
                 }
                 write!(f, "]")
             },
-            &Object::Reference{obj_nr, gen_nr} => {
+            &Object::Reference (ObjectId {obj_nr, gen_nr}) => {
                 write!(f, "{} {} R", obj_nr, gen_nr)
             },
             &Object::Name (ref name) => write!(f, "/{}", name),
