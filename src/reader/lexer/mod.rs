@@ -299,6 +299,12 @@ impl<'a> Substr<'a> {
             Err(_) => false,
         }
     }
+    pub fn is_real_number(&self) -> bool {
+        match self.to::<f32>() {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
 
     pub fn to_vec(&self) -> Vec<u8> {
         self.slice.to_vec()

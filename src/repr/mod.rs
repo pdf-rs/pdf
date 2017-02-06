@@ -15,6 +15,7 @@ use std::str::from_utf8;
 use std::fmt::{Display, Formatter};
 use std::io::SeekFrom;
 use std::collections::HashMap;
+use inflate::InflateStream;
 
 
 /* Objects */
@@ -90,6 +91,24 @@ impl Dictionary {
 	{
 		let _ = self.0.insert(key.into(), value.into());
 	}
+
+    /// Mostly used for debugging. If type is not specified, it will return Ok(()).
+    pub fn expect_type<K>(&self, type_name: K) -> Result<()>
+        where K: Into<String>
+    {
+        let type_name = type_name.into();
+        match self.get("Type") {
+            Err(_) => Ok(()),
+            Ok(&Object::Name (ref name)) => {
+                if *name == *type_name {
+                    Ok(())
+                } else {
+                    bail!("Expected type {}, found type {}.", type_name, name)
+                }
+            }
+            _ => bail!("???"),
+        }
+    }
 }
 
 impl Object {
@@ -127,6 +146,23 @@ impl Object {
         }
     }
 
+    pub fn parse_from_stream(obj_stream: &Stream, index: u16) -> Result<Object> {
+        let num_objects = obj_stream.dictionary.get("N")?.unwrap_integer()?;
+        let first = obj_stream.dictionary.get("First")?.unwrap_integer()?;
+
+        let mut lexer = Lexer::new(&obj_stream.content);
+
+        // Just find the byte offset of the one we are interested in
+        let mut obj_nr = 0;
+        let mut byte_offset = 0;
+        for _ in 0..index+1 {
+            obj_nr = lexer.next()?.to::<u32>()?;
+            byte_offset = lexer.next()?.to::<u16>()?;
+        }
+
+        lexer.seek(SeekFrom::Start (first as u64 + byte_offset as u64));
+        Object::parse_from(&mut lexer)
+    }
     pub fn parse_from(lexer: &mut Lexer) -> Result<Object> {
         let first_lexeme = lexer.next()?;
 
@@ -153,14 +189,27 @@ impl Object {
                 // Get length
                 let length = { dict.get("Length")?.unwrap_integer()? };
                 // Read the stream
-                let content = lexer.seek(SeekFrom::Current(length as i64));
-                debug!("Stream"; "contents" => content.as_string());
+                let mut content = lexer.seek(SeekFrom::Current(length as i64)).to_vec();
+                // Uncompress/decode if there is a filter
+                match dict.get("Filter") {
+                    Ok(&Object::Name (ref s)) => {
+                        if *s == "FlateDecode".to_string() {
+                            content = flat_decode(&content);
+                        } else {
+                            bail!("NOT IMPLEMENTED: Filter type {}", *s);
+                        }
+                    }
+                    Ok(_) => {
+                        bail!("NOT IMPLEMENTED: Array of filters");
+                    }
+                    _ => {}
+                }
                 // Finish
                 lexer.next_expect("endstream")?;
 
                 Object::Stream (Stream {
                     dictionary: dict,
-                    content: content.to_vec(),
+                    content: content,
                 })
             } else {
                 Object::Dictionary (dict)
@@ -190,6 +239,9 @@ impl Object {
                 lexer.seek(SeekFrom::Start(pos_bk as u64)); // (roll back the lexer first)
                 Object::Integer(first_lexeme.to::<i32>()?)
             }
+        } else if first_lexeme.is_real_number() {
+            // Real Number
+            Object::RealNumber (first_lexeme.to::<f32>()?)
         } else if first_lexeme.equals(b"/") {
             // Name
             let s = lexer.next()?.as_string();
@@ -268,15 +320,8 @@ impl Display for Object {
                 }
                 Ok(())
             }
-            &Object::Stream (Stream {dictionary: _, ref content}) => {
-                let decoded = from_utf8(content);
-                match decoded {
-                    Ok(decoded) => write!(f, "stream\n{}\nendstream\n", decoded),
-                    Err(_) => {
-                        // Write out bytes as numbers.
-                        write!(f, "stream\n{:?}\nendstream\n", content)
-                    }
-                }
+            &Object::Stream (ref stream) => {
+                write!(f, "{}", stream)
             }
             &Object::Dictionary(Dictionary(ref d)) => {
                 write!(f, "<< ")?;
@@ -301,3 +346,32 @@ impl Display for Object {
     }
 }
 
+impl Display for Stream {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let decoded = from_utf8(&self.content);
+        match decoded {
+            Ok(decoded) => write!(f, "stream\n{}\nendstream\n", decoded),
+            Err(_) => {
+                // Write out bytes as numbers.
+                write!(f, "stream\n{:?}\nendstream\n", self.content)
+            }
+        }
+    }
+}
+
+// TODO move to own module
+fn flat_decode(data: &Vec<u8>) -> Vec<u8> {
+    let mut inflater = InflateStream::from_zlib();
+    let mut out = Vec::<u8>::new();
+    let mut n = 0;
+    while n < data.len() {
+        let res = inflater.update(&data[n..]);
+        if let Ok((num_bytes_read, result)) = res {
+            n += num_bytes_read;
+            out.extend(result);
+        } else {
+            res.unwrap();
+        }
+    }
+    out
+}

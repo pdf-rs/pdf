@@ -82,7 +82,7 @@ impl Debug for XrefTable {
                     write!(f, "{:4}: {:010} {:05} n \n", i, pos, gen_nr)?
                 },
                 &Some(XrefEntry::InStream {stream_obj_nr, index}) => {
-                    write!(f, "{:4}: in stream {}, index {}", i, stream_obj_nr, index)?
+                    write!(f, "{:4}: in stream {}, index {}\n", i, stream_obj_nr, index)?
                 }
                 &None => {
                     write!(f, "{:4}: None!\n", i)?
@@ -121,7 +121,7 @@ impl XrefSection {
                 0 => XrefEntry::Free {next_obj_nr: field1 as u32, gen_nr: field2 as u16},
                 1 => XrefEntry::InUse {pos: field1 as usize, gen_nr: field2 as u16},
                 2 => XrefEntry::InStream {stream_obj_nr: field1 as u32, index: field2 as u16},
-                _ => bail!("Reading xref stream, The first field 'type' is {}", _type),
+                _ => bail!("Reading xref stream, The first field 'type' is {} - must be 0, 1 or 2", _type),
             };
             entries.push(entry);
         }

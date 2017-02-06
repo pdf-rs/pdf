@@ -10,7 +10,6 @@ use std::io::SeekFrom;
 use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
-use inflate::InflateStream;
 
 pub struct PdfReader {
     // Contents
@@ -57,7 +56,7 @@ impl PdfReader {
             Object::Reference (id) => {
                 Ok(
                     // Recursively dereference...
-                    self.dereference(self.read_indirect_object(id.obj_nr)?.object)?
+                    self.dereference(self.read_indirect_object(id.obj_nr)?)?
                 )
             },
             _ => {
@@ -65,16 +64,26 @@ impl PdfReader {
             }
         }
     }
-    pub fn read_indirect_object(&self, obj_nr: u32) -> Result<IndirectObject> {
+    pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Object> {
+        trace!("Look up in xref table"; "obj_nr" => obj_nr);
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
             XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
             XrefEntry::InUse {pos, gen_nr: _} => {
                 let mut lexer = Lexer::new(&self.buf);
                 lexer.seek(SeekFrom::Start(pos as u64));
-                IndirectObject::parse_from(&mut lexer)
+                let indirect_obj = IndirectObject::parse_from(&mut lexer)?;
+                if indirect_obj.id.obj_nr != obj_nr {
+                    bail!("xref table is wrong: read indirect obj of wrong obj_nr {} != {}", indirect_obj.id.obj_nr, obj_nr);
+                }
+                Ok(indirect_obj.object)
             }
-            XrefEntry::InStream {stream_obj_nr, index} => /* TODO */ Err("NOT IMPLEMENTED".into()),
+            XrefEntry::InStream {stream_obj_nr, index} => {
+                let obj_stream = self.read_indirect_object(stream_obj_nr)?.unwrap_stream()?;
+                obj_stream.dictionary.expect_type("ObjStm")?;
+                debug!("InStream case"; "Object stream" => format!("{}", obj_stream));
+                Object::parse_from_stream(&obj_stream, index)
+            }
         }
     }
 
@@ -205,9 +214,7 @@ impl PdfReader {
         };
         
         let (dict, data) = (xref_stream.dictionary, xref_stream.content);
-
-        let data = flat_decode(&data);
-
+        
         let mut data_left = &data[..];
 
         let mut sections = Vec::new();
@@ -215,7 +222,7 @@ impl PdfReader {
             let section = XrefSection::new_from_xref_stream(first_id, num_entries, &width, &mut data_left)?;
             sections.push(section);
         }
-        debug!("Xref stream"; "Sections" => format!("{:?}", sections));
+        // debug!("Xref stream"; "Sections" => format!("{:?}", sections));
 
         // TODO Shouldn't be necessary to clone as we don't use xref_stream anymore.
         Ok((sections, dict))
@@ -277,6 +284,7 @@ impl PdfReader {
             next_xref_start = trailer.get("Prev")
                 .and_then(|x| Ok(x.unwrap_integer()?)).ok();
         }
+        debug!("XREF TABLE"; "table" => format!("{:?}", table));
         Ok(table)
 
     }
@@ -313,18 +321,3 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn flat_decode(data: &Vec<u8>) -> Vec<u8> {
-    let mut inflater = InflateStream::from_zlib();
-    let mut out = Vec::<u8>::new();
-    let mut n = 0;
-    while n < data.len() {
-        let res = inflater.update(&data[n..]);
-        if let Ok((num_bytes_read, result)) = res {
-            n += num_bytes_read;
-            out.extend(result);
-        } else {
-            res.unwrap();
-        }
-    }
-    out
-}
