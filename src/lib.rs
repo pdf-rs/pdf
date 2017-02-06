@@ -141,7 +141,7 @@ mod tests {
                 .full()
                 .use_utc_timestamp()
                 .build();
-            let d = slog::level_filter(Level::Trace, drain);
+            let d = slog::level_filter(Level::Debug, drain);
             slog::Logger::root(d.fuse(), o![])
         } else {
             slog::Logger::root(slog_stream::stream(std::io::stderr(), slog_json::default()).fuse(),

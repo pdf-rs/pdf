@@ -44,9 +44,6 @@ impl PdfReader {
         pdf_reader.xref_table = pdf_reader.gather_xref().chain_err(|| "Error reading xref table.")?;
         pdf_reader.root = pdf_reader.read_root().chain_err(|| "Error reading root.")?;
         pdf_reader.pages_root = pdf_reader.read_pages().chain_err(|| "Error reading pages.")?;
-
-
-        println!("XrefTable:\n{:?}", pdf_reader.xref_table);
         Ok(pdf_reader)
     }
     /// Consumes the Object, and returns either the same object, or the object pointed to, if `obj`
@@ -81,7 +78,6 @@ impl PdfReader {
             XrefEntry::InStream {stream_obj_nr, index} => {
                 let obj_stream = self.read_indirect_object(stream_obj_nr)?.unwrap_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
-                debug!("InStream case"; "Object stream" => format!("{}", obj_stream));
                 Object::parse_from_stream(&obj_stream, index)
             }
         }
