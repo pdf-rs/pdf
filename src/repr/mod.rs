@@ -112,7 +112,7 @@ impl Dictionary {
 }
 
 impl Object {
-    pub fn unwrap_integer(&self) -> Result<i32> {
+    pub fn as_integer(&self) -> Result<i32> {
         match self {
             &Object::Integer (n) => Ok(n),
             _ => {
@@ -121,25 +121,50 @@ impl Object {
             }
         }
     }
-    pub fn unwrap_array(&self) -> Result<&Vec<Object>> {
+    pub fn borrow_array(&self) -> Result<&Vec<Object>> {
         match self {
             &Object::Array (ref v) => Ok(v),
             _ => Err (ErrorKind::WrongObjectType.into())
         }
     }
-    pub fn unwrap_integer_array(&self) -> Result<Vec<i32>> {
-        self.unwrap_array()?.iter()
-            .map(|x| Ok(x.unwrap_integer()?)).collect::<Result<Vec<_>>>()
+    pub fn borrow_integer_array(&self) -> Result<Vec<i32>> {
+        self.borrow_array()?.iter()
+            .map(|x| Ok(x.as_integer()?)).collect::<Result<Vec<_>>>()
     }
 
-    pub fn unwrap_dictionary(self) -> Result<Dictionary> {
+    pub fn borrow_dictionary(&self) -> Result<&Dictionary> {
+        match self {
+            &Object::Dictionary (ref dict) => Ok(dict),
+            _ => Err (ErrorKind::WrongObjectType.into())
+        }
+    }
+
+    pub fn borrow_stream(&self) -> Result<&Stream> {
+        match self {
+            &Object::Stream (ref s) => Ok(s),
+            _ => Err (ErrorKind::WrongObjectType.into()),
+        }
+    }
+
+    pub fn as_array(self) -> Result<Vec<Object>> {
+        match self {
+            Object::Array (v) => Ok(v),
+            _ => Err (ErrorKind::WrongObjectType.into())
+        }
+    }
+    pub fn as_integer_array(self) -> Result<Vec<i32>> {
+        self.as_array()?.iter()
+            .map(|x| Ok(x.as_integer()?)).collect::<Result<Vec<_>>>()
+    }
+
+    pub fn as_dictionary(self) -> Result<Dictionary> {
         match self {
             Object::Dictionary (dict) => Ok(dict),
             _ => Err (ErrorKind::WrongObjectType.into())
         }
     }
 
-    pub fn unwrap_stream(self) -> Result<Stream> {
+    pub fn as_stream(self) -> Result<Stream> {
         match self {
             Object::Stream (s) => Ok(s),
             _ => Err (ErrorKind::WrongObjectType.into()),
@@ -147,8 +172,8 @@ impl Object {
     }
 
     pub fn parse_from_stream(obj_stream: &Stream, index: u16) -> Result<Object> {
-        let num_objects = obj_stream.dictionary.get("N")?.unwrap_integer()?;
-        let first = obj_stream.dictionary.get("First")?.unwrap_integer()?;
+        let num_objects = obj_stream.dictionary.get("N")?.as_integer()?;
+        let first = obj_stream.dictionary.get("First")?.as_integer()?;
 
         let mut lexer = Lexer::new(&obj_stream.content);
 
@@ -187,7 +212,7 @@ impl Object {
                 lexer.next()?;
 
                 // Get length
-                let length = { dict.get("Length")?.unwrap_integer()? };
+                let length = { dict.get("Length")?.as_integer()? };
                 // Read the stream
                 let mut content = lexer.seek(SeekFrom::Current(length as i64)).to_vec();
                 // Uncompress/decode if there is a filter

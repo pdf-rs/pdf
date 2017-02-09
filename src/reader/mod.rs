@@ -76,7 +76,7 @@ impl PdfReader {
                 Ok(indirect_obj.object)
             }
             XrefEntry::InStream {stream_obj_nr, index} => {
-                let obj_stream = self.read_indirect_object(stream_obj_nr)?.unwrap_stream()?;
+                let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
                 Object::parse_from_stream(&obj_stream, index)
             }
@@ -138,7 +138,7 @@ impl PdfReader {
                         };
                     // Traverse children of node.
                     for kid in kids {
-                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid.clone())?.unwrap_dictionary()?)?;
+                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid.clone())?.as_dictionary()?)?;
                         match result {
                             Some(found_page) => return Ok(Some(found_page)),
                             None => {},
@@ -194,16 +194,16 @@ impl PdfReader {
     }
 
     fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let xref_stream = IndirectObject::parse_from(lexer).chain_err(|| "Reading Xref stream")?.object.unwrap_stream()?;
+        let xref_stream = IndirectObject::parse_from(lexer).chain_err(|| "Reading Xref stream")?.object.as_stream()?;
 
         // Get 'W' as array of integers
-        let width = xref_stream.dictionary.get("W")?.unwrap_integer_array()?;
+        let width = xref_stream.dictionary.get("W")?.clone().as_integer_array()?; // TODO need borrow_as_array etc, or something
         let entry_size = width.iter().fold(0, |x, &y| x + y);
-        let num_entries = xref_stream.dictionary.get("Size")?.unwrap_integer()?;
+        let num_entries = xref_stream.dictionary.get("Size")?.as_integer()?;
 
         let indices: Vec<(i32, i32)> = {
             match xref_stream.dictionary.get("Index") {
-                Ok(obj) => obj.unwrap_integer_array()?,
+                Ok(obj) => obj.borrow_integer_array()?,
                 Err(_) => vec![0, num_entries],
             }.chunks(2).map(|c| (c[0], c[1])).collect()
             // ^^ TODO panics if odd number of elements - how to handle it?
@@ -251,7 +251,7 @@ impl PdfReader {
         }
         // Read trailer
         lexer.next_expect("trailer")?;
-        let trailer = Object::parse_from(lexer)?.unwrap_dictionary()?;
+        let trailer = Object::parse_from(lexer)?.as_dictionary()?;
      
         Ok((sections, trailer))
 
@@ -262,7 +262,7 @@ impl PdfReader {
     /// hybrid ones)
     fn gather_xref(&self) -> Result<XrefTable> {
         let mut lexer = Lexer::new(&self.buf);
-        let num_objects = self.trailer.get("Size")?.unwrap_integer()?;
+        let num_objects = self.trailer.get("Size")?.as_integer()?;
 
         let mut table = XrefTable::new(num_objects as usize);
 
@@ -278,7 +278,7 @@ impl PdfReader {
             }
             // Find position of eventual next xref & trailer
             next_xref_start = trailer.get("Prev")
-                .and_then(|x| Ok(x.unwrap_integer()?)).ok();
+                .and_then(|x| Ok(x.as_integer()?)).ok();
         }
         debug!("XREF TABLE"; "table" => format!("{:?}", table));
         Ok(table)
@@ -297,11 +297,12 @@ impl PdfReader {
 
     /// Read the Root/Catalog object
     fn read_root(&self) -> Result<Dictionary> {
-        self.dereference(self.trailer.get("Root")?.clone())?.unwrap_dictionary()
+        // TODO Shouldn't have to clone here...
+        self.dereference(self.trailer.get("Root")?.clone())?.as_dictionary()
     }
 
     fn read_pages(&self) -> Result<Dictionary> {
-        self.dereference(self.root.get("Pages")?.clone())?.unwrap_dictionary()
+        self.dereference(self.root.get("Pages")?.clone())?.as_dictionary()
     }
 
 }

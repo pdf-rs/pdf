@@ -18,16 +18,10 @@ pub mod reader;
 pub mod repr;
 pub mod err;
 
-// TODO Most immediate plan
-
-// - Implement read_indirect_object for InStream.
-// - Find out how to properly decode FlatDecode filter in Lexer::read_xref_stream. Using `inflate`
-// crate?
-
 // TODO Plan
 
-// * Cross-reference streams
-//  - question: What happens with incremental update?
+// Figure out a good way to dereference (look in reader/mod.rs, read_root())
+//  - maybe Borrow trait?
 // * Fix find_page()
 // * Display the PDF model for debugging
 // * Write back to file - that means keeping track of what has changed
