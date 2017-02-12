@@ -49,8 +49,14 @@ impl PdfReader {
         Ok(pdf_reader)
     }
 
+
+    pub fn get_xref_table(&self) -> &XrefTable {
+        return &self.xref_table;
+    }
+
     /// If `obj` is a Reference: reads the indirect object it refers to
     /// Else: Returns a clone of the object.
+    // TODO: It shouldn't have to clone..
     pub fn dereference(&self, obj: &Object) -> Result<Object> {
         match obj {
             &Object::Reference (ref id) => {
@@ -211,7 +217,6 @@ impl PdfReader {
             next_xref_start = trailer.get("Prev")
                 .and_then(|x| Ok(x.as_integer()?)).ok();
         }
-        debug!("XREF TABLE"; "table" => format!("{:?}", table));
         Ok(table)
 
     }

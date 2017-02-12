@@ -13,6 +13,7 @@ slog-term = "1"
 isatty = "0.1"
 num-traits = "*"
 inflate = "0.1.1"
+ansi_term = "0.9.0"
 
 [lib]
 doctest = false

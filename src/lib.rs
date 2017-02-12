@@ -13,6 +13,7 @@ extern crate isatty;
 extern crate error_chain;
 extern crate num_traits;
 extern crate inflate;
+extern crate ansi_term;
 
 pub mod reader;
 pub mod object;
@@ -21,19 +22,15 @@ pub mod err;
 
 // TODO Plan
 
-// Test more extensively
-// * Display the PDF model for debugging
+// In progress now: Remove use of Slog and just use println instead.
+// * Test more extensively
 // * Write back to file - that means keeping track of what has changed
 
 
-// TODO Thoughts
-
-// Classifying ("tokenizing") mostly happens in reader/mod.rs. Maybe it should be integrated into
-// Lexer...
-
-// Is it possible to store it fully as intermediate repr? What are the pros/cons?
-//  * takes less space
-//  * throws any error only at beginning
+// TODO Future:
+// - Choose to read everything into a high-level intermediate representation for faster access &
+// less memory.
+// - Choose to read directly from file.
 
 // Later there should be an option to read directly from file
 
@@ -51,6 +48,7 @@ mod tests {
     use slog;
     use slog::{DrainExt, Level};
     use {slog_term, slog_stream, isatty, slog_json, slog_scope};
+    use ansi_term::Style;
 
     //#[test]
     fn sequential_read() {
@@ -79,6 +77,15 @@ mod tests {
     }
 
     #[test]
+    fn read_xref() {
+        let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
+        println!("\n          {}\n\n{:?}\n\n",
+                 Style::new().bold().underline().paint("Xref Table"),
+                 reader.get_xref_table()
+                 );
+    }
+
+    #[test]
     fn read_pages() {
         setup_logger();
         let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
@@ -88,10 +95,22 @@ mod tests {
             info!("Reading page {}", i);
             let page = reader.find_page(i).chain_err(|| format!("Get page {}", i)).unwrap_or_else(|e| print_err(e));
             for (& ref name, & ref object) in &page.0 {
-                println!("/{} =\n\n{}\n\n", name, object);
+                let object = reader.dereference(object).chain_err(|| "Dereferencing an object...").unwrap_or_else(|e| print_err(e));
+                match object {
+                    Object::Array (ref arr) => {
+                        for (i, e) in arr.iter().enumerate() {
+                            let e = reader.dereference(e).chain_err(|| "Deref element").unwrap_or_else(|e| print_err(e));
+                            println!(" [{}] = {}\n", i, e);
+                        }
+                    }
+                    _ => {
+                        println!("/{} =\n\n{}\n\n", name, object);
+                    }
+                }
             }
         }
     }
+
 
     // #[test]
     fn read_string() {
