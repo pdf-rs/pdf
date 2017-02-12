@@ -21,7 +21,7 @@ impl XrefEntry {
         match self {
             &XrefEntry::Free {next_obj_nr: _, gen_nr} => gen_nr,
             &XrefEntry::InUse {pos: _, gen_nr} => gen_nr,
-            &XrefEntry::InStream {stream_obj_nr: u32, index: u16} => 0, // TODO I think these always have gen nr 0?
+            &XrefEntry::InStream {stream_obj_nr: _, index: _} => 0, // TODO I think these always have gen nr 0?
         }
     }
 }
@@ -107,39 +107,6 @@ impl XrefSection {
             first_id: first_id,
             entries: Vec::new(),
         }
-    }
-    /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-    pub fn new_from_xref_stream(first_id: i32, num_entries: i32, width: &Vec<i32>, data: &mut &[u8]) -> Result<XrefSection> {
-        let mut entries = Vec::new();
-        for i in 0..num_entries {
-            let _type = XrefSection::read_u64_from_stream(width[0], data);
-            let field1 = XrefSection::read_u64_from_stream(width[1], data);
-            let field2 = XrefSection::read_u64_from_stream(width[2], data);
-
-            let entry =
-            match _type {
-                0 => XrefEntry::Free {next_obj_nr: field1 as u32, gen_nr: field2 as u16},
-                1 => XrefEntry::InUse {pos: field1 as usize, gen_nr: field2 as u16},
-                2 => XrefEntry::InStream {stream_obj_nr: field1 as u32, index: field2 as u16},
-                _ => bail!("Reading xref stream, The first field 'type' is {} - must be 0, 1 or 2", _type),
-            };
-            entries.push(entry);
-        }
-        Ok(XrefSection {
-            first_id: first_id as u32,
-            entries: entries,
-        })
-    }
-    /// Helper to read an integer with a certain amount of bits `width` from stream.
-    fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
-        let mut result = 0;
-        for i in 0..width {
-            let i = width - 1 - i; // (width, 0]
-            let c: u8 = data[0];
-            *data = &data[1..]; // Consume byte
-            result += c as u64 * 256.pow(i as u32);
-        }
-        result
     }
     pub fn add_free_entry(&mut self, next_obj_nr: u32, gen_nr: u16) {
         self.entries.push(XrefEntry::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});

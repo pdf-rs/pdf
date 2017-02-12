@@ -15,14 +15,13 @@ extern crate num_traits;
 extern crate inflate;
 
 pub mod reader;
-pub mod repr;
+pub mod object;
+pub mod xref;
 pub mod err;
 
 // TODO Plan
 
-// Figure out a good way to dereference (look in reader/mod.rs, read_root())
-//  - maybe Borrow trait?
-// * Fix find_page()
+// Test more extensively
 // * Display the PDF model for debugging
 // * Write back to file - that means keeping track of what has changed
 
@@ -44,7 +43,8 @@ mod tests {
     use reader::PdfReader;
     use reader::lexer::Lexer;
     use reader::lexer::StringLexer;
-    use repr::*;
+    use object::*;
+    use xref::*;
     use err::*;
 
     use std;
@@ -86,17 +86,10 @@ mod tests {
         let n = reader.get_num_pages();
         for i in 0..n {
             info!("Reading page {}", i);
-            let page = reader.get_page_contents(i).chain_err(|| format!("Get page {}", i)).unwrap_or_else(|e| print_err(e));
-            /*
-            match page {
-                Object::Dictionary (ref dictionary) => {
-                    for &(ref name, ref object) in dictionary {
-                        println!("Key {}:\n\n{}\n\n", name, object);
-                    }
-                },
-                _ => panic!("Not dicionary"),
+            let page = reader.find_page(i).chain_err(|| format!("Get page {}", i)).unwrap_or_else(|e| print_err(e));
+            for (& ref name, & ref object) in &page.0 {
+                println!("/{} =\n\n{}\n\n", name, object);
             }
-            */
         }
     }
 

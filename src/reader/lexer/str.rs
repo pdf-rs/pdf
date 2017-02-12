@@ -51,10 +51,10 @@ impl<'a> StringLexer<'a> {
                         // A character code must follow. 1-3 numbers.
                         let mut char_code: u8 = 0;
                         let mut octal_digits = Vec::new();
-                        for i in 0..3 {
+                        for _ in 0..3 {
                             let c = self.peek_byte()?;
                             if c >= b'0' && c <= b'9' {
-                                self.next_byte();
+                                self.next_byte()?;
                                 octal_digits.push(c - b'0');
                             } else {
                                 break;

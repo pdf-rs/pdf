@@ -83,7 +83,7 @@ impl<'a> Lexer<'a> {
 
         // Read to past the end of lexeme
         while !self.is_whitespace(pos) && !self.is_delimiter(pos) {
-            let mut new_pos = self.advance_pos(pos, forward)?;
+            let new_pos = self.advance_pos(pos, forward)?;
             if new_pos == pos {
                 break;
             } else {

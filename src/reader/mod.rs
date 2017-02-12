@@ -1,8 +1,10 @@
 pub mod lexer;
+mod parser;
 
-use reader::lexer::StringLexer;
-use repr::*;
+use object::*;
+use xref::*;
 use err::*;
+use reader::parser::Parser;
 
 use self::lexer::Lexer;
 use std::vec::Vec;
@@ -46,21 +48,20 @@ impl PdfReader {
         pdf_reader.pages_root = pdf_reader.read_pages().chain_err(|| "Error reading pages.")?;
         Ok(pdf_reader)
     }
-    /// Consumes the Object, and returns either the same object, or the object pointed to, if `obj`
-    /// is a reference.
-    pub fn dereference(&self, obj: Object) -> Result<Object> {
+
+    /// If `obj` is a Reference: reads the indirect object it refers to
+    /// Else: Returns a clone of the object.
+    pub fn dereference(&self, obj: &Object) -> Result<Object> {
         match obj {
-            Object::Reference (id) => {
-                Ok(
-                    // Recursively dereference...
-                    self.dereference(self.read_indirect_object(id.obj_nr)?)?
-                )
+            &Object::Reference (ref id) => {
+                self.read_indirect_object(id.obj_nr)
             },
             _ => {
-                Ok(obj)
+                Ok(obj.clone())
             }
         }
     }
+
     pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Object> {
         trace!("Look up in xref table"; "obj_nr" => obj_nr);
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
@@ -69,7 +70,7 @@ impl PdfReader {
             XrefEntry::InUse {pos, gen_nr: _} => {
                 let mut lexer = Lexer::new(&self.buf);
                 lexer.seek(SeekFrom::Start(pos as u64));
-                let indirect_obj = IndirectObject::parse_from(&mut lexer)?;
+                let indirect_obj = Parser::indirect_object(&mut lexer)?;
                 if indirect_obj.id.obj_nr != obj_nr {
                     bail!("xref table is wrong: read indirect obj of wrong obj_nr {} != {}", indirect_obj.id.obj_nr, obj_nr);
                 }
@@ -78,7 +79,7 @@ impl PdfReader {
             XrefEntry::InStream {stream_obj_nr, index} => {
                 let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
-                Object::parse_from_stream(&obj_stream, index)
+                Parser::object_from_stream(&obj_stream, index)
             }
         }
     }
@@ -92,17 +93,11 @@ impl PdfReader {
         }
     }
 
-    /// Returns Dictionary, with /Type = Page.
-    /// page_nr must be smaller than `self.get_num_pages()`
-    pub fn get_page_contents(&self, page_nr: i32) -> Result<Dictionary> {
+    /// Find a page looking in the page tree. Return the Object.
+    pub fn find_page(&self, page_nr: i32) -> Result<Dictionary> {
         if page_nr >= self.get_num_pages() {
             return Err(ErrorKind::OutOfBounds.into());
         }
-        let page = self.find_page(page_nr)?;
-        Ok(page)
-    }
-    /// Find a page looking in the page tree. Return the Object.
-    fn find_page(&self, page_nr: i32) -> Result<Dictionary> {
         let result = self.find_page_internal(page_nr, &mut 0, &self.pages_root)?;
         match result {
             Some(page) => Ok(page),
@@ -138,7 +133,7 @@ impl PdfReader {
                         };
                     // Traverse children of node.
                     for kid in kids {
-                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid.clone())?.as_dictionary()?)?;
+                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid)?.as_dictionary()?)?;
                         match result {
                             Some(found_page) => return Ok(Some(found_page)),
                             None => {},
@@ -184,77 +179,13 @@ impl PdfReader {
         if next_word.equals(b"xref") {
             // Read classic xref table
             
-            PdfReader::parse_xref_table_and_trailer(lexer)
+            Parser::xref_table_and_trailer(lexer)
         } else {
             // Read xref stream
 
             lexer.back()?;
-            PdfReader::parse_xref_stream_and_trailer(lexer)
+            Parser::xref_stream_and_trailer(lexer)
         }
-    }
-
-    fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let xref_stream = IndirectObject::parse_from(lexer).chain_err(|| "Reading Xref stream")?.object.as_stream()?;
-
-        // Get 'W' as array of integers
-        let width = xref_stream.dictionary.get("W")?.clone().as_integer_array()?; // TODO need borrow_as_array etc, or something
-        let entry_size = width.iter().fold(0, |x, &y| x + y);
-        let num_entries = xref_stream.dictionary.get("Size")?.as_integer()?;
-
-        let indices: Vec<(i32, i32)> = {
-            match xref_stream.dictionary.get("Index") {
-                Ok(obj) => obj.borrow_integer_array()?,
-                Err(_) => vec![0, num_entries],
-            }.chunks(2).map(|c| (c[0], c[1])).collect()
-            // ^^ TODO panics if odd number of elements - how to handle it?
-        };
-        
-        let (dict, data) = (xref_stream.dictionary, xref_stream.content);
-        
-        let mut data_left = &data[..];
-
-        let mut sections = Vec::new();
-        for (first_id, num_objects) in indices {
-            let section = XrefSection::new_from_xref_stream(first_id, num_entries, &width, &mut data_left)?;
-            sections.push(section);
-        }
-        // debug!("Xref stream"; "Sections" => format!("{:?}", sections));
-
-        // TODO Shouldn't be necessary to clone as we don't use xref_stream anymore.
-        Ok((sections, dict))
-    }
-
-    /// Reads xref table
-    fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let mut sections = Vec::new();
-        
-        // Keep reading subsections until we hit `trailer`
-        while !lexer.peek()?.equals(b"trailer") {
-            let start_id = lexer.next_as::<u32>()?;
-            let num_ids = lexer.next_as::<u32>()?;
-
-            let mut section = XrefSection::new(start_id);
-
-            for _ in 0..num_ids {
-                let w1 = lexer.next()?;
-                let w2 = lexer.next()?;
-                let w3 = lexer.next()?;
-                if w3.equals(b"f") {
-                    section.add_free_entry(w1.to::<u32>()?, w2.to::<u16>()?);
-                } else if w3.equals(b"n") {
-                    section.add_inuse_entry(w1.to::<usize>()?, w2.to::<u16>()?);
-                } else {
-                    bail!(ErrorKind::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.as_string(), expected: "f or n"});
-                }
-            }
-            sections.push(section);
-        }
-        // Read trailer
-        lexer.next_expect("trailer")?;
-        let trailer = Object::parse_from(lexer)?.as_dictionary()?;
-     
-        Ok((sections, trailer))
-
     }
 
     /// Gathers all xref sections in the file to an XrefTable.
@@ -297,12 +228,11 @@ impl PdfReader {
 
     /// Read the Root/Catalog object
     fn read_root(&self) -> Result<Dictionary> {
-        // TODO Shouldn't have to clone here...
-        self.dereference(self.trailer.get("Root")?.clone())?.as_dictionary()
+        self.dereference(self.trailer.get("Root")?)?.as_dictionary()
     }
 
     fn read_pages(&self) -> Result<Dictionary> {
-        self.dereference(self.root.get("Pages")?.clone())?.as_dictionary()
+        self.dereference(self.root.get("Pages")?)?.as_dictionary()
     }
 
 }
