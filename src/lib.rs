@@ -1,14 +1,6 @@
 // #![feature(plugin)]
 // #![plugin(clippy)]
 
-#[macro_use (o, slog_log, slog_trace, slog_debug, slog_info, slog_warn, slog_error)]
-extern crate slog;
-extern crate slog_json;
-#[macro_use]
-extern crate slog_scope;
-extern crate slog_stream;
-extern crate slog_term;
-extern crate isatty;
 #[macro_use]
 extern crate error_chain;
 extern crate num_traits;
@@ -45,14 +37,10 @@ mod tests {
     use err::*;
 
     use std;
-    use slog;
-    use slog::{DrainExt, Level};
-    use {slog_term, slog_stream, isatty, slog_json, slog_scope};
     use ansi_term::Style;
 
     //#[test]
     fn sequential_read() {
-        setup_logger();
         let buf = reader::read_file("edited_example.pdf").chain_err(|| "Cannot read file.").unwrap_or_else(|e| print_err(e));
         let mut lexer = Lexer::new(&buf);
         loop {
@@ -87,12 +75,11 @@ mod tests {
 
     #[test]
     fn read_pages() {
-        setup_logger();
         let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
         for i in 0..n {
-            info!("Reading page {}", i);
+            println!("Reading page {}", i);
             let page = reader.find_page(i).chain_err(|| format!("Get page {}", i)).unwrap_or_else(|e| print_err(e));
             for (& ref name, & ref object) in &page.0 {
                 let object = reader.dereference(object).chain_err(|| "Dereferencing an object...").unwrap_or_else(|e| print_err(e));
@@ -139,20 +126,4 @@ mod tests {
     }
 
 
-    fn setup_logger() {
-        let logger = if isatty::stderr_isatty() {
-            let drain = slog_term::streamer()
-                .sync()
-                .stderr()
-                .full()
-                .use_utc_timestamp()
-                .build();
-            let d = slog::level_filter(Level::Debug, drain);
-            slog::Logger::root(d.fuse(), o![])
-        } else {
-            slog::Logger::root(slog_stream::stream(std::io::stderr(), slog_json::default()).fuse(),
-                               o![])
-        };
-        slog_scope::set_global_logger(logger);
-    }
 }

@@ -18,16 +18,15 @@ pub struct Parser {}
 // Note: part of `impl` is in xref_stream module.
 impl Parser {
     pub fn object_from_stream(obj_stream: &Stream, index: u16) -> Result<Object> {
-        let num_objects = obj_stream.dictionary.get("N")?.as_integer()?;
+        let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
         let first = obj_stream.dictionary.get("First")?.as_integer()?;
 
         let mut lexer = Lexer::new(&obj_stream.content);
 
         // Just find the byte offset of the one we are interested in
-        let mut obj_nr = 0;
         let mut byte_offset = 0;
         for _ in 0..index+1 {
-            obj_nr = lexer.next()?.to::<u32>()?;
+            lexer.next()?.to::<u32>()?; /* obj_nr. Might want to check whether it's the rigth object. */
             byte_offset = lexer.next()?.to::<u16>()?;
         }
 
@@ -167,7 +166,6 @@ impl Parser {
 
 
     pub fn indirect_object(lexer: &mut Lexer) -> Result<IndirectObject> {
-        trace!("-> read_indirect_object_from");
         let obj_nr = lexer.next()?.to::<u32>()?;
         let gen_nr = lexer.next()?.to::<u16>()?;
         lexer.next_expect("obj")?;
@@ -176,7 +174,6 @@ impl Parser {
 
         lexer.next_expect("endobj")?;
 
-        trace!("- read_indirect_object_from");
         Ok(IndirectObject {
             id: ObjectId {obj_nr: obj_nr, gen_nr: gen_nr},
             object: obj,
@@ -191,7 +188,6 @@ impl Parser {
 
         // Get 'W' as array of integers
         let width = xref_stream.dictionary.get("W")?.borrow_integer_array()?;
-        let entry_size = width.iter().fold(0, |x, &y| x + y);
         let num_entries = xref_stream.dictionary.get("Size")?.as_integer()?;
 
         let indices: Vec<(i32, i32)> = {
@@ -208,7 +204,7 @@ impl Parser {
 
         let mut sections = Vec::new();
         for (first_id, num_objects) in indices {
-            let section = Parser::xref_section_from_stream(first_id, num_entries, &width, &mut data_left)?;
+            let section = Parser::xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
             sections.push(section);
         }
         // debug!("Xref stream"; "Sections" => format!("{:?}", sections));

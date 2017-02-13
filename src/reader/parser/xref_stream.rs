@@ -1,8 +1,6 @@
 use reader::parser::Parser;
 
-use object::*;
 use xref::*;
-use reader::lexer::*;
 use err::*;
 use num_traits::PrimInt;
 

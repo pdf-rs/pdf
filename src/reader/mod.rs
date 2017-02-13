@@ -69,7 +69,7 @@ impl PdfReader {
     }
 
     pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Object> {
-        trace!("Look up in xref table"; "obj_nr" => obj_nr);
+        println!("Look up in xref table... obj_nr = {}", obj_nr);
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
             XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
@@ -225,9 +225,7 @@ impl PdfReader {
     /// Needs to be called before any other functions on the PdfReader
     /// Reads the last trailer in the file
     fn read_last_trailer(&mut self) -> Result<Dictionary> {
-        trace!("-> read_last_trailer");
         let (_, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
-        trace!("_ read_last_trailer");
         Ok(trailer)
     }
 
