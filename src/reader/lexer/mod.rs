@@ -13,11 +13,11 @@ pub use self::str::StringLexer;
 #[allow(dead_code)]
 pub struct Lexer<'a> {
     pos: usize,
-    buf: &'a Vec<u8>,
+    buf: &'a [u8],
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(buf: &'a Vec<u8>) -> Lexer<'a> {
+    pub fn new(buf: &'a [u8]) -> Lexer<'a> {
         Lexer {
             pos: 0,
             buf: buf,
@@ -139,8 +139,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Returns the substr between the old and new positions
-    pub fn seek(&mut self, new_pos: SeekFrom) -> Substr<'a> {
+
+    // Just a helper function for set_pos, set_pos_from_end and offset_pos.
+    fn seek(&mut self, new_pos: SeekFrom) -> Substr<'a> {
         let wanted_pos;
         match new_pos {
             SeekFrom::Start(offset) => wanted_pos = offset as usize,
@@ -155,6 +156,19 @@ impl<'a> Lexer<'a> {
         };
         self.pos = wanted_pos; // TODO restrict
         self.new_substr(range)
+    }
+
+    /// Returns the substr between the old and new positions
+    pub fn set_pos(&mut self, new_pos: usize) -> Substr<'a> {
+        self.seek(SeekFrom::Start(new_pos as u64))
+    }
+    /// Returns the substr between the old and new positions
+    pub fn set_pos_from_end(&mut self, new_pos: usize) -> Substr<'a> {
+        self.seek(SeekFrom::End(new_pos as i64))
+    }
+    /// Returns the substr between the old and new positions
+    pub fn offset_pos(&mut self, offset: usize) -> Substr<'a> {
+        self.seek(SeekFrom::Current(offset as i64))
     }
 
     /// Moves pos to start of next line. Returns the skipped-over substring.

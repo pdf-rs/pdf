@@ -2,6 +2,7 @@
 //
 
 mod xref_stream;
+mod content;
 
 use object::*;
 use xref::*;
@@ -30,7 +31,7 @@ impl Parser {
             byte_offset = lexer.next()?.to::<u16>()?;
         }
 
-        lexer.seek(SeekFrom::Start (first as u64 + byte_offset as u64));
+        lexer.set_pos(first as usize + byte_offset as usize);
         Parser::object(&mut lexer)
     }
 
@@ -60,7 +61,7 @@ impl Parser {
                 // Get length
                 let length = { dict.get("Length")?.as_integer()? };
                 // Read the stream
-                let mut content = lexer.seek(SeekFrom::Current(length as i64)).to_vec();
+                let mut content = lexer.offset_pos(length as usize).to_vec();
                 // Uncompress/decode if there is a filter
                 match dict.get("Filter") {
                     Ok(&Object::Name (ref s)) => {
@@ -102,12 +103,12 @@ impl Parser {
                     })
                 } else {
                     // We are probably in an array of numbers - it's not a reference anyway
-                    lexer.seek(SeekFrom::Start(pos_bk as u64)); // (roll back the lexer first)
+                    lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
                     Object::Integer(first_lexeme.to::<i32>()?)
                 }
             } else {
                 // It is but a number
-                lexer.seek(SeekFrom::Start(pos_bk as u64)); // (roll back the lexer first)
+                lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
                 Object::Integer(first_lexeme.to::<i32>()?)
             }
         } else if first_lexeme.is_real_number() {
@@ -145,7 +146,7 @@ impl Parser {
                 string_lexer.get_offset() as i64
             };
             // Advance to end of string
-            lexer.seek(SeekFrom::Current (bytes_traversed));
+            lexer.offset_pos(bytes_traversed as usize);
 
             Object::String (string)
         } else if first_lexeme.equals(b"<") {

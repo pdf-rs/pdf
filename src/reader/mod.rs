@@ -75,7 +75,7 @@ impl PdfReader {
             XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
             XrefEntry::InUse {pos, gen_nr: _} => {
                 let mut lexer = Lexer::new(&self.buf);
-                lexer.seek(SeekFrom::Start(pos as u64));
+                lexer.set_pos(pos as usize);
                 let indirect_obj = Parser::indirect_object(&mut lexer)?;
                 if indirect_obj.id.obj_nr != obj_nr {
                     bail!("xref table is wrong: read indirect obj of wrong obj_nr {} != {}", indirect_obj.id.obj_nr, obj_nr);
@@ -166,13 +166,13 @@ impl PdfReader {
 
     fn lexer_at(&self, pos: usize) -> Lexer {
         let mut lexer = Lexer::new(&self.buf);
-        lexer.seek(SeekFrom::Start (pos as u64));
+        lexer.set_pos(pos as usize);
         lexer
     }
 
     fn read_startxref(&mut self) -> Result<usize> {
         let mut lexer = Lexer::new(&self.buf);
-        lexer.seek(SeekFrom::End(0));
+        lexer.set_pos_from_end(0);
         let _ = lexer.seek_substr_back(b"startxref")?;
         Ok(lexer.next_as::<usize>()?)
     }
@@ -207,7 +207,7 @@ impl PdfReader {
         
         while let Some(xref_start) = next_xref_start {
             // Jump to next `trailer`
-            lexer.seek(SeekFrom::Start(xref_start as u64));
+            lexer.set_pos(xref_start as usize);
             // Add sections
             let (sections, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(xref_start as usize))?;
             for section in sections {

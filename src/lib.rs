@@ -11,6 +11,7 @@ pub mod reader;
 pub mod object;
 pub mod xref;
 pub mod err;
+pub mod content;
 
 // TODO Plan
 
