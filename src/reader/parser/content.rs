@@ -1,33 +1,43 @@
 use reader::parser::Parser;
 use reader::lexer::Lexer;
 
-use xref::*;
 use err::*;
 use content::*;
 use std::mem::swap;
 
 impl Parser {
 
-    fn content_stream(data: &[u8]) -> Result<()> {
-        let mut content = Content {operations: Vec::new()};
+    pub fn content_stream(data: &[u8]) -> Result<Content> {
         let mut lexer = Lexer::new(data);
+
+        let mut content = Content {operations: Vec::new()};
         let mut buffer = Vec::new();
+
         loop {
             let backup_pos = lexer.get_pos();
             let obj = Parser::object(&mut lexer);
             match obj {
-                Ok(obj) => buffer.push(obj),
-                Err(_) => {
+                Ok(obj) => {
+                    // Operand
+                    buffer.push(obj)
+                }
+                Err(e) => {
+                    // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
-                    // If it's not an object, treat it as an operator
-                    let operator = lexer.next()?.as_string(); // TODO will fail because of ' and "
+                    let operator = lexer.next()?.as_string(); // TODO will this work as expected?
                     let mut operation = Operation::new(operator, Vec::new());
                     // Give operands to operation and empty buffer.
                     swap(&mut buffer, &mut operation.operands);
-
+                    content.operations.push(operation.clone());
+                    println!("      Parsed operation: {}", operation);
                 }
             }
+            if lexer.get_pos() > data.len() {
+                bail!("Read past boundary of given contents.");
+            } else if lexer.get_pos() == data.len() {
+                break;
+            }
         }
-        Ok(())
+        Ok(content)
     }
 }

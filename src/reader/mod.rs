@@ -1,5 +1,5 @@
 pub mod lexer;
-mod parser;
+pub mod parser;
 
 use object::*;
 use xref::*;
@@ -69,7 +69,6 @@ impl PdfReader {
     }
 
     pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Object> {
-        println!("Look up in xref table... obj_nr = {}", obj_nr);
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
             XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),

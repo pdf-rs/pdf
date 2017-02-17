@@ -26,7 +26,7 @@ impl<'a> StringLexer<'a> {
     }
     /// Get offset/pos from start of string
     pub fn get_offset(&self) -> usize {
-        self.pos + 1
+        self.pos
     }
 
     pub fn next_lexeme(&mut self) -> Result<Option<u8>> {
@@ -96,7 +96,7 @@ impl<'a> StringLexer<'a> {
     fn next_byte(&mut self) -> Result<u8> {
         if self.pos < self.buf.len() - 1 {
             self.pos += 1;
-            Ok(self.buf[self.pos])
+            Ok(self.buf[self.pos-1])
         } else {
             bail!(ErrorKind::EOF);
         }
@@ -133,3 +133,19 @@ impl<'a, 'b> Iterator for StringLexerIter<'a, 'b> {
         }
     }
 }
+
+/* not done..
+
+
+#[cfg(test)]
+mod tests {
+    use reader::lexer::StringLexer;
+    #[test]
+    fn tests() {
+        let vec = b"a\\nb\\rc\\td\\(f/)\\\\hei)";
+        let lexer = StringLexer::new(vec);
+        let lexemes: Vec<Result<u8>> = lexer.iter().collect();
+    }
+}
+
+*/

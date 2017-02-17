@@ -15,7 +15,17 @@ pub mod content;
 
 // TODO Plan
 
-// In progress now: Remove use of Slog and just use println instead.
+// * String lexer: Excludes first letter..
+// * Content parser: `[(\()]TJ` becomes:
+// Operation: [ ()
+// Operation: ( ()
+// Operation: \ ()
+// Operation: ( ()
+// Operation: ) ()
+// Operation: ] ()
+// Operation: TJ ()
+//  --> It fails to recognize the object [(\()]
+
 // * Test more extensively
 // * Write back to file - that means keeping track of what has changed
 
@@ -33,11 +43,13 @@ mod tests {
     use reader::PdfReader;
     use reader::lexer::Lexer;
     use reader::lexer::StringLexer;
+    use reader::parser::Parser;
     use object::*;
     use xref::*;
     use err::*;
 
     use std;
+    use std::str;
     use ansi_term::Style;
 
     //#[test]
@@ -65,7 +77,7 @@ mod tests {
         */
     }
 
-    #[test]
+    // #[test]
     fn read_xref() {
         let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
         println!("\n          {}\n\n{:?}\n\n",
@@ -86,9 +98,16 @@ mod tests {
                 let object = reader.dereference(object).chain_err(|| "Dereferencing an object...").unwrap_or_else(|e| print_err(e));
                 match object {
                     Object::Array (ref arr) => {
+                        println!("/{} =\n\n", name);
                         for (i, e) in arr.iter().enumerate() {
                             let e = reader.dereference(e).chain_err(|| "Deref element").unwrap_or_else(|e| print_err(e));
                             println!(" [{}] = {}\n", i, e);
+                            if name == "Contents" {
+                                // Decode the contents into operators & operands
+                                let stream = e.as_stream().unwrap_or_else(|e| print_err(e));
+                                let contents = Parser::content_stream(&stream.content).unwrap_or_else(|e| print_err(e));
+                                println!(" Contents: {}", contents);
+                            }
                         }
                     }
                     _ => {
@@ -110,8 +129,19 @@ mod tests {
         }
     }
 
+    // #[test]
+    fn read_string2() {
+        let buf = b"[(Problem)-375(Set)-375(2,)-375(P)31(art)-374(1)]";
+        println!("Test: {}", str::from_utf8(buf).unwrap());
+        let mut lexer = Lexer::new(buf);
+
+        let mut lexer = Lexer::new(buf);
+        let obj = Parser::object(&mut lexer).unwrap_or_else(|e| print_err(e));
+        println!("Object: {}", obj);
+    }
+
     /// Prints the error if it is an Error
-    fn print_err<T>(err: Error) -> T {
+    pub fn print_err<T>(err: Error) -> T {
         println!("\n === \nError: {}", err);
         for e in err.iter().skip(1) {
             println!("  caused by: {}", e);
@@ -125,6 +155,5 @@ mod tests {
         println!(" === \n");
         panic!("Exiting");
     }
-
 
 }

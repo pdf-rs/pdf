@@ -103,7 +103,7 @@ impl<'a> Lexer<'a> {
     /// Just a helper for next_word.
     fn advance_pos(&self, pos: usize, forward: bool) -> Result<usize> {
         if forward {
-            if pos < self.buf.len() - 1 {
+            if pos < self.buf.len() {
                 Ok(pos + 1)
             } else {
                 bail!(ErrorKind::EOF);

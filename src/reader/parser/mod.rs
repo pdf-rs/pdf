@@ -39,7 +39,6 @@ impl Parser {
         let first_lexeme = lexer.next()?;
 
         let obj = if first_lexeme.equals(b"<<") {
-
             let mut dict = Dictionary::new();
             loop {
                 // Expect a Name (and Object) or the '>>' delimiter
@@ -123,7 +122,7 @@ impl Parser {
             // Array
             loop {
                 let element = Parser::object(lexer)?;
-                array.push(element);
+                array.push(element.clone());
 
                 // Exit if closing delimiter
                 if lexer.peek()?.equals(b"]") {
