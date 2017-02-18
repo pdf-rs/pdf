@@ -241,7 +241,11 @@ impl<'a> Lexer<'a> {
         if self.pos >= self.buf.len() {
             self.pos = self.buf.len() - 1;
         }
-        self.new_substr(start_pos..self.pos)
+        if start_pos < self.buf.len() {
+            self.new_substr(start_pos..self.pos)
+        } else {
+            self.new_substr(0..0)
+        }
     }
 
     pub fn get_remaining_slice(&self) -> &[u8] {

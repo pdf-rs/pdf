@@ -29,7 +29,6 @@ impl Parser {
                     // Give operands to operation and empty buffer.
                     swap(&mut buffer, &mut operation.operands);
                     content.operations.push(operation.clone());
-                    println!("      Parsed operation: {}", operation);
                 }
             }
             if lexer.get_pos() > data.len() {

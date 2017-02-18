@@ -38,6 +38,6 @@ impl Display for Operation {
         for ref operand in &self.operands {
             write!(f, "{}, ", operand)?;
         }
-        write!(f, ") ,  ")
+        write!(f, ")\n")
     }
 }
