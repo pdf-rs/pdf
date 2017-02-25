@@ -1,18 +1,17 @@
-use reader::parser::Parser;
-
+use reader::PdfReader;
 use xref::*;
 use err::*;
 use num_traits::PrimInt;
 
 // Just the part of Parser which reads xref sections from xref stream.
-impl Parser {
+impl PdfReader {
     /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-    pub fn xref_section_from_stream(first_id: i32, num_entries: i32, width: &Vec<i32>, data: &mut &[u8]) -> Result<XrefSection> {
+    pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &Vec<i32>, data: &mut &[u8]) -> Result<XrefSection> {
         let mut entries = Vec::new();
         for _ in 0..num_entries {
-            let _type = Parser::read_u64_from_stream(width[0], data);
-            let field1 = Parser::read_u64_from_stream(width[1], data);
-            let field2 = Parser::read_u64_from_stream(width[2], data);
+            let _type = PdfReader::read_u64_from_stream(width[0], data);
+            let field1 = PdfReader::read_u64_from_stream(width[1], data);
+            let field2 = PdfReader::read_u64_from_stream(width[2], data);
 
             let entry =
             match _type {

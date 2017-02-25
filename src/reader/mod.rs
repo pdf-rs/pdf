@@ -4,7 +4,6 @@ pub mod parser;
 use object::*;
 use xref::*;
 use err::*;
-use reader::parser::Parser;
 
 use self::lexer::Lexer;
 use std::vec::Vec;
@@ -26,15 +25,18 @@ pub struct PdfReader {
 
 
 impl PdfReader {
-    pub fn new(path: &str) -> Result<PdfReader> {
+    pub fn from_path(path: &str) -> Result<PdfReader> {
         let buf = read_file(path)?;
+        PdfReader::new(buf)
+    }
+    pub fn new(data: Vec<u8>) -> Result<PdfReader> {
         let mut pdf_reader = PdfReader {
             startxref: 0,
             xref_table: XrefTable::new(0),
             root: Dictionary::new(),
             trailer: Dictionary::new(),
             pages_root: Dictionary::new(),
-            buf: buf,
+            buf: data,
         };
         let startxref = pdf_reader.read_startxref()?;
         pdf_reader.startxref = startxref;
@@ -75,7 +77,7 @@ impl PdfReader {
             XrefEntry::InUse {pos, gen_nr: _} => {
                 let mut lexer = Lexer::new(&self.buf);
                 lexer.set_pos(pos as usize);
-                let indirect_obj = Parser::indirect_object(&mut lexer)?;
+                let indirect_obj = self.parse_indirect_object(&mut lexer)?;
                 if indirect_obj.id.obj_nr != obj_nr {
                     bail!("xref table is wrong: read indirect obj of wrong obj_nr {} != {}", indirect_obj.id.obj_nr, obj_nr);
                 }
@@ -84,7 +86,7 @@ impl PdfReader {
             XrefEntry::InStream {stream_obj_nr, index} => {
                 let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
-                Parser::object_from_stream(&obj_stream, index)
+                self.parse_object_from_stream(&obj_stream, index)
             }
         }
     }
@@ -179,17 +181,17 @@ impl PdfReader {
     /// Reads xref and trailer at some byte position `start`.
     /// `start` should point to the `xref` keyword of an xref table, or to the start of an xref
     /// stream.
-    fn read_xref_and_trailer_at(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+    fn read_xref_and_trailer_at(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
         let next_word = lexer.next()?;
         if next_word.equals(b"xref") {
             // Read classic xref table
             
-            Parser::xref_table_and_trailer(lexer)
+            self.parse_xref_table_and_trailer(lexer)
         } else {
             // Read xref stream
 
             lexer.back()?;
-            Parser::xref_stream_and_trailer(lexer)
+            self.parse_xref_stream_and_trailer(lexer)
         }
     }
 
@@ -208,7 +210,7 @@ impl PdfReader {
             // Jump to next `trailer`
             lexer.set_pos(xref_start as usize);
             // Add sections
-            let (sections, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(xref_start as usize))?;
+            let (sections, trailer) = self.read_xref_and_trailer_at(&mut self.lexer_at(xref_start as usize))?;
             for section in sections {
                 table.add_entries_from(section);
             }
@@ -224,7 +226,7 @@ impl PdfReader {
     /// Needs to be called before any other functions on the PdfReader
     /// Reads the last trailer in the file
     fn read_last_trailer(&mut self) -> Result<Dictionary> {
-        let (_, trailer) = PdfReader::read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
+        let (_, trailer) = self.read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
         Ok(trailer)
     }
 

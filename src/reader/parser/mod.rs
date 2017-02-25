@@ -2,8 +2,8 @@
 //
 
 mod xref_stream;
-mod content;
 
+use reader::PdfReader;
 use object::*;
 use xref::*;
 use reader::lexer::*;
@@ -13,12 +13,9 @@ use inflate::InflateStream;
 use std::io::SeekFrom;
 
 
-pub struct Parser {}
-
-
 // Note: part of `impl` is in xref_stream module.
-impl Parser {
-    pub fn object_from_stream(obj_stream: &Stream, index: u16) -> Result<Object> {
+impl PdfReader {
+    pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<Object> {
         let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
         let first = obj_stream.dictionary.get("First")?.as_integer()?;
 
@@ -32,10 +29,10 @@ impl Parser {
         }
 
         lexer.set_pos(first as usize + byte_offset as usize);
-        Parser::object(&mut lexer)
+        self.parse_object(&mut lexer)
     }
 
-    pub fn object(lexer: &mut Lexer) -> Result<Object> {
+    pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Object> {
         let first_lexeme = lexer.next()?;
 
         let obj = if first_lexeme.equals(b"<<") {
@@ -45,7 +42,7 @@ impl Parser {
                 let delimiter = lexer.next()?;
                 if delimiter.equals(b"/") {
                     let key = lexer.next()?.as_string();
-                    let obj = Parser::object(lexer)?;
+                    let obj = self.parse_object(lexer)?;
                     dict.set(key, obj);
                 } else if delimiter.equals(b">>") {
                     break;
@@ -57,6 +54,7 @@ impl Parser {
             if lexer.peek()?.equals(b"stream") {
                 lexer.next()?;
 
+                println!("DEBUG.. Dictionary length = {}", dict.get("Length")?);
                 // Get length
                 let length = { dict.get("Length")?.as_integer()? };
                 // Read the stream
@@ -65,7 +63,7 @@ impl Parser {
                 match dict.get("Filter") {
                     Ok(&Object::Name (ref s)) => {
                         if *s == "FlateDecode".to_string() {
-                            content = Parser::flat_decode(&content);
+                            content = PdfReader::flat_decode(&content);
                         } else {
                             bail!("NOT IMPLEMENTED: Filter type {}", *s);
                         }
@@ -121,7 +119,7 @@ impl Parser {
             let mut array = Vec::new();
             // Array
             loop {
-                let element = Parser::object(lexer)?;
+                let element = self.parse_object(lexer)?;
                 array.push(element.clone());
 
                 // Exit if closing delimiter
@@ -165,12 +163,12 @@ impl Parser {
     }
 
 
-    pub fn indirect_object(lexer: &mut Lexer) -> Result<IndirectObject> {
+    pub fn parse_indirect_object(&self, lexer: &mut Lexer) -> Result<IndirectObject> {
         let obj_nr = lexer.next()?.to::<u32>()?;
         let gen_nr = lexer.next()?.to::<u16>()?;
         lexer.next_expect("obj")?;
 
-        let obj = Parser::object(lexer)?;
+        let obj = self.parse_object(lexer)?;
 
         lexer.next_expect("endobj")?;
 
@@ -183,8 +181,8 @@ impl Parser {
 
 
     /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-    pub fn xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let xref_stream = Parser::indirect_object(lexer).chain_err(|| "Reading Xref stream")?.object.as_stream()?;
+    pub fn parse_xref_stream_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+        let xref_stream = self.parse_indirect_object(lexer).chain_err(|| "Reading Xref stream")?.object.as_stream()?;
 
         // Get 'W' as array of integers
         let width = xref_stream.dictionary.get("W")?.borrow_integer_array()?;
@@ -204,7 +202,7 @@ impl Parser {
 
         let mut sections = Vec::new();
         for (first_id, num_objects) in indices {
-            let section = Parser::xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
+            let section = PdfReader::parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
             sections.push(section);
         }
         // debug!("Xref stream"; "Sections" => format!("{:?}", sections));
@@ -213,7 +211,7 @@ impl Parser {
     }
 
     /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-    pub fn xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+    pub fn parse_xref_table_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
         let mut sections = Vec::new();
         
         // Keep reading subsections until we hit `trailer`
@@ -239,7 +237,7 @@ impl Parser {
         }
         // Read trailer
         lexer.next_expect("trailer")?;
-        let trailer = Parser::object(lexer)?.as_dictionary()?;
+        let trailer = self.parse_object(lexer)?.as_dictionary()?;
      
         Ok((sections, trailer))
     }

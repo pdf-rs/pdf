@@ -7,24 +7,29 @@ extern crate num_traits;
 extern crate inflate;
 extern crate ansi_term;
 
-pub mod reader;
-pub mod object;
-pub mod xref;
-pub mod err;
-pub mod content;
+mod reader;
+pub use reader::*;
+
+mod object;
+pub use object::*;
+
+mod xref;
+pub use xref::*;
+
+mod content;
+pub use content::*;
+
+mod err;
+pub use err::*;
 
 // TODO Plan
 
-// * String lexer: Excludes first letter..
-// * Content parser: `[(\()]TJ` becomes:
-// Operation: [ ()
-// Operation: ( ()
-// Operation: \ ()
-// Operation: ( ()
-// Operation: ) ()
-// Operation: ] ()
-// Operation: TJ ()
-//  --> It fails to recognize the object [(\()]
+
+// * Object::as_.. and Object::borrow_..:
+//   - would make sense to automatically dereference. But how do we dereference if we don't know
+//   PdfReader!
+//   - Should every object have a reference to the PdfReader? No.
+//   - Should I implement as_.. and borrow_.. for PdfReader instead? Possibly.
 
 // * Test more extensively
 // * Write back to file - that means keeping track of what has changed
@@ -43,7 +48,6 @@ mod tests {
     use reader::PdfReader;
     use reader::lexer::Lexer;
     use reader::lexer::StringLexer;
-    use reader::parser::Parser;
     use object::*;
     use xref::*;
     use err::*;
@@ -51,6 +55,7 @@ mod tests {
     use std;
     use std::str;
     use ansi_term::Style;
+    use content::Content;
 
     //#[test]
     fn sequential_read() {
@@ -79,7 +84,8 @@ mod tests {
 
     // #[test]
     fn read_xref() {
-        let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
+
+        let reader = PdfReader::from_path("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
         println!("\n          {}\n\n{:?}\n\n",
                  Style::new().bold().underline().paint("Xref Table"),
                  reader.get_xref_table()
@@ -88,7 +94,7 @@ mod tests {
 
     #[test]
     fn read_pages() {
-        let reader = PdfReader::new("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
+        let reader = PdfReader::from_path("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
         for i in 0..n {
@@ -105,7 +111,7 @@ mod tests {
                             if name == "Contents" {
                                 // Decode the contents into operators & operands
                                 let stream = e.as_stream().unwrap_or_else(|e| print_err(e));
-                                let contents = Parser::content_stream(&stream.content).unwrap_or_else(|e| print_err(e));
+                                let contents = reader.parse_content(&stream.content).unwrap_or_else(|e| print_err(e));
                                 println!(" Contents: {}", contents);
                             }
                         }
@@ -135,8 +141,8 @@ mod tests {
         println!("Test: {}", str::from_utf8(buf).unwrap());
         let mut lexer = Lexer::new(buf);
 
-        let mut lexer = Lexer::new(buf);
-        let obj = Parser::object(&mut lexer).unwrap_or_else(|e| print_err(e));
+        let reader = PdfReader::new(buf.to_vec()).unwrap_or_else(|e| print_err(e));
+        let obj = reader.parse_object(&mut lexer).unwrap_or_else(|e| print_err(e));
         println!("Object: {}", obj);
     }
 
