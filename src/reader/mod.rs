@@ -1,5 +1,6 @@
 pub mod lexer;
-pub mod parser;
+mod parse_object;
+mod parse_xref;
 
 use object::*;
 use xref::*;

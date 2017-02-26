@@ -28,7 +28,10 @@ pub struct Content {
 }
 
 impl PdfReader {
-
+    // TODO it would be optimal to let this be a static method of `Content`, but it
+    // requires parsing an object. The reason that is a dynamic method of `PdfReader` is because it
+    // needs dereferencing in case of Stream object. However, I don't think a Content Stream should
+    // contain that..
     pub fn parse_content(&self, data: &[u8]) -> Result<Content> {
         let mut lexer = Lexer::new(data);
 

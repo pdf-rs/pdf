@@ -1,8 +1,6 @@
 // Considering whether to impl Object and IndirectObject here.
 //
 
-mod xref_stream;
-
 use reader::PdfReader;
 use object::*;
 use xref::*;
@@ -10,10 +8,8 @@ use reader::lexer::*;
 use err::*;
 
 use inflate::InflateStream;
-use std::io::SeekFrom;
 
 
-// Note: part of `impl` is in xref_stream module.
 impl PdfReader {
     pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<Object> {
         let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
@@ -56,7 +52,7 @@ impl PdfReader {
 
                 println!("DEBUG.. Dictionary length = {}", dict.get("Length")?);
                 // Get length
-                let length = { dict.get("Length")?.as_integer()? };
+                let length = self.dereference(dict.get("Length")?)?.as_integer()?;
                 // Read the stream
                 let mut content = lexer.offset_pos(length as usize).to_vec();
                 // Uncompress/decode if there is a filter
@@ -176,70 +172,6 @@ impl PdfReader {
             id: ObjectId {obj_nr: obj_nr, gen_nr: gen_nr},
             object: obj,
         })
-    }
-
-
-
-    /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-    pub fn parse_xref_stream_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let xref_stream = self.parse_indirect_object(lexer).chain_err(|| "Reading Xref stream")?.object.as_stream()?;
-
-        // Get 'W' as array of integers
-        let width = xref_stream.dictionary.get("W")?.borrow_integer_array()?;
-        let num_entries = xref_stream.dictionary.get("Size")?.as_integer()?;
-
-        let indices: Vec<(i32, i32)> = {
-            match xref_stream.dictionary.get("Index") {
-                Ok(obj) => obj.borrow_integer_array()?,
-                Err(_) => vec![0, num_entries],
-            }.chunks(2).map(|c| (c[0], c[1])).collect()
-            // ^^ TODO panics if odd number of elements - how to handle it?
-        };
-        
-        let (dict, data) = (xref_stream.dictionary, xref_stream.content);
-        
-        let mut data_left = &data[..];
-
-        let mut sections = Vec::new();
-        for (first_id, num_objects) in indices {
-            let section = PdfReader::parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
-            sections.push(section);
-        }
-        // debug!("Xref stream"; "Sections" => format!("{:?}", sections));
-
-        Ok((sections, dict))
-    }
-
-    /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-    pub fn parse_xref_table_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let mut sections = Vec::new();
-        
-        // Keep reading subsections until we hit `trailer`
-        while !lexer.peek()?.equals(b"trailer") {
-            let start_id = lexer.next_as::<u32>()?;
-            let num_ids = lexer.next_as::<u32>()?;
-
-            let mut section = XrefSection::new(start_id);
-
-            for _ in 0..num_ids {
-                let w1 = lexer.next()?;
-                let w2 = lexer.next()?;
-                let w3 = lexer.next()?;
-                if w3.equals(b"f") {
-                    section.add_free_entry(w1.to::<u32>()?, w2.to::<u16>()?);
-                } else if w3.equals(b"n") {
-                    section.add_inuse_entry(w1.to::<usize>()?, w2.to::<u16>()?);
-                } else {
-                    bail!(ErrorKind::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.as_string(), expected: "f or n"});
-                }
-            }
-            sections.push(section);
-        }
-        // Read trailer
-        lexer.next_expect("trailer")?;
-        let trailer = self.parse_object(lexer)?.as_dictionary()?;
-     
-        Ok((sections, trailer))
     }
 
     // TODO move out to decoding/encoding module
