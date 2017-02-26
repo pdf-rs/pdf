@@ -1,9 +1,13 @@
 pub mod lexer;
 mod parse_object;
 mod parse_xref;
+mod parse_content;
+mod object;
+mod xref;
 
-use object::*;
-use xref::*;
+pub use self::object::*;
+pub use self::xref::*;
+
 use err::*;
 
 use self::lexer::Lexer;
@@ -13,7 +17,7 @@ use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
 
-pub struct PdfReader {
+pub struct Reader {
     // Contents
     startxref: usize,
     xref_table: XrefTable,
@@ -25,13 +29,13 @@ pub struct PdfReader {
 }
 
 
-impl PdfReader {
-    pub fn from_path(path: &str) -> Result<PdfReader> {
+impl Reader {
+    pub fn from_path(path: &str) -> Result<Reader> {
         let buf = read_file(path)?;
-        PdfReader::new(buf)
+        Reader::new(buf)
     }
-    pub fn new(data: Vec<u8>) -> Result<PdfReader> {
-        let mut pdf_reader = PdfReader {
+    pub fn new(data: Vec<u8>) -> Result<Reader> {
+        let mut pdf_reader = Reader {
             startxref: 0,
             xref_table: XrefTable::new(0),
             root: Dictionary::new(),
@@ -224,7 +228,7 @@ impl PdfReader {
     }
 
 
-    /// Needs to be called before any other functions on the PdfReader
+    /// Needs to be called before any other functions on the Reader
     /// Reads the last trailer in the file
     fn read_last_trailer(&mut self) -> Result<Dictionary> {
         let (_, trailer) = self.read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;

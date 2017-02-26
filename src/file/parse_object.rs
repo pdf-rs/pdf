@@ -1,16 +1,16 @@
 // Considering whether to impl Object and IndirectObject here.
 //
 
-use reader::PdfReader;
-use object::*;
-use xref::*;
-use reader::lexer::*;
+use file::Reader;
+use file::object::*;
+use file::xref::*;
+use file::lexer::*;
 use err::*;
 
 use inflate::InflateStream;
 
 
-impl PdfReader {
+impl Reader {
     pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<Object> {
         let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
         let first = obj_stream.dictionary.get("First")?.as_integer()?;
@@ -50,7 +50,6 @@ impl PdfReader {
             if lexer.peek()?.equals(b"stream") {
                 lexer.next()?;
 
-                println!("DEBUG.. Dictionary length = {}", dict.get("Length")?);
                 // Get length
                 let length = self.dereference(dict.get("Length")?)?.as_integer()?;
                 // Read the stream
@@ -59,7 +58,7 @@ impl PdfReader {
                 match dict.get("Filter") {
                     Ok(&Object::Name (ref s)) => {
                         if *s == "FlateDecode".to_string() {
-                            content = PdfReader::flat_decode(&content);
+                            content = Reader::flat_decode(&content);
                         } else {
                             bail!("NOT IMPLEMENTED: Filter type {}", *s);
                         }

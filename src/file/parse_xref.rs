@@ -1,19 +1,19 @@
-use reader::PdfReader;
-use xref::*;
+use file::Reader;
+use file::xref::*;
+use file::object::*;
 use err::*;
-use object::*;
 use num_traits::PrimInt;
-use reader::lexer::Lexer;
+use file::lexer::Lexer;
 
 // Just the part of Parser which reads xref sections from xref stream.
-impl PdfReader {
+impl Reader {
     /// Takes `&mut &[u8]` so that it can "consume" data as it reads
     pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &Vec<i32>, data: &mut &[u8]) -> Result<XrefSection> {
         let mut entries = Vec::new();
         for _ in 0..num_entries {
-            let _type = PdfReader::read_u64_from_stream(width[0], data);
-            let field1 = PdfReader::read_u64_from_stream(width[1], data);
-            let field2 = PdfReader::read_u64_from_stream(width[2], data);
+            let _type = Reader::read_u64_from_stream(width[0], data);
+            let field1 = Reader::read_u64_from_stream(width[1], data);
+            let field2 = Reader::read_u64_from_stream(width[2], data);
 
             let entry =
             match _type {
@@ -64,7 +64,7 @@ impl PdfReader {
 
         let mut sections = Vec::new();
         for (first_id, num_objects) in indices {
-            let section = PdfReader::parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
+            let section = Reader::parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
             sections.push(section);
         }
         // debug!("Xref stream"; "Sections" => format!("{:?}", sections));

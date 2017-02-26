@@ -7,19 +7,12 @@ extern crate num_traits;
 extern crate inflate;
 extern crate ansi_term;
 
-mod reader;
-pub use reader::*;
-
-mod object;
-pub use object::*;
-
-mod xref;
-pub use xref::*;
-
-mod content;
-pub use content::*;
-
+mod file;
 mod err;
+mod content;
+
+pub use content::*;
+pub use file::*;
 pub use err::*;
 
 // TODO Plan
@@ -27,9 +20,9 @@ pub use err::*;
 
 // * Object::as_.. and Object::borrow_..:
 //   - would make sense to automatically dereference. But how do we dereference if we don't know
-//   PdfReader!
-//   - Should every object have a reference to the PdfReader? No.
-//   - Should I implement as_.. and borrow_.. for PdfReader instead? Possibly.
+//   Reader!
+//   - Should every object have a reference to the Reader? No.
+//   - Should I implement as_.. and borrow_.. for Reader instead? Possibly.
 
 // * Test more extensively
 // * Write back to file - that means keeping track of what has changed
@@ -44,22 +37,21 @@ pub use err::*;
 
 #[cfg(test)]
 mod tests {
-    use reader;
-    use reader::PdfReader;
-    use reader::lexer::Lexer;
-    use reader::lexer::StringLexer;
-    use object::*;
-    use xref::*;
+    use file;
+    use file::Reader;
+    use file::lexer::Lexer;
+    use file::lexer::StringLexer;
+    use file::*;
+    use file::*;
     use err::*;
 
     use std;
     use std::str;
     use ansi_term::Style;
-    use content::Content;
 
     //#[test]
     fn sequential_read() {
-        let buf = reader::read_file("edited_example.pdf").chain_err(|| "Cannot read file.").unwrap_or_else(|e| print_err(e));
+        let buf = file::read_file("edited_example.pdf").chain_err(|| "Cannot read file.").unwrap_or_else(|e| print_err(e));
         let mut lexer = Lexer::new(&buf);
         loop {
             let pos = lexer.get_pos();
@@ -85,7 +77,7 @@ mod tests {
     // #[test]
     fn read_xref() {
 
-        let reader = PdfReader::from_path("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
+        let reader = Reader::from_path("la.pdf").chain_err(|| "Error creating Reader.").unwrap_or_else(|e| print_err(e));
         println!("\n          {}\n\n{:?}\n\n",
                  Style::new().bold().underline().paint("Xref Table"),
                  reader.get_xref_table()
@@ -94,7 +86,7 @@ mod tests {
 
     #[test]
     fn read_pages() {
-        let reader = PdfReader::from_path("la.pdf").chain_err(|| "Error creating PdfReader.").unwrap_or_else(|e| print_err(e));
+        let reader = Reader::from_path("la.pdf").chain_err(|| "Error creating Reader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
         for i in 0..n {
@@ -141,7 +133,7 @@ mod tests {
         println!("Test: {}", str::from_utf8(buf).unwrap());
         let mut lexer = Lexer::new(buf);
 
-        let reader = PdfReader::new(buf.to_vec()).unwrap_or_else(|e| print_err(e));
+        let reader = Reader::new(buf.to_vec()).unwrap_or_else(|e| print_err(e));
         let obj = reader.parse_object(&mut lexer).unwrap_or_else(|e| print_err(e));
         println!("Object: {}", obj);
     }
