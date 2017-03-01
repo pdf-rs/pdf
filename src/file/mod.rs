@@ -16,6 +16,7 @@ use std::io::SeekFrom;
 use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
+use std::iter::Iterator;
 
 pub struct Reader {
     // Contents
@@ -56,6 +57,12 @@ impl Reader {
         Ok(pdf_reader)
     }
 
+    pub fn objects<'a>(&'a self) -> ObjectIter<'a> {
+        ObjectIter {
+            reader: &self,
+            obj_nr_iter: self.xref_table.iter(),
+        }
+    }
 
     pub fn get_xref_table(&self) -> &XrefTable {
         return &self.xref_table;
@@ -245,6 +252,27 @@ impl Reader {
     }
 
 }
+
+
+pub struct ObjectIter<'a> {
+    reader: &'a Reader,
+    obj_nr_iter: ObjectNrIter<'a>,
+}
+
+impl<'a> Iterator for ObjectIter<'a> {
+    type Item = Result<(ObjectId, Object)>;
+    fn next(&mut self) -> Option<Result<(ObjectId, Object)>> {
+        match self.obj_nr_iter.next() {
+            Some(obj_nr) => {
+                let id = ObjectId {obj_nr: obj_nr, gen_nr: 0}; // TODO Get the actual gen nr
+                Some(self.reader.read_indirect_object(obj_nr).map(|obj| (id, obj)))
+             }
+            None => None,
+        }
+    }
+}
+
+
 
 pub fn read_file(path: &str) -> Result<Vec<u8>> {
     let mut file  = File::open(path)?;

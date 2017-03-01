@@ -38,9 +38,14 @@ impl<'a> Lexer<'a> {
         Ok(lexeme)
     }
 
-    /// Look at the next lexeme.
+    /// Look at the next lexeme. Will return empty substr if the next character is EOF.
     pub fn peek(&self) -> Result<Substr<'a>> {
-        Ok(self.next_word(true)?.0)
+        match self.next_word(true) {
+            Ok((substr, _)) => Ok(substr),
+            Err(Error(ErrorKind::EOF,_)) => Ok(self.new_substr(self.pos..self.pos)),
+            Err(e) => Err(e),
+        }
+
     }
     pub fn peek_back(&self) -> Result<Substr<'a>> {
         Ok(self.next_word(false)?.0)

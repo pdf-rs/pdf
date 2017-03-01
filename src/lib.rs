@@ -7,23 +7,20 @@ extern crate num_traits;
 extern crate inflate;
 extern crate ansi_term;
 
-mod file;
+mod doc;
+pub mod file;
 mod err;
 mod content;
 
+pub use doc::Document;
+pub use doc::object::Object;
 pub use content::*;
-pub use file::*;
 pub use err::*;
 
 // TODO Plan
 
-
-// * Object::as_.. and Object::borrow_..:
-//   - would make sense to automatically dereference. But how do we dereference if we don't know
-//   Reader!
-//   - Should every object have a reference to the Reader? No.
-//   - Should I implement as_.. and borrow_.. for Reader instead? Possibly.
-
+// * WrongObjectType to contain `expected` str
+// * Object::type_str(&self) -> &str
 // * Test more extensively
 // * Write back to file - that means keeping track of what has changed
 
@@ -35,8 +32,25 @@ pub use err::*;
 
 // Later there should be an option to read directly from file
 
+/// Prints the error if it is an Error
+pub fn print_err<T>(err: Error) -> T {
+    println!("\n === \nError: {}", err);
+    for e in err.iter().skip(1) {
+        println!("  caused by: {}", e);
+    }
+    println!(" === \n");
+
+    if let Some(backtrace) = err.backtrace() {
+        println!("backtrace: {:?}", backtrace);
+    }
+
+    println!(" === \n");
+    panic!("Exiting");
+}
+
 #[cfg(test)]
 mod tests {
+    use ::print_err;
     use file;
     use file::Reader;
     use file::lexer::Lexer;
@@ -84,8 +98,8 @@ mod tests {
                  );
     }
 
-    #[test]
-    fn read_pages() {
+    //#[test]
+    fn reader_pages() {
         let reader = Reader::from_path("la.pdf").chain_err(|| "Error creating Reader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
@@ -138,20 +152,5 @@ mod tests {
         println!("Object: {}", obj);
     }
 
-    /// Prints the error if it is an Error
-    pub fn print_err<T>(err: Error) -> T {
-        println!("\n === \nError: {}", err);
-        for e in err.iter().skip(1) {
-            println!("  caused by: {}", e);
-        }
-        println!(" === \n");
-
-        if let Some(backtrace) = err.backtrace() {
-            println!("backtrace: {:?}", backtrace);
-        }
-
-        println!(" === \n");
-        panic!("Exiting");
-    }
 
 }

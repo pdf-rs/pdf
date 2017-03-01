@@ -40,10 +40,15 @@ pub struct Stream {
     pub content: Vec<u8>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ObjectId {
     pub obj_nr: u32,
     pub gen_nr: u16,
+}
+impl Display for ObjectId {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "obj_id({} {})", self.obj_nr, self.gen_nr)
+    }
 }
 
 impl Dictionary {
@@ -88,6 +93,14 @@ impl Object {
             &Object::Integer (n) => Ok(n),
             _ => {
                 // Err (ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
+                Err (ErrorKind::WrongObjectType.into())
+            }
+        }
+    }
+    pub fn as_reference(&self) -> Result<ObjectId> {
+        match self {
+            &Object::Reference (id) => Ok(id),
+            _ => {
                 Err (ErrorKind::WrongObjectType.into())
             }
         }
