@@ -19,8 +19,9 @@ pub use err::*;
 
 // TODO Plan
 
-// * WrongObjectType to contain `expected` str
-// * Object::type_str(&self) -> &str
+// * Write more doc-lines
+// * get_dictionary etc in Dictionary?
+// * to_ instead of as_?
 // * Test more extensively
 // * Write back to file - that means keeping track of what has changed
 

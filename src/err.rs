@@ -50,9 +50,9 @@ error_chain! {
             description("Tried to dereference free object.")
             display("Tried to dereference free object nr {}.", obj_nr)
         }
-        WrongObjectType {
+        WrongObjectType {expected: &'static str, found: &'static str} {
             description("Function called on object of wrong type.")
-            display("Function called on object of wrong type.")
+            display("Expected {}, found {}.", expected, found)
         }
         /// Should be chained after WrongObjectType.
         ExpectedType {expected: &'static str} {

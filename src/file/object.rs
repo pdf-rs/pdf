@@ -93,7 +93,7 @@ impl Object {
             &Object::Integer (n) => Ok(n),
             _ => {
                 // Err (ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
-                Err (ErrorKind::WrongObjectType.into())
+                Err (ErrorKind::WrongObjectType {expected: "Integer", found: self.type_str()}.into())
             }
         }
     }
@@ -101,14 +101,14 @@ impl Object {
         match self {
             &Object::Reference (id) => Ok(id),
             _ => {
-                Err (ErrorKind::WrongObjectType.into())
+                Err (ErrorKind::WrongObjectType {expected: "Reference", found: self.type_str()}.into())
             }
         }
     }
     pub fn borrow_array(&self) -> Result<&Vec<Object>> {
         match self {
             &Object::Array (ref v) => Ok(v),
-            _ => Err (ErrorKind::WrongObjectType.into())
+            _ => Err (ErrorKind::WrongObjectType {expected: "Array", found: self.type_str()}.into())
         }
     }
     pub fn borrow_integer_array(&self) -> Result<Vec<i32>> {
@@ -119,21 +119,21 @@ impl Object {
     pub fn borrow_dictionary(&self) -> Result<&Dictionary> {
         match self {
             &Object::Dictionary (ref dict) => Ok(dict),
-            _ => Err (ErrorKind::WrongObjectType.into())
+            _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary", found: self.type_str()}.into())
         }
     }
 
     pub fn borrow_stream(&self) -> Result<&Stream> {
         match self {
             &Object::Stream (ref s) => Ok(s),
-            _ => Err (ErrorKind::WrongObjectType.into()),
+            _ => Err (ErrorKind::WrongObjectType {expected: "Stream", found: self.type_str()}.into()),
         }
     }
 
     pub fn as_array(self) -> Result<Vec<Object>> {
         match self {
             Object::Array (v) => Ok(v),
-            _ => Err (ErrorKind::WrongObjectType.into())
+            _ => Err (ErrorKind::WrongObjectType {expected: "Array", found: self.type_str()}.into())
         }
     }
     pub fn as_integer_array(self) -> Result<Vec<i32>> {
@@ -144,14 +144,30 @@ impl Object {
     pub fn as_dictionary(self) -> Result<Dictionary> {
         match self {
             Object::Dictionary (dict) => Ok(dict),
-            _ => Err (ErrorKind::WrongObjectType.into())
+            _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary", found: self.type_str()}.into())
         }
     }
 
     pub fn as_stream(self) -> Result<Stream> {
         match self {
             Object::Stream (s) => Ok(s),
-            _ => Err (ErrorKind::WrongObjectType.into()),
+            _ => Err (ErrorKind::WrongObjectType {expected: "Stream", found: self.type_str()}.into()),
+        }
+    }
+
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            &Object::Integer (_) => "Integer",
+            &Object::RealNumber (_) => "RealNumber",
+            &Object::Boolean (_) => "Boolean",
+            &Object::String (_) => "String",
+            &Object::HexString (_) => "HexString",
+            &Object::Stream (_) => "Stream",
+            &Object::Dictionary (_) => "Dictionary",
+            &Object::Array (_) => "Array",
+            &Object::Reference (_) => "Reference",
+            &Object::Name (_) => "Name",
+            &Object::Null => "Null",
         }
     }
 
