@@ -1,7 +1,11 @@
-//! Test
-pub mod object;
+//! Abstraction over the `file` module.
+//! Stores objects in high-level representation.
+//! Introduces wrappers for all kinds of PDF Objects (`file::Object`), for easy PDF reference
+//! following.
 
-use self::object::{Object, Dictionary};
+mod object;
+
+pub use self::object::*;
 use file;
 use file::{ObjectId, Stream, Reader};
 use err::*;
@@ -33,6 +37,8 @@ impl Document {
         Ok(doc)
     }
 
+
+    /// Does not follow references.
     pub fn get_object<'a>(&'a self, id: ObjectId) -> Result<Object<'a>> {
         let obj: Result<&file::Object> = self.objects.get(&id).ok_or("Error getting object".into());
         Ok(
@@ -40,6 +46,7 @@ impl Document {
         )
     }
 
+    /// Get number of pages in the PDF document. Reads the `/Pages` dictionary.
     pub fn get_num_pages(&self) -> Result<i32> {
         Ok(self.get_object(self.root_id)?.as_dictionary()?
             .get("Pages")?.as_dictionary()?
@@ -47,6 +54,7 @@ impl Document {
         )
     }
 
+    /// Traverses the Pages/Page tree to find the page `n`. `n=0` is the first page.
     pub fn get_page(&self, n: i32) -> Result<Dictionary> {
         if n >= self.get_num_pages()? {
             return Err(ErrorKind::OutOfBounds.into());
@@ -106,8 +114,8 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
-    use ::Document;
-    use ::print_err;
+    use doc::Document;
+    use print_err;
 
     static FILE: &'static str = "la.pdf";
 

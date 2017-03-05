@@ -1,3 +1,4 @@
+//! Basic functionality for parsing a PDF file.
 pub mod lexer;
 mod parse_object;
 mod parse_xref;

@@ -11,6 +11,7 @@ use inflate::InflateStream;
 
 
 impl Reader {
+    /// Parser an Object from an Object Stream at index `index`.
     pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<Object> {
         let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
         let first = obj_stream.dictionary.get("First")?.as_integer()?;
@@ -28,6 +29,7 @@ impl Reader {
         self.parse_object(&mut lexer)
     }
 
+    /// Parses an Object starting at the current position of `lexer`.
     pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Object> {
         let first_lexeme = lexer.next()?;
 

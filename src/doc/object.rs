@@ -8,7 +8,7 @@ use std::ops::Index;
 // my_obj.as_integer() will dereference if needed.
 
 
-/// `Object` wraps a `file::Object` together with a reference to `Document`.
+/// Wrapper for `file::Object`.
 pub struct Object<'a> {
     obj: &'a file::Object,
     doc: &'a Document,
@@ -22,6 +22,10 @@ impl<'a> Object<'a> {
             obj: obj,
             doc: doc,
         }
+    }
+    /// Returns the wrapped Object
+    pub fn inner(&self) -> &file::Object {
+        self.obj
     }
     /// Try to convert to Integer type. Recursively dereference references in the attempt.
     pub fn as_integer(&self) -> Result<i32> {
@@ -38,6 +42,21 @@ impl<'a> Object<'a> {
             &file::Object::Dictionary (ref dict) => Ok(Dictionary {dict: dict, doc: &self.doc}),
             &file::Object::Reference (id) => self.doc.get_object(id)?.as_dictionary(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary or Reference", found: self.obj.type_str()}.into()),
+        }
+    }
+
+    /// Try to convert to Stream type. Recursively dereference references in the attempt.
+    pub fn as_stream(&self) -> Result<Stream<'a>> {
+        match self.obj {
+            &file::Object::Stream (ref stream) => {
+                Ok(Stream {
+                    dict: Dictionary {dict: &stream.dictionary, doc: &self.doc},
+                    content: &stream.content,
+                    doc: &self.doc
+                })
+            }
+            &file::Object::Reference (id) => self.doc.get_object(id)?.as_stream(),
+            _ => Err (ErrorKind::WrongObjectType {expected: "Stream or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
@@ -80,7 +99,17 @@ impl<'a> Dictionary<'a> {
     }
 }
 
+/// Wraps `file::Stream`.
+// 
+#[derive(Clone)]
+pub struct Stream<'a> {
+    pub dict: Dictionary<'a>,
+    pub content: &'a Vec<u8>,
+    doc: &'a Document,
+}
+
 /// Wraps `file::Array`.
+#[derive(Clone)]
 pub struct Array<'a> {
     array: &'a Vec<file::Object>,
     doc: &'a Document,

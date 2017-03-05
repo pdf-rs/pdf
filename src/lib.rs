@@ -7,13 +7,11 @@ extern crate num_traits;
 extern crate inflate;
 extern crate ansi_term;
 
-mod doc;
+pub mod doc;
 pub mod file;
 mod err;
 mod content;
 
-pub use doc::Document;
-pub use doc::object::Object;
 pub use content::*;
 pub use err::*;
 
