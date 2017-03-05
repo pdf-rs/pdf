@@ -55,14 +55,14 @@ mod tests {
     use file::lexer::Lexer;
     use file::lexer::StringLexer;
     use file::*;
-    use file::*;
     use err::*;
+    use Content;
 
-    use std;
     use std::str;
     use ansi_term::Style;
 
     //#[test]
+    #[allow(dead_code)]
     fn sequential_read() {
         let buf = file::read_file("edited_example.pdf").chain_err(|| "Cannot read file.").unwrap_or_else(|e| print_err(e));
         let mut lexer = Lexer::new(&buf);
@@ -88,6 +88,7 @@ mod tests {
     }
 
     // #[test]
+    #[allow(dead_code)]
     fn read_xref() {
 
         let reader = Reader::from_path("la.pdf").chain_err(|| "Error creating Reader.").unwrap_or_else(|e| print_err(e));
@@ -98,7 +99,8 @@ mod tests {
     }
 
     //#[test]
-    fn reader_pages() {
+    #[allow(dead_code)]
+    fn read_pages() {
         let reader = Reader::from_path("la.pdf").chain_err(|| "Error creating Reader.").unwrap_or_else(|e| print_err(e));
 
         let n = reader.get_num_pages();
@@ -116,7 +118,7 @@ mod tests {
                             if name == "Contents" {
                                 // Decode the contents into operators & operands
                                 let stream = e.as_stream().unwrap_or_else(|e| print_err(e));
-                                let contents = reader.parse_content(&stream.content).unwrap_or_else(|e| print_err(e));
+                                let contents = Content::parse_from(&stream.content).unwrap_or_else(|e| print_err(e));
                                 println!(" Contents: {}", contents);
                             }
                         }
@@ -131,6 +133,7 @@ mod tests {
 
 
     // #[test]
+    #[allow(dead_code)]
     fn read_string() {
         let s: &[u8] = "(\\2670\\331\\346\\nZ\\356\\215n\\273\\264\\350d \\013t\\2670\\331\\346\\nZ\\356\\215n\\273\\264\\350d\n \\013t\\\n)".as_bytes();
         let mut lexer = StringLexer::new(s);
@@ -141,6 +144,7 @@ mod tests {
     }
 
     // #[test]
+    #[allow(dead_code)]
     fn read_string2() {
         let buf = b"[(Problem)-375(Set)-375(2,)-375(P)31(art)-374(1)]";
         println!("Test: {}", str::from_utf8(buf).unwrap());

@@ -7,7 +7,7 @@ mod object;
 
 pub use self::object::*;
 use file;
-use file::{ObjectId, Stream, Reader};
+use file::{ObjectId, Reader};
 use err::*;
 use std::collections::HashMap;
 
@@ -121,13 +121,13 @@ mod tests {
 
     #[test]
     fn construct() {
-        let doc = Document::from_path(FILE).unwrap_or_else(|e| print_err(e));
+        let _ = Document::from_path(FILE).unwrap_or_else(|e| print_err(e));
     }
     #[test]
     fn pages() {
         let doc = Document::from_path(FILE).unwrap_or_else(|e| print_err(e));
         for n in 0..doc.get_num_pages().unwrap_or_else(|e| print_err(e)) {
-            let page = doc.get_page(n).unwrap_or_else(|e| print_err(e));
+            let _ = doc.get_page(n).unwrap_or_else(|e| print_err(e));
         }
     }
 }

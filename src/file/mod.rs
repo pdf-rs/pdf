@@ -2,7 +2,6 @@
 pub mod lexer;
 mod parse_object;
 mod parse_xref;
-mod parse_content;
 mod object;
 mod xref;
 

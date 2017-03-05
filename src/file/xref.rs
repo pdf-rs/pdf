@@ -1,7 +1,6 @@
 use err::*;
 use std;
 use std::fmt::{Debug, Formatter};
-use num_traits::PrimInt;
 
 ///////////////////////////
 // Cross-reference table //

@@ -3,7 +3,6 @@
 
 use file::Reader;
 use file::object::*;
-use file::xref::*;
 use file::lexer::*;
 use err::*;
 
@@ -31,6 +30,19 @@ impl Reader {
 
     /// Parses an Object starting at the current position of `lexer`.
     pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Object> {
+        Reader::parse_object_internal(lexer, Some(&self))
+    }
+    /// Parses an Objec starting at the current position of `lexer`. "As is" here means that it
+    /// will not follow references when reading the "/Length" of a Stream - but rather return an
+    /// `Error`.
+    pub fn parse_object_as_is(lexer: &mut Lexer) -> Result<Object> {
+        Reader::parse_object_internal(lexer, None)
+    }
+
+    /// The reason for this is to support two modes of parsing: with and without `&self`. `&self`
+    /// is only needed for following references, then especially considering that the "/Length"
+    /// entry of a Stream Dictionary may be a Reference.
+    fn parse_object_internal(lexer: &mut Lexer, reader: Option<&Reader>) -> Result<Object> {
         let first_lexeme = lexer.next()?;
 
         let obj = if first_lexeme.equals(b"<<") {
@@ -40,7 +52,7 @@ impl Reader {
                 let delimiter = lexer.next()?;
                 if delimiter.equals(b"/") {
                     let key = lexer.next()?.as_string();
-                    let obj = self.parse_object(lexer)?;
+                    let obj = Reader::parse_object_internal(lexer, reader)?;
                     dict.set(key, obj);
                 } else if delimiter.equals(b">>") {
                     break;
@@ -53,7 +65,10 @@ impl Reader {
                 lexer.next()?;
 
                 // Get length
-                let length = self.dereference(dict.get("Length")?)?.as_integer()?;
+                let length = match reader {
+                    Some(reader) => reader.dereference(dict.get("Length")?)?.as_integer()?,
+                    None => dict.get("Length")?.as_integer()?,
+                };
                 // Read the stream
                 let mut content = lexer.offset_pos(length as usize).to_vec();
                 // Uncompress/decode if there is a filter
@@ -116,7 +131,7 @@ impl Reader {
             let mut array = Vec::new();
             // Array
             loop {
-                let element = self.parse_object(lexer)?;
+                let element = Reader::parse_object_internal(lexer, reader)?;
                 array.push(element.clone());
 
                 // Exit if closing delimiter
@@ -158,6 +173,9 @@ impl Reader {
 
         Ok(obj)
     }
+    /// Parses an Object starting at the current position of `lexer`. Almost as
+    /// `Reader::parse_object`, but this function does not take `Reader`, at the expense that it
+    /// cannot dereference 
 
 
     pub fn parse_indirect_object(&self, lexer: &mut Lexer) -> Result<IndirectObject> {

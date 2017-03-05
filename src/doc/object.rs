@@ -1,7 +1,6 @@
 use doc::Document;
 use file;
 use err::*;
-use std::ops::Index;
 
 // Want to wrap file::Object together with Document, so that we may do dereferencing.
 // e.g.
@@ -100,13 +99,19 @@ impl<'a> Dictionary<'a> {
 }
 
 /// Wraps `file::Stream`.
-// 
 #[derive(Clone)]
 pub struct Stream<'a> {
     pub dict: Dictionary<'a>,
     pub content: &'a Vec<u8>,
     doc: &'a Document,
 }
+
+/* TODO
+impl<'a> Stream<'a> {
+    ///
+    pub fn parse_content()
+}
+*/
 
 /// Wraps `file::Array`.
 #[derive(Clone)]
