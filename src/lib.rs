@@ -15,16 +15,6 @@ mod content;
 pub use content::*;
 pub use err::*;
 
-// TODO
-
-// * Write tests for `Lexer`
-// * Lexer::next - Iterator? - What about using Option instead of Result?
-// * get_dictionary etc in Dictionary?
-// * `file::Dictionary`: hide the member and make interface for it?
-
-
-// TODO Future:
-// - Choose to read directly from file.
 
 /// Prints the error if it is an Error
 pub fn print_err<T>(err: Error) -> T {
