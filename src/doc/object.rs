@@ -7,7 +7,7 @@ use err::*;
 // my_obj.as_integer() will dereference if needed.
 
 
-/// Wrapper for `file::Object`.
+/// Wraps `file::Object`.
 pub struct Object<'a> {
     obj: &'a file::Object,
     doc: &'a Document,
@@ -28,51 +28,51 @@ impl<'a> Object<'a> {
     }
     /// Try to convert to Integer type. Recursively dereference references in the attempt.
     pub fn as_integer(&self) -> Result<i32> {
-        match self.obj {
-            &file::Object::Integer (n) => Ok(n),
-            &file::Object::Reference (id) => self.doc.get_object(id)?.as_integer(),
+        match *self.obj {
+            file::Object::Integer (n) => Ok(n),
+            file::Object::Reference (id) => self.doc.get_object(id)?.as_integer(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Integer or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
     /// Try to convert to Dictionary type. Recursively dereference references in the attempt.
     pub fn as_dictionary(&self) -> Result<Dictionary<'a>> {
-        match self.obj {
-            &file::Object::Dictionary (ref dict) => Ok(Dictionary {dict: dict, doc: &self.doc}),
-            &file::Object::Reference (id) => self.doc.get_object(id)?.as_dictionary(),
+        match *self.obj {
+            file::Object::Dictionary (ref dict) => Ok(Dictionary {dict: dict, doc: self.doc}),
+            file::Object::Reference (id) => self.doc.get_object(id)?.as_dictionary(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
     /// Try to convert to Stream type. Recursively dereference references in the attempt.
     pub fn as_stream(&self) -> Result<Stream<'a>> {
-        match self.obj {
-            &file::Object::Stream (ref stream) => {
+        match *self.obj {
+            file::Object::Stream (ref stream) => {
                 Ok(Stream {
-                    dict: Dictionary {dict: &stream.dictionary, doc: &self.doc},
+                    dict: Dictionary {dict: &stream.dictionary, doc: self.doc},
                     content: &stream.content,
-                    doc: &self.doc
+                    doc: self.doc
                 })
             }
-            &file::Object::Reference (id) => self.doc.get_object(id)?.as_stream(),
+            file::Object::Reference (id) => self.doc.get_object(id)?.as_stream(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Stream or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
     /// Try to convert to Array type. Recursively dereference references in the attempt.
     pub fn as_array(&self) -> Result<Array<'a>> {
-        match self.obj {
-            &file::Object::Array (ref array) => Ok(Array {array: array, doc: &self.doc}),
-            &file::Object::Reference (id) => self.doc.get_object(id)?.as_array(),
+        match *self.obj {
+            file::Object::Array (ref array) => Ok(Array {array: array, doc: self.doc}),
+            file::Object::Reference (id) => self.doc.get_object(id)?.as_array(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Array or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
     /// Try to convert to Name type. Recursively dereference references in the attempt.
     pub fn as_name(&self) -> Result<String> {
-        match self.obj {
-            &file::Object::Name(ref s) => Ok(s.clone()),
-            &file::Object::Reference(id) => self.doc.get_object(id)?.as_name(),
+        match *self.obj {
+            file::Object::Name(ref s) => Ok(s.clone()),
+            file::Object::Reference(id) => self.doc.get_object(id)?.as_name(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Name or Reference", found: self.obj.type_str()}.into()),
         }
     }
@@ -124,10 +124,13 @@ impl<'a> Array<'a> {
     pub fn len(&self) -> usize {
         self.array.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.array.len() == 0
+    }
     pub fn get(&self, index: usize) -> Object<'a> {
         Object {
             obj: &self.array[index],
-            doc: &self.doc,
+            doc: self.doc,
         }
     }
 

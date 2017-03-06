@@ -8,7 +8,7 @@ use file::lexer::Lexer;
 // Just the part of Parser which reads xref sections from xref stream.
 impl Reader {
     /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-    pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &Vec<i32>, data: &mut &[u8]) -> Result<XrefSection> {
+    pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XrefSection> {
         let mut entries = Vec::new();
         for _ in 0..num_entries {
             let _type = Reader::read_u64_from_stream(width[0], data);
@@ -44,15 +44,15 @@ impl Reader {
 
     /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
     pub fn parse_xref_stream_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
-        let xref_stream = self.parse_indirect_object(lexer).chain_err(|| "Reading Xref stream")?.object.as_stream()?;
+        let xref_stream = self.parse_indirect_object(lexer).chain_err(|| "Reading Xref stream")?.object.into_stream()?;
 
         // Get 'W' as array of integers
-        let width = xref_stream.dictionary.get("W")?.borrow_integer_array()?;
+        let width = xref_stream.dictionary.get("W")?.as_integer_array()?;
         let num_entries = xref_stream.dictionary.get("Size")?.as_integer()?;
 
         let indices: Vec<(i32, i32)> = {
             match xref_stream.dictionary.get("Index") {
-                Ok(obj) => obj.borrow_integer_array()?,
+                Ok(obj) => obj.as_integer_array()?,
                 Err(_) => vec![0, num_entries],
             }.chunks(2).map(|c| (c[0], c[1])).collect()
             // ^^ TODO panics if odd number of elements - how to handle it?
@@ -100,7 +100,7 @@ impl Reader {
         }
         // Read trailer
         lexer.next_expect("trailer")?;
-        let trailer = self.parse_object(lexer)?.as_dictionary()?;
+        let trailer = self.parse_object(lexer)?.into_dictionary()?;
      
         Ok((sections, trailer))
     }

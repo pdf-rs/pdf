@@ -1,7 +1,4 @@
-//! Abstraction over the `file` module.
-//! Stores objects in high-level representation.
-//! Introduces wrappers for all kinds of PDF Objects (`file::Object`), for easy PDF reference
-//! following.
+//! Abstraction over the `file` module. Stores objects in high-level representation. Introduces wrappers for all kinds of PDF Objects (`file::Object`), for easy PDF reference following.
 
 mod object;
 
@@ -11,9 +8,7 @@ use file::{ObjectId, Reader};
 use err::*;
 use std::collections::HashMap;
 
-/// `Document` keeps all objects of the PDf file stored in a high-level representation. It ships
-/// object wrappers that have the same name as those in the `file` module. These all borrow
-/// `Document` to be able to automatically dereference References.
+/// `Document` keeps all objects of the PDf file stored in a high-level representation.
 
 pub struct Document {
     objects: HashMap<ObjectId, file::Object>,
@@ -39,10 +34,10 @@ impl Document {
 
 
     /// Does not follow references.
-    pub fn get_object<'a>(&'a self, id: ObjectId) -> Result<Object<'a>> {
-        let obj: Result<&file::Object> = self.objects.get(&id).ok_or("Error getting object".into());
+    pub fn get_object(&self, id: ObjectId) -> Result<Object> {
+        let obj: Result<&file::Object> = self.objects.get(&id).ok_or_else(|| "Error getting object".into());
         Ok(
-            Object::new(obj?, &self)
+            Object::new(obj?, self)
         )
     }
 
@@ -77,7 +72,7 @@ impl Document {
         }
 
         let node_type: String = node.get("Type")?.as_name()?;
-        if node_type == "Pages".to_string() { // Intermediate node
+        if node_type == "Pages" { // Intermediate node
             // Number of leaf nodes (pages) in this subtree
             let count = node.get("Count")?.as_integer()?;
 
@@ -85,19 +80,18 @@ impl Document {
             if *progress + count > page_nr {
                 let kids = node.get("Kids")?.as_array()?;
                 // Traverse children of node.
-                for kid in kids.into_iter() {
+                for kid in &kids {
                     let next_node: Dictionary = kid.as_dictionary()?;
                     let result = self.find_page(page_nr, progress, next_node)?;
-                    match result {
-                        Some(found_page) => return Ok(Some(found_page)),
-                        None => {},
+                    if let Some(found_page) = result {
+                        return Ok(Some(found_page));
                     };
                 }
                 Ok(None)
             } else {
                 Ok(None)
             }
-        } else if node_type == "Page".to_string() { // Leaf node
+        } else if node_type == "Page" { // Leaf node
             if page_nr == *progress {
                 Ok(Some(node))
             } else {

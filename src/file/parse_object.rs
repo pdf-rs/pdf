@@ -30,7 +30,7 @@ impl Reader {
 
     /// Parses an Object starting at the current position of `lexer`.
     pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Object> {
-        Reader::parse_object_internal(lexer, Some(&self))
+        Reader::parse_object_internal(lexer, Some(self))
     }
     /// Parses an Objec starting at the current position of `lexer`. "As is" here means that it
     /// will not follow references when reading the "/Length" of a Stream - but rather return an
@@ -46,7 +46,7 @@ impl Reader {
         let first_lexeme = lexer.next()?;
 
         let obj = if first_lexeme.equals(b"<<") {
-            let mut dict = Dictionary::new();
+            let mut dict = Dictionary::default();
             loop {
                 // Expect a Name (and Object) or the '>>' delimiter
                 let delimiter = lexer.next()?;
@@ -74,7 +74,7 @@ impl Reader {
                 // Uncompress/decode if there is a filter
                 match dict.get("Filter") {
                     Ok(&Object::Name (ref s)) => {
-                        if *s == "FlateDecode".to_string() {
+                        if *s == "FlateDecode" {
                             content = Reader::flat_decode(&content);
                         } else {
                             bail!("NOT IMPLEMENTED: Filter type {}", *s);
@@ -194,7 +194,7 @@ impl Reader {
     }
 
     // TODO move out to decoding/encoding module
-    fn flat_decode(data: &Vec<u8>) -> Vec<u8> {
+    fn flat_decode(data: &[u8]) -> Vec<u8> {
         let mut inflater = InflateStream::from_zlib();
         let mut out = Vec::<u8>::new();
         let mut n = 0;

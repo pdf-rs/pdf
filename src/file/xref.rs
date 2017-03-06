@@ -17,10 +17,10 @@ pub enum XrefEntry {
 
 impl XrefEntry {
     pub fn get_gen_nr(&self) -> u16 {
-        match self {
-            &XrefEntry::Free {next_obj_nr: _, gen_nr} => gen_nr,
-            &XrefEntry::InUse {pos: _, gen_nr} => gen_nr,
-            &XrefEntry::InStream {stream_obj_nr: _, index: _} => 0, // TODO I think these always have gen nr 0?
+        match *self {
+            XrefEntry::Free {gen_nr, ..}
+            | XrefEntry::InUse {gen_nr, ..} => gen_nr,
+            XrefEntry::InStream { .. } => 0, // TODO I think these always have gen nr 0?
         }
     }
 }
@@ -43,9 +43,9 @@ impl XrefTable {
         }
     }
 
-    pub fn iter<'a>(&'a self) -> ObjectNrIter<'a> {
+    pub fn iter(&self) -> ObjectNrIter {
         ObjectNrIter {
-            xref_table: &self,
+            xref_table: self,
             obj_nr: -1,
         }
     }
@@ -63,18 +63,14 @@ impl XrefTable {
     pub fn add_entries_from(&mut self, section: XrefSection) {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
-            let should_be_updated = match self.entries[i].clone() {
+            let should_be_updated = match self.entries[i] {
                 Some(existing_entry) => {
-                    if entry.get_gen_nr() <= existing_entry.get_gen_nr() {
-                        false
-                    } else {
-                        true
-                    }
+                    !(entry.get_gen_nr() <= existing_entry.get_gen_nr())
                 },
                 None => true,
             };
             if should_be_updated {
-                self.entries[section.first_id as usize + i] = Some(entry.clone());
+                self.entries[section.first_id as usize + i] = Some(*entry);
             }
         }
     }
@@ -83,17 +79,17 @@ impl XrefTable {
 impl Debug for XrefTable {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         for (i, entry) in self.entries.iter().enumerate() {
-            match entry {
-                &Some(XrefEntry::Free {next_obj_nr, gen_nr}) => {
+            match *entry {
+                Some(XrefEntry::Free {next_obj_nr, gen_nr}) => {
                     write!(f, "{:4}: {:010} {:05} f \n", i, next_obj_nr, gen_nr)?
                 },
-                &Some(XrefEntry::InUse {pos, gen_nr}) => {
+                Some(XrefEntry::InUse {pos, gen_nr}) => {
                     write!(f, "{:4}: {:010} {:05} n \n", i, pos, gen_nr)?
                 },
-                &Some(XrefEntry::InStream {stream_obj_nr, index}) => {
+                Some(XrefEntry::InStream {stream_obj_nr, index}) => {
                     write!(f, "{:4}: in stream {}, index {}\n", i, stream_obj_nr, index)?
                 }
-                &None => {
+                None => {
                     write!(f, "{:4}: None!\n", i)?
                 }
             }
@@ -141,9 +137,8 @@ impl<'a> Iterator for ObjectNrIter<'a> {
             None
         } else {
             match self.xref_table.entries[self.obj_nr as usize] {
-                Some(XrefEntry::Free {..}) => self.next(),
+                Some(XrefEntry::Free {..}) | None => self.next(),
                 Some(_) => Some(self.obj_nr as u32),
-                None => self.next(),
             }
         }
     }

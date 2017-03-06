@@ -1,3 +1,6 @@
+/// Lexing an input file, in the sense of breaking it up into substrings based on delimiters and
+/// whitespace.
+
 use std;
 use std::str::FromStr;
 use std::ops::Range;
@@ -9,6 +12,7 @@ mod str;
 pub use self::str::StringLexer;
 
 
+/// `Lexer` has functionality to jump around and traverse the PDF lexemes of a string in any direction.
 #[derive(Copy, Clone)]
 #[allow(dead_code)]
 pub struct Lexer<'a> {
@@ -24,14 +28,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Returns next lexeme. Lexer moves to the next byte after the lexeme.
+    /// Returns next lexeme. Lexer moves to the next byte after the lexeme. (needs to be tested)
     pub fn next(&mut self) -> Result<Substr<'a>> {
         let (lexeme, pos) = self.next_word(true)?;
         self.pos = pos;
         Ok(lexeme)
     }
 
-    /// Gives previous lexeme. Lexer moves to the first byte of this lexeme.
+    /// Gives previous lexeme. Lexer moves to the first byte of this lexeme. (needs to be tested)
     pub fn back(&mut self) -> Result<Substr<'a>> {
         let (lexeme, pos) = self.next_word(false)?;
         self.pos = pos;
@@ -47,10 +51,13 @@ impl<'a> Lexer<'a> {
         }
 
     }
+
+    /// Returns previous lexeme without advancing position.
     pub fn peek_back(&self) -> Result<Substr<'a>> {
         Ok(self.next_word(false)?.0)
     }
 
+    /// Returns `Ok` if the next lexeme matches `expected` - else `Err`.
     pub fn next_expect(&mut self, expected: &'static str) -> Result<()> {
         let word = self.next()?;
         if word.equals(expected.as_bytes()) {
@@ -113,12 +120,10 @@ impl<'a> Lexer<'a> {
             } else {
                 bail!(ErrorKind::EOF);
             }
-        } else {
-            if pos > 0 {
+        } else if pos > 0 {
                 Ok(pos - 1)
-            } else {
+        } else {
                 bail!(ErrorKind::EOF);
-            }
         }
     }
 
@@ -145,7 +150,7 @@ impl<'a> Lexer<'a> {
     }
 
 
-    // Just a helper function for set_pos, set_pos_from_end and offset_pos.
+    /// Just a helper function for set_pos, set_pos_from_end and offset_pos.
     fn seek(&mut self, new_pos: SeekFrom) -> Substr<'a> {
         let wanted_pos;
         match new_pos {
@@ -253,6 +258,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Returns slice from current position to end.
     pub fn get_remaining_slice(&self) -> &[u8] {
         &self.buf[self.pos..]
     }
@@ -296,7 +302,7 @@ impl<'a> Lexer<'a> {
 
 
 
-// Iterator item
+/// A slice from some original string - a lexeme.
 pub struct Substr<'a> {
     slice: &'a [u8],
 }

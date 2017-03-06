@@ -39,9 +39,9 @@ impl Reader {
         let mut pdf_reader = Reader {
             startxref: 0,
             xref_table: XrefTable::new(0),
-            root: Dictionary::new(),
-            trailer: Dictionary::new(),
-            pages_root: Dictionary::new(),
+            root: Dictionary::default(),
+            trailer: Dictionary::default(),
+            pages_root: Dictionary::default(),
             buf: data,
         };
         let startxref = pdf_reader.read_startxref()?;
@@ -57,23 +57,23 @@ impl Reader {
         Ok(pdf_reader)
     }
 
-    pub fn objects<'a>(&'a self) -> ObjectIter<'a> {
+    pub fn objects(&self) -> ObjectIter {
         ObjectIter {
-            reader: &self,
+            reader: self,
             obj_nr_iter: self.xref_table.iter(),
         }
     }
 
     pub fn get_xref_table(&self) -> &XrefTable {
-        return &self.xref_table;
+        &self.xref_table
     }
 
     /// If `obj` is a Reference: reads the indirect object it refers to
     /// Else: Returns a clone of the object.
     // TODO: It shouldn't have to clone..
     pub fn dereference(&self, obj: &Object) -> Result<Object> {
-        match obj {
-            &Object::Reference (ref id) => {
+        match *obj {
+            Object::Reference (ref id) => {
                 self.read_indirect_object(id.obj_nr)
             },
             _ => {
@@ -85,8 +85,8 @@ impl Reader {
     pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Object> {
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
-            XrefEntry::Free {next_obj_nr: _, gen_nr:_} => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
-            XrefEntry::InUse {pos, gen_nr: _} => {
+            XrefEntry::Free { .. } => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
+            XrefEntry::InUse {pos, ..} => {
                 let mut lexer = Lexer::new(&self.buf);
                 lexer.set_pos(pos as usize);
                 let indirect_obj = self.parse_indirect_object(&mut lexer)?;
@@ -96,7 +96,7 @@ impl Reader {
                 Ok(indirect_obj.object)
             }
             XrefEntry::InStream {stream_obj_nr, index} => {
-                let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
+                let obj_stream = self.read_indirect_object(stream_obj_nr)?.into_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
                 self.parse_object_from_stream(&obj_stream, index)
             }
@@ -135,9 +135,9 @@ impl Reader {
         }
 
         if let Ok(&Object::Name(ref t)) = node.get("Type") {
-            if *t == "Pages".to_string() { // Intermediate node
+            if *t == "Pages" { // Intermediate node
                 // Number of leaf nodes (pages) in this subtree
-                let count = if let &Object::Integer(n) = node.get("Count")? {
+                let count = if let Object::Integer(n) = *node.get("Count")? {
                         n
                     } else {
                         bail!("No Count.");
@@ -145,24 +145,23 @@ impl Reader {
 
                 // If the target page is a descendant of the intermediate node
                 if *progress + count > page_nr {
-                    let kids = if let &Object::Array(ref kids) = node.get("Kids")? {
+                    let kids = if let Object::Array(ref kids) = *node.get("Kids")? {
                             kids
                         } else {
                             bail!("No Kids entry in Pages object.");
                         };
                     // Traverse children of node.
                     for kid in kids {
-                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid)?.as_dictionary()?)?;
-                        match result {
-                            Some(found_page) => return Ok(Some(found_page)),
-                            None => {},
-                        };
+                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid)?.into_dictionary()?)?;
+                        if let Some(found_page) = result {
+                            return Ok(Some(found_page));
+                        }
                     }
                     Ok(None)
                 } else {
                     Ok(None)
                 }
-            } else if *t == "Page".to_string() { // Leaf node
+            } else if *t == "Page" { // Leaf node
                 if page_nr == *progress {
                     Ok(Some(node.clone()))
                 } else {
@@ -244,11 +243,11 @@ impl Reader {
 
     /// Read the Root/Catalog object
     fn read_root(&self) -> Result<Dictionary> {
-        self.dereference(self.trailer.get("Root")?)?.as_dictionary()
+        self.dereference(self.trailer.get("Root")?)?.into_dictionary()
     }
 
     fn read_pages(&self) -> Result<Dictionary> {
-        self.dereference(self.root.get("Pages")?)?.as_dictionary()
+        self.dereference(self.root.get("Pages")?)?.into_dictionary()
     }
 
 }

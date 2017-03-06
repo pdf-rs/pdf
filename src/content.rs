@@ -1,3 +1,4 @@
+/// PDF content streams.
 use file::Reader;
 use file::Object;
 
@@ -7,6 +8,7 @@ use err::*;
 use std::mem::swap;
 use file::lexer::Lexer;
 
+/// Operation in a PDF content stream.
 #[derive(Debug, Clone)]
 pub struct Operation {
 	pub operator: String,
@@ -23,6 +25,7 @@ impl Operation {
 }
 
 
+/// Represents a PDF content stream - a `Vec` of `Operator`s
 #[derive(Debug)]
 pub struct Content {
     pub operations: Vec<Operation>,
@@ -67,7 +70,7 @@ impl Content {
 impl Display for Content {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "Content: ")?;
-        for ref operation in &self.operations {
+        for operation in &self.operations {
             write!(f, "{}", operation)?;
         }
         Ok(())
@@ -77,7 +80,7 @@ impl Display for Content {
 impl Display for Operation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "Operation: {} (", self.operator)?;
-        for ref operand in &self.operands {
+        for operand in &self.operands {
             write!(f, "{}, ", operand)?;
         }
         write!(f, ")\n")

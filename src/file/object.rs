@@ -1,5 +1,3 @@
-//! Runtime representation of a PDF file.
-
 use std::vec::Vec;
 use err::*;
 
@@ -22,7 +20,8 @@ pub enum Object {
     RealNumber (f32),
     Boolean (bool),
     String (Vec<u8>),
-    HexString (Vec<u8>), // each byte is 0-15
+    /// Each byte is 0-15
+    HexString (Vec<u8>),
     Stream (Stream),
     Dictionary (Dictionary),
     Array (Vec<Object>),
@@ -31,20 +30,24 @@ pub enum Object {
     Null,
 }
 
-#[derive(Clone, Debug)]
-pub struct Dictionary (pub HashMap<String, Object>);
-
+/// PDF stream object.
 #[derive(Clone, Debug)]
 pub struct Stream {
     pub dictionary: Dictionary,
     pub content: Vec<u8>,
 }
 
+/// Used to identify an object; corresponds to a PDF indirect reference.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ObjectId {
     pub obj_nr: u32,
     pub gen_nr: u16,
 }
+
+/// PDF dictionary object, maps from `String` to `file::Object`.
+#[derive(Clone, Debug, Default)]
+pub struct Dictionary (pub HashMap<String, Object>);
+
 impl Display for ObjectId {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "obj_id({} {})", self.obj_nr, self.gen_nr)
@@ -52,14 +55,11 @@ impl Display for ObjectId {
 }
 
 impl Dictionary {
-    pub fn new() -> Dictionary {
-        Dictionary (HashMap::new())
-    }
-    pub fn get<'a, K>(&'a self, key: K) -> Result<&'a Object>
+    pub fn get<K>(&self, key: K) -> Result<&Object>
         where K: Into<String>
     {
         let key = key.into();
-        self.0.get(&key).ok_or(ErrorKind::NotFound {word: key}.into())
+        self.0.get(&key).ok_or_else(|| ErrorKind::NotFound {word: key}.into())
     }
     pub fn set<K, V>(&mut self, key: K, value: V)
 		where K: Into<String>,
@@ -89,8 +89,8 @@ impl Dictionary {
 
 impl Object {
     pub fn as_integer(&self) -> Result<i32> {
-        match self {
-            &Object::Integer (n) => Ok(n),
+        match *self {
+            Object::Integer (n) => Ok(n),
             _ => {
                 // Err (ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
                 Err (ErrorKind::WrongObjectType {expected: "Integer", found: self.type_str()}.into())
@@ -98,57 +98,57 @@ impl Object {
         }
     }
     pub fn as_reference(&self) -> Result<ObjectId> {
-        match self {
-            &Object::Reference (id) => Ok(id),
+        match *self {
+            Object::Reference (id) => Ok(id),
             _ => {
                 Err (ErrorKind::WrongObjectType {expected: "Reference", found: self.type_str()}.into())
             }
         }
     }
-    pub fn borrow_array(&self) -> Result<&Vec<Object>> {
-        match self {
-            &Object::Array (ref v) => Ok(v),
+    pub fn as_array(&self) -> Result<&Vec<Object>> {
+        match *self {
+            Object::Array (ref v) => Ok(v),
             _ => Err (ErrorKind::WrongObjectType {expected: "Array", found: self.type_str()}.into())
         }
     }
-    pub fn borrow_integer_array(&self) -> Result<Vec<i32>> {
-        self.borrow_array()?.iter()
+    pub fn as_integer_array(&self) -> Result<Vec<i32>> {
+        self.as_array()?.iter()
             .map(|x| Ok(x.as_integer()?)).collect::<Result<Vec<_>>>()
     }
 
-    pub fn borrow_dictionary(&self) -> Result<&Dictionary> {
-        match self {
-            &Object::Dictionary (ref dict) => Ok(dict),
+    pub fn as_dictionary(&self) -> Result<&Dictionary> {
+        match *self {
+            Object::Dictionary (ref dict) => Ok(dict),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary", found: self.type_str()}.into())
         }
     }
 
-    pub fn borrow_stream(&self) -> Result<&Stream> {
-        match self {
-            &Object::Stream (ref s) => Ok(s),
+    pub fn as_stream(&self) -> Result<&Stream> {
+        match *self {
+            Object::Stream (ref s) => Ok(s),
             _ => Err (ErrorKind::WrongObjectType {expected: "Stream", found: self.type_str()}.into()),
         }
     }
 
-    pub fn as_array(self) -> Result<Vec<Object>> {
+    pub fn into_array(self) -> Result<Vec<Object>> {
         match self {
             Object::Array (v) => Ok(v),
             _ => Err (ErrorKind::WrongObjectType {expected: "Array", found: self.type_str()}.into())
         }
     }
-    pub fn as_integer_array(self) -> Result<Vec<i32>> {
+    pub fn into_integer_array(self) -> Result<Vec<i32>> {
         self.as_array()?.iter()
             .map(|x| Ok(x.as_integer()?)).collect::<Result<Vec<_>>>()
     }
 
-    pub fn as_dictionary(self) -> Result<Dictionary> {
+    pub fn into_dictionary(self) -> Result<Dictionary> {
         match self {
             Object::Dictionary (dict) => Ok(dict),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary", found: self.type_str()}.into())
         }
     }
 
-    pub fn as_stream(self) -> Result<Stream> {
+    pub fn into_stream(self) -> Result<Stream> {
         match self {
             Object::Stream (s) => Ok(s),
             _ => Err (ErrorKind::WrongObjectType {expected: "Stream", found: self.type_str()}.into()),
@@ -156,30 +156,33 @@ impl Object {
     }
 
     pub fn type_str(&self) -> &'static str {
-        match self {
-            &Object::Integer (_) => "Integer",
-            &Object::RealNumber (_) => "RealNumber",
-            &Object::Boolean (_) => "Boolean",
-            &Object::String (_) => "String",
-            &Object::HexString (_) => "HexString",
-            &Object::Stream (_) => "Stream",
-            &Object::Dictionary (_) => "Dictionary",
-            &Object::Array (_) => "Array",
-            &Object::Reference (_) => "Reference",
-            &Object::Name (_) => "Name",
-            &Object::Null => "Null",
+        match *self {
+            Object::Integer (_) => "Integer",
+            Object::RealNumber (_) => "RealNumber",
+            Object::Boolean (_) => "Boolean",
+            Object::String (_) => "String",
+            Object::HexString (_) => "HexString",
+            Object::Stream (_) => "Stream",
+            Object::Dictionary (_) => "Dictionary",
+            Object::Array (_) => "Array",
+            Object::Reference (_) => "Reference",
+            Object::Name (_) => "Name",
+            Object::Null => "Null",
         }
     }
 
 }
 
+
+
+
 impl Display for Object {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            &Object::Integer(n) => write!(f, "{}", n),
-            &Object::RealNumber(n) => write!(f, "{}", n),
-            &Object::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
-            &Object::String (ref s) => {
+        match *self {
+            Object::Integer(n) => write!(f, "{}", n),
+            Object::RealNumber(n) => write!(f, "{}", n),
+            Object::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
+            Object::String (ref s) => {
                 let decoded = from_utf8(s);
                 match decoded {
                     Ok(decoded) => write!(f, "({})", decoded),
@@ -193,34 +196,34 @@ impl Display for Object {
                     }
                 }
             },
-            &Object::HexString (ref s) => {
+            Object::HexString (ref s) => {
                 for c in s {
                     write!(f, "{},", c)?;
                 }
                 Ok(())
             }
-            &Object::Stream (ref stream) => {
+            Object::Stream (ref stream) => {
                 write!(f, "{}", stream)
             }
-            &Object::Dictionary(Dictionary(ref d)) => {
+            Object::Dictionary(Dictionary(ref d)) => {
                 write!(f, "<< ")?;
                 for e in d {
                     write!(f, "/{} {}", e.0, e.1)?;
                 }
                 write!(f, ">>\n")
             },
-            &Object::Array(ref a) => {
+            Object::Array(ref a) => {
                 write!(f, "[")?;
                 for e in a {
                     write!(f, "{} ", e)?;
                 }
                 write!(f, "]")
             },
-            &Object::Reference (ObjectId {obj_nr, gen_nr}) => {
+            Object::Reference (ObjectId {obj_nr, gen_nr}) => {
                 write!(f, "{} {} R", obj_nr, gen_nr)
             },
-            &Object::Name (ref name) => write!(f, "/{}", name),
-            &Object::Null => write!(f, "Null"),
+            Object::Name (ref name) => write!(f, "/{}", name),
+            Object::Null => write!(f, "Null"),
         }
     }
 }

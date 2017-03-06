@@ -2,7 +2,23 @@ use std::iter::Iterator;
 use err::*;
 use num_traits::int::PrimInt;
 
-/// A lexer for PDF strings.
+/// A lexer for PDF strings. Breaks the string up into single characters (`u8`)
+/// It's also possible to get the number of indices of the original array that was traversed by the
+/// Iterator.
+///
+/// ```
+/// let mut string: Vec<u8> = Vec::new();
+/// let bytes_traversed = {
+///     let mut string_lexer = StringLexer::new(lexer.get_remaining_slice());
+///     for character in string_lexer.iter() {
+///         let character = character?;
+///         string.push(character);
+///     }
+///     string_lexer.get_offset() as i64
+/// };
+/// // bytes_traversed now holds the number of bytes in the original array traversed.
+/// ```
+///
 
 #[derive(Clone)]
 pub struct StringLexer<'a> {
@@ -12,7 +28,7 @@ pub struct StringLexer<'a> {
 }
 
 impl<'a> StringLexer<'a> {
-    /// `buf` should start right after the `(` delimiter, but span all the way to EOF. StringLexer
+    /// `buf` should start right after the `(` delimiter, and may span all the way to EOF. StringLexer
     /// will determine the end of the string.
     pub fn new(buf: &'a [u8]) -> StringLexer<'a> {
         StringLexer {
@@ -29,6 +45,7 @@ impl<'a> StringLexer<'a> {
         self.pos
     }
 
+    /// (mostly just used by Iterator, but might be useful)
     pub fn next_lexeme(&mut self) -> Result<Option<u8>> {
         let c = self.next_byte()?;
         match c {
@@ -60,7 +77,7 @@ impl<'a> StringLexer<'a> {
                                 break;
                             }
                         }
-                        if octal_digits.len() == 0 {
+                        if octal_digits.is_empty() {
                             bail!("Wrong character following `\\`: {}", self.peek_byte()?);
                         }
                         // Convert string of octal digits to number
