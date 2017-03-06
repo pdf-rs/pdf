@@ -10,7 +10,7 @@ Read, alter and write PDF files.
 
 repository = "https://github.com/Ploppz/pdf-rs"
 readme = "README.md"
-keywords = ["pdf", "1.7"]
+keywords = ["pdf"]
 license = "MIT"
 
 [dependencies]
