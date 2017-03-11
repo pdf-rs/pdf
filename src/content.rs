@@ -40,7 +40,7 @@ impl Content {
 
         loop {
             let backup_pos = lexer.get_pos();
-            let obj = Reader::parse_object_as_is(&mut lexer);
+            let obj = Reader::parse_direct_object(&mut lexer);
             match obj {
                 Ok(obj) => {
                     // Operand

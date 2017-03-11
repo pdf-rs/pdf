@@ -1,6 +1,8 @@
 use doc::Document;
 use file;
 use err::*;
+use std::fmt;
+// use std::fmt::{Formatter, Debug};
 
 // Want to wrap file::Object together with Document, so that we may do dereferencing.
 // e.g.
@@ -32,6 +34,14 @@ impl<'a> Object<'a> {
             file::Object::Integer (n) => Ok(n),
             file::Object::Reference (id) => self.doc.get_object(id)?.as_integer(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Integer or Reference", found: self.obj.type_str()}.into()),
+        }
+    }
+
+    pub fn as_number(&self) -> Result<f32> {
+        match *self.obj {
+            file::Object::Number (n) => Ok(n),
+            file::Object::Reference (id) => self.doc.get_object(id)?.as_number(),
+            _ => Err (ErrorKind::WrongObjectType {expected: "Number or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
@@ -85,7 +95,6 @@ pub struct Dictionary<'a> {
     dict: &'a file::Dictionary,
     doc: &'a Document,
 }
-
 impl<'a> Dictionary<'a> {
     pub fn get<K>(&self, key: K) -> Result<Object<'a>>
         where K: Into<String>
@@ -96,7 +105,17 @@ impl<'a> Dictionary<'a> {
             doc: self.doc,
         })
     }
+
+    // TODO write the rest of them? If desired.
+    /// Calls `self.get` and tries to convert to Dictionary.
+    pub fn get_dictionary<K>(&self, key: K) -> Result<Dictionary<'a>>
+        where K: Into<String>
+    {
+        self.get(key)?.as_dictionary()
+    }
+
 }
+
 
 /// Wraps `file::Stream`.
 #[derive(Clone)]
@@ -175,3 +194,27 @@ impl<'a> Index<usize> for Array<'a> {
     }
 }
 */
+
+
+/* fmt::Debug for wrappers: */
+
+impl<'a> fmt::Debug for Object<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.obj)
+    }
+}
+impl<'a> fmt::Debug for Dictionary<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.dict)
+    }
+}
+impl<'a> fmt::Debug for Array<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.array)
+    }
+}
+impl<'a> fmt::Debug for Stream<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Dict: {:?}, Content: {:?}", self.dict, self.content)
+    }
+}

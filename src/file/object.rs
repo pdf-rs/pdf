@@ -17,7 +17,7 @@ pub struct IndirectObject {
 #[derive(Clone, Debug)]
 pub enum Object {
     Integer (i32),
-    RealNumber (f32),
+    Number (f32),
     Boolean (bool),
     String (Vec<u8>),
     /// Each byte is 0-15
@@ -158,7 +158,7 @@ impl Object {
     pub fn type_str(&self) -> &'static str {
         match *self {
             Object::Integer (_) => "Integer",
-            Object::RealNumber (_) => "RealNumber",
+            Object::Number (_) => "Number",
             Object::Boolean (_) => "Boolean",
             Object::String (_) => "String",
             Object::HexString (_) => "HexString",
@@ -180,7 +180,7 @@ impl Display for Object {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match *self {
             Object::Integer(n) => write!(f, "{}", n),
-            Object::RealNumber(n) => write!(f, "{}", n),
+            Object::Number(n) => write!(f, "{}", n),
             Object::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
             Object::String (ref s) => {
                 let decoded = from_utf8(s);

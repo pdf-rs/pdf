@@ -32,10 +32,10 @@ impl Reader {
     pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Object> {
         Reader::parse_object_internal(lexer, Some(self))
     }
-    /// Parses an Objec starting at the current position of `lexer`. "As is" here means that it
+    /// Parses an Objec starting at the current position of `lexer`. It
     /// will not follow references when reading the "/Length" of a Stream - but rather return an
     /// `Error`.
-    pub fn parse_object_as_is(lexer: &mut Lexer) -> Result<Object> {
+    pub fn parse_direct_object(lexer: &mut Lexer) -> Result<Object> {
         Reader::parse_object_internal(lexer, None)
     }
 
@@ -122,7 +122,7 @@ impl Reader {
             }
         } else if first_lexeme.is_real_number() {
             // Real Number
-            Object::RealNumber (first_lexeme.to::<f32>()?)
+            Object::Number (first_lexeme.to::<f32>()?)
         } else if first_lexeme.equals(b"/") {
             // Name
             let s = lexer.next()?.as_string();
