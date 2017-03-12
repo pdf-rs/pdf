@@ -1,0 +1,11 @@
+[package]
+name = "pdf_derive"
+version = "0.1.0"
+authors = ["Sebastian Köln <sebk@rynx.org>"]
+
+[dependencies]
+syn = "*"
+quote = "*"
+
+[lib]
+proc-macro = true
