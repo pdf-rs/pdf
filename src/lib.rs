@@ -52,23 +52,23 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     let fields_ser: Vec<_> = parts.iter()
     .map(|&(ref field, ref key, opt)| if opt {
         quote! {
-            if let Some(field) = self.#field {
+            if let Some(ref field) = self.#field {
                 write!(out, "{} ", #key)?;
-                field.serialize(out);
-                writeln!($out, "")?;
+                field.serialize(out)?;
+                writeln!(out, "")?;
             }
         }
     } else {
         quote! {
             write!(out, "{} ", #key)?;
-            self.#field.serialize(out);
+            self.#field.serialize(out)?;
             writeln!(out, "")?;
         }
     }).collect();
     
-    let r = quote! {
+    quote! {
         impl Object for #name {
-            fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "<<")?;
                 writeln!(out, "/Type /{}", stringify!(#name))?;
                 #(#fields_ser)*
@@ -76,7 +76,41 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
                 Ok(())
             }
         }
-    };
-    println!("{}", r.as_str());
-    r
+    }
 }
+
+/*
+#[proc_macro_derive(PrimitiveConv)]
+pub fn primitive_conv(input: TokenStream) -> TokenStream {
+    // Construct a string representation of the type definition
+    let s = input.to_string();
+    
+    // Parse the string representation
+    let ast = syn::parse_macro_input(&s).unwrap();
+
+    // Build the impl
+    let gen = impl_primitive_conv(&ast);
+    
+    // Return the generated impl
+    gen.parse().unwrap()
+}
+
+
+fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
+    let name = &ast.ident;
+    
+    let fields = match ast.body {
+        Body::Struct(ref data) => data.fields(),
+        Body::Enum(_) => panic!("#[derive(PrimitiveConv)] can only be used with structs"),
+    };
+    
+    quote! {
+        impl PrimitiveConf for #name {
+            fn from_primitive(p: Primitive) -> Result<#name, String> {
+                #name {
+                    #( #fields: 
+                }
+            }
+        }
+    }
+*/
