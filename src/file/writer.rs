@@ -1,4 +1,4 @@
-use file::{ObjectId, Object};
+use file::{ObjectId, AnyObject};
 use err::*;
 use std::iter::Iterator;
 
@@ -9,14 +9,14 @@ struct Writer {
 
 impl Writer {
     pub fn new<I>(objects: I) -> Writer
-        where I: Iterator<Item=(ObjectId, Object)>
+        where I: Iterator<Item=(ObjectId, AnyObject)>
     {
         Writer {
         }
     }
 
     pub fn write<I>(objects: I) -> Result<()>
-        where I: Iterator<Item=(ObjectId, Object)>
+        where I: Iterator<Item=(ObjectId, AnyObject)>
     {
         for (id, obj) in objects {
             // TODO write to file, add to xref table

@@ -1,5 +1,6 @@
 //! Basic functionality for parsing a PDF file.
 pub mod lexer;
+pub mod types;
 mod reader;
 mod writer;
 mod parse_object;

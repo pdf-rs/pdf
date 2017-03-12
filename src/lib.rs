@@ -1,5 +1,6 @@
 // #![feature(plugin)]
 // #![plugin(clippy)]
+#![feature(trace_macros)]
 
 #[macro_use]
 extern crate error_chain;
@@ -98,7 +99,7 @@ mod tests {
             for (& ref name, & ref object) in &page.0 {
                 let object = reader.dereference(object).chain_err(|| "Dereferencing an object...").unwrap_or_else(|e| print_err(e));
                 match object {
-                    Object::Array (ref arr) => {
+                    AnyObject::Array (ref arr) => {
                         println!("/{} =\n\n", name);
                         for (i, e) in arr.iter().enumerate() {
                             let e = reader.dereference(e).chain_err(|| "Deref element").unwrap_or_else(|e| print_err(e));

@@ -4,43 +4,43 @@ use err::*;
 use std::fmt;
 // use std::fmt::{Formatter, Debug};
 
-// Want to wrap file::Object together with Document, so that we may do dereferencing.
+// Want to wrap file::AnyObject together with Document, so that we may do dereferencing.
 // e.g.
 // my_obj.as_integer() will dereference if needed.
 
 
-/// Wraps `file::Object`.
+/// Wraps `file::AnyObject`.
 pub struct Object<'a> {
-    obj: &'a file::Object,
+    obj: &'a file::AnyObject,
     doc: &'a Document,
 }
 
 
 impl<'a> Object<'a> {
     // TODO should only be used by Document
-    pub fn new(obj: &'a file::Object, doc: &'a Document) -> Object<'a> {
+    pub fn new(obj: &'a file::AnyObject, doc: &'a Document) -> Object<'a> {
         Object {
             obj: obj,
             doc: doc,
         }
     }
     /// Returns the wrapped Object
-    pub fn inner(&self) -> &file::Object {
+    pub fn inner(&self) -> &file::AnyObject {
         self.obj
     }
     /// Try to convert to Integer type. Recursively dereference references in the attempt.
     pub fn as_integer(&self) -> Result<i32> {
         match *self.obj {
-            file::Object::Integer (n) => Ok(n),
-            file::Object::Reference (id) => self.doc.get_object(id)?.as_integer(),
+            file::AnyObject::Integer (n) => Ok(n),
+            file::AnyObject::Reference (id) => self.doc.get_object(id)?.as_integer(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Integer or Reference", found: self.obj.type_str()}.into()),
         }
     }
 
     pub fn as_number(&self) -> Result<f32> {
         match *self.obj {
-            file::Object::Number (n) => Ok(n),
-            file::Object::Reference (id) => self.doc.get_object(id)?.as_number(),
+            file::AnyObject::Number (n) => Ok(n),
+            file::AnyObject::Reference (id) => self.doc.get_object(id)?.as_number(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Number or Reference", found: self.obj.type_str()}.into()),
         }
     }
@@ -48,8 +48,8 @@ impl<'a> Object<'a> {
     /// Try to convert to Dictionary type. Recursively dereference references in the attempt.
     pub fn as_dictionary(&self) -> Result<Dictionary<'a>> {
         match *self.obj {
-            file::Object::Dictionary (ref dict) => Ok(Dictionary {dict: dict, doc: self.doc}),
-            file::Object::Reference (id) => self.doc.get_object(id)?.as_dictionary(),
+            file::AnyObject::Dictionary (ref dict) => Ok(Dictionary {dict: dict, doc: self.doc}),
+            file::AnyObject::Reference (id) => self.doc.get_object(id)?.as_dictionary(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary or Reference", found: self.obj.type_str()}.into()),
         }
     }
@@ -57,14 +57,14 @@ impl<'a> Object<'a> {
     /// Try to convert to Stream type. Recursively dereference references in the attempt.
     pub fn as_stream(&self) -> Result<Stream<'a>> {
         match *self.obj {
-            file::Object::Stream (ref stream) => {
+            file::AnyObject::Stream (ref stream) => {
                 Ok(Stream {
                     dict: Dictionary {dict: &stream.dictionary, doc: self.doc},
                     content: &stream.content,
                     doc: self.doc
                 })
             }
-            file::Object::Reference (id) => self.doc.get_object(id)?.as_stream(),
+            file::AnyObject::Reference (id) => self.doc.get_object(id)?.as_stream(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Stream or Reference", found: self.obj.type_str()}.into()),
         }
     }
@@ -72,8 +72,8 @@ impl<'a> Object<'a> {
     /// Try to convert to Array type. Recursively dereference references in the attempt.
     pub fn as_array(&self) -> Result<Array<'a>> {
         match *self.obj {
-            file::Object::Array (ref array) => Ok(Array {array: array, doc: self.doc}),
-            file::Object::Reference (id) => self.doc.get_object(id)?.as_array(),
+            file::AnyObject::Array (ref array) => Ok(Array {array: array, doc: self.doc}),
+            file::AnyObject::Reference (id) => self.doc.get_object(id)?.as_array(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Array or Reference", found: self.obj.type_str()}.into()),
         }
     }
@@ -81,8 +81,8 @@ impl<'a> Object<'a> {
     /// Try to convert to Name type. Recursively dereference references in the attempt.
     pub fn as_name(&self) -> Result<String> {
         match *self.obj {
-            file::Object::Name(ref s) => Ok(s.clone()),
-            file::Object::Reference(id) => self.doc.get_object(id)?.as_name(),
+            file::AnyObject::Name(ref s) => Ok(s.clone()),
+            file::AnyObject::Reference(id) => self.doc.get_object(id)?.as_name(),
             _ => Err (ErrorKind::WrongObjectType {expected: "Name or Reference", found: self.obj.type_str()}.into()),
         }
     }
@@ -135,7 +135,7 @@ impl<'a> Stream<'a> {
 /// Wraps `file::Array`.
 #[derive(Clone)]
 pub struct Array<'a> {
-    array: &'a Vec<file::Object>,
+    array: &'a Vec<file::AnyObject>,
     doc: &'a Document,
 }
 
