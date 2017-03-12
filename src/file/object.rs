@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 
 pub trait Object {
-    fn serialize<W: Write>(&self, out: &mut W) -> Result<()>;
+    fn serialize<W: Write>(&self, out: &mut W) -> std::io::Result<()>;
 }
 
 /* Objects */

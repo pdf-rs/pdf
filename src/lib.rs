@@ -1,7 +1,7 @@
-// #![feature(plugin)]
-// #![plugin(clippy)]
-#![feature(trace_macros)]
+#![feature(attr_literals)] 
 
+#[macro_use]
+extern crate pdf_derive;
 #[macro_use]
 extern crate error_chain;
 extern crate num_traits;
