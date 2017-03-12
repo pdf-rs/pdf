@@ -11,7 +11,7 @@ use inflate::InflateStream;
 
 impl Reader {
     /// Parser an Object from an Object Stream at index `index`.
-    pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<AnyObject> {
+    pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<Primitive> {
         let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
         let first = obj_stream.dictionary.get("First")?.as_integer()?;
 
@@ -29,20 +29,20 @@ impl Reader {
     }
 
     /// Parses an Object starting at the current position of `lexer`.
-    pub fn parse_object(&self, lexer: &mut Lexer) -> Result<AnyObject> {
+    pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Primitive> {
         Reader::parse_object_internal(lexer, Some(self))
     }
     /// Parses an Objec starting at the current position of `lexer`. It
     /// will not follow references when reading the "/Length" of a Stream - but rather return an
     /// `Error`.
-    pub fn parse_direct_object(lexer: &mut Lexer) -> Result<AnyObject> {
+    pub fn parse_direct_object(lexer: &mut Lexer) -> Result<Primitive> {
         Reader::parse_object_internal(lexer, None)
     }
 
     /// The reason for this is to support two modes of parsing: with and without `&self`. `&self`
     /// is only needed for following references, then especially considering that the "/Length"
     /// entry of a Stream Dictionary may be a Reference.
-    fn parse_object_internal(lexer: &mut Lexer, reader: Option<&Reader>) -> Result<AnyObject> {
+    fn parse_object_internal(lexer: &mut Lexer, reader: Option<&Reader>) -> Result<Primitive> {
         let first_lexeme = lexer.next()?;
 
         let obj = if first_lexeme.equals(b"<<") {
@@ -73,7 +73,7 @@ impl Reader {
                 let mut content = lexer.offset_pos(length as usize).to_vec();
                 // Uncompress/decode if there is a filter
                 match dict.get("Filter") {
-                    Ok(&AnyObject::Name (ref s)) => {
+                    Ok(&Primitive::Name (ref s)) => {
                         if *s == "FlateDecode" {
                             content = Reader::flat_decode(&content);
                         } else {
@@ -88,12 +88,12 @@ impl Reader {
                 // Finish
                 lexer.next_expect("endstream")?;
 
-                AnyObject::Stream (Stream {
+                Primitive::Stream (Stream {
                     dictionary: dict,
                     content: content,
                 })
             } else {
-                AnyObject::Dictionary (dict)
+                Primitive::Dictionary (dict)
             }
         } else if first_lexeme.is_integer() {
             // May be Integer or Reference
@@ -106,27 +106,27 @@ impl Reader {
                 let third_lexeme = lexer.next()?;
                 if third_lexeme.equals(b"R") {
                     // It is indeed a reference to an indirect object
-                    AnyObject::Reference (ObjectId {
+                    Primitive::Reference (ObjectId {
                         obj_nr: first_lexeme.to::<u32>()?,
                         gen_nr: second_lexeme.to::<u16>()?,
                     })
                 } else {
                     // We are probably in an array of numbers - it's not a reference anyway
                     lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
-                    AnyObject::Integer(first_lexeme.to::<i32>()?)
+                    Primitive::Integer(first_lexeme.to::<i32>()?)
                 }
             } else {
                 // It is but a number
                 lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
-                AnyObject::Integer(first_lexeme.to::<i32>()?)
+                Primitive::Integer(first_lexeme.to::<i32>()?)
             }
         } else if first_lexeme.is_real_number() {
             // Real Number
-            AnyObject::Number (first_lexeme.to::<f32>()?)
+            Primitive::Number (first_lexeme.to::<f32>()?)
         } else if first_lexeme.equals(b"/") {
             // Name
             let s = lexer.next()?.as_string();
-            AnyObject::Name(s)
+            Primitive::Name(s)
         } else if first_lexeme.equals(b"[") {
             let mut array = Vec::new();
             // Array
@@ -141,7 +141,7 @@ impl Reader {
             }
             lexer.next()?; // Move beyond closing delimiter
 
-            AnyObject::Array (array)
+            Primitive::Array (array)
         } else if first_lexeme.equals(b"(") {
 
             let mut string: Vec<u8> = Vec::new();
@@ -157,11 +157,11 @@ impl Reader {
             // Advance to end of string
             lexer.offset_pos(bytes_traversed as usize);
 
-            AnyObject::String (string)
+            Primitive::String (string)
         } else if first_lexeme.equals(b"<") {
             let hex_str = lexer.next()?.to_vec();
             lexer.next_expect(">")?;
-            AnyObject::HexString (hex_str)
+            Primitive::HexString (hex_str)
         } else {
             bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
                   lexer.get_pos(),

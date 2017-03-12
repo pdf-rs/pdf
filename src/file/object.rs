@@ -1,6 +1,4 @@
 use err::*;
-use file::types::*;
-
 
 use std;
 use std::io::Write;
@@ -17,11 +15,11 @@ pub trait Object {
 /* Objects */
 pub struct IndirectObject {
     pub id: ObjectId,
-    pub object: AnyObject,
+    pub object: Primitive,
 }
 
 #[derive(Clone, Debug)]
-pub enum AnyObject {
+pub enum Primitive {
     Null,
     Integer (i32),
     Number (f32),
@@ -31,7 +29,7 @@ pub enum AnyObject {
     HexString (Vec<u8>),
     Stream (Stream),
     Dictionary (Dictionary),
-    Array (Vec<AnyObject>),
+    Array (Vec<Primitive>),
     Reference (ObjectId),
     Name (String),
 }
@@ -55,10 +53,10 @@ pub struct ObjectId {
 
 /// PDF dictionary object, maps from `String` to `file::Object`.
 #[derive(Clone, Debug, Default)]
-pub struct Dictionary (pub HashMap<String, AnyObject>);
+pub struct Dictionary (pub HashMap<String, Primitive>);
 
 impl Dictionary {
-    pub fn get<K>(&self, key: K) -> Result<&AnyObject>
+    pub fn get<K>(&self, key: K) -> Result<&Primitive>
         where K: Into<String>
     {
         let key = key.into();
@@ -66,7 +64,7 @@ impl Dictionary {
     }
     pub fn set<K, V>(&mut self, key: K, value: V)
 		where K: Into<String>,
-		      V: Into<AnyObject>
+		      V: Into<Primitive>
 	{
 		let _ = self.0.insert(key.into(), value.into());
 	}
@@ -78,7 +76,7 @@ impl Dictionary {
         let type_name = type_name.into();
         match self.get("Type") {
             Err(_) => Ok(()),
-            Ok(&AnyObject::Name (ref name)) => {
+            Ok(&Primitive::Name (ref name)) => {
                 if *name == *type_name {
                     Ok(())
                 } else {
@@ -90,10 +88,10 @@ impl Dictionary {
     }
 }
 
-impl AnyObject {
+impl Primitive {
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
-            AnyObject::Integer (n) => Ok(n),
+            Primitive::Integer (n) => Ok(n),
             _ => {
                 // Err (ErrorKind::WrongObjectType.into()).chain_err(|| ErrorKind::ExpectedType {expected: "Reference"})
                 Err (ErrorKind::WrongObjectType {expected: "Integer", found: self.type_str()}.into())
@@ -102,15 +100,15 @@ impl AnyObject {
     }
     pub fn as_reference(&self) -> Result<ObjectId> {
         match *self {
-            AnyObject::Reference (id) => Ok(id),
+            Primitive::Reference (id) => Ok(id),
             _ => {
                 Err (ErrorKind::WrongObjectType {expected: "Reference", found: self.type_str()}.into())
             }
         }
     }
-    pub fn as_array(&self) -> Result<&Vec<AnyObject>> {
+    pub fn as_array(&self) -> Result<&Vec<Primitive>> {
         match *self {
-            AnyObject::Array (ref v) => Ok(v),
+            Primitive::Array (ref v) => Ok(v),
             _ => Err (ErrorKind::WrongObjectType {expected: "Array", found: self.type_str()}.into())
         }
     }
@@ -121,21 +119,21 @@ impl AnyObject {
 
     pub fn as_dictionary(&self) -> Result<&Dictionary> {
         match *self {
-            AnyObject::Dictionary (ref dict) => Ok(dict),
+            Primitive::Dictionary (ref dict) => Ok(dict),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary", found: self.type_str()}.into())
         }
     }
 
     pub fn as_stream(&self) -> Result<&Stream> {
         match *self {
-            AnyObject::Stream (ref s) => Ok(s),
+            Primitive::Stream (ref s) => Ok(s),
             _ => Err (ErrorKind::WrongObjectType {expected: "Stream", found: self.type_str()}.into()),
         }
     }
 
-    pub fn into_array(self) -> Result<Vec<AnyObject>> {
+    pub fn into_array(self) -> Result<Vec<Primitive>> {
         match self {
-            AnyObject::Array (v) => Ok(v),
+            Primitive::Array (v) => Ok(v),
             _ => Err (ErrorKind::WrongObjectType {expected: "Array", found: self.type_str()}.into())
         }
     }
@@ -146,31 +144,31 @@ impl AnyObject {
 
     pub fn into_dictionary(self) -> Result<Dictionary> {
         match self {
-            AnyObject::Dictionary (dict) => Ok(dict),
+            Primitive::Dictionary (dict) => Ok(dict),
             _ => Err (ErrorKind::WrongObjectType {expected: "Dictionary", found: self.type_str()}.into())
         }
     }
 
     pub fn into_stream(self) -> Result<Stream> {
         match self {
-            AnyObject::Stream (s) => Ok(s),
+            Primitive::Stream (s) => Ok(s),
             _ => Err (ErrorKind::WrongObjectType {expected: "Stream", found: self.type_str()}.into()),
         }
     }
 
     pub fn type_str(&self) -> &'static str {
         match *self {
-            AnyObject::Integer (_) => "Integer",
-            AnyObject::Number (_) => "Number",
-            AnyObject::Boolean (_) => "Boolean",
-            AnyObject::String (_) => "String",
-            AnyObject::HexString (_) => "HexString",
-            AnyObject::Stream (_) => "Stream",
-            AnyObject::Dictionary (_) => "Dictionary",
-            AnyObject::Array (_) => "Array",
-            AnyObject::Reference (_) => "Reference",
-            AnyObject::Name (_) => "Name",
-            AnyObject::Null => "Null",
+            Primitive::Integer (_) => "Integer",
+            Primitive::Number (_) => "Number",
+            Primitive::Boolean (_) => "Boolean",
+            Primitive::String (_) => "String",
+            Primitive::HexString (_) => "HexString",
+            Primitive::Stream (_) => "Stream",
+            Primitive::Dictionary (_) => "Dictionary",
+            Primitive::Array (_) => "Array",
+            Primitive::Reference (_) => "Reference",
+            Primitive::Name (_) => "Name",
+            Primitive::Null => "Null",
         }
     }
 
@@ -183,13 +181,13 @@ impl Display for ObjectId {
     }
 }
 
-impl Display for AnyObject {
+impl Display for Primitive {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match *self {
-            AnyObject::Integer(n) => write!(f, "{}", n),
-            AnyObject::Number(n) => write!(f, "{}", n),
-            AnyObject::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
-            AnyObject::String (ref s) => {
+            Primitive::Integer(n) => write!(f, "{}", n),
+            Primitive::Number(n) => write!(f, "{}", n),
+            Primitive::Boolean(b) => write!(f, "{}", if b {"true"} else {"false"}),
+            Primitive::String (ref s) => {
                 let decoded = from_utf8(s);
                 match decoded {
                     Ok(decoded) => write!(f, "({})", decoded),
@@ -203,34 +201,34 @@ impl Display for AnyObject {
                     }
                 }
             },
-            AnyObject::HexString (ref s) => {
+            Primitive::HexString (ref s) => {
                 for c in s {
                     write!(f, "{},", c)?;
                 }
                 Ok(())
             }
-            AnyObject::Stream (ref stream) => {
+            Primitive::Stream (ref stream) => {
                 write!(f, "{}", stream)
             }
-            AnyObject::Dictionary(Dictionary(ref d)) => {
+            Primitive::Dictionary(Dictionary(ref d)) => {
                 write!(f, "<< ")?;
                 for e in d {
                     write!(f, "/{} {}", e.0, e.1)?;
                 }
                 write!(f, ">>\n")
             },
-            AnyObject::Array(ref a) => {
+            Primitive::Array(ref a) => {
                 write!(f, "[")?;
                 for e in a {
                     write!(f, "{} ", e)?;
                 }
                 write!(f, "]")
             },
-            AnyObject::Reference (ObjectId {obj_nr, gen_nr}) => {
+            Primitive::Reference (ObjectId {obj_nr, gen_nr}) => {
                 write!(f, "{} {} R", obj_nr, gen_nr)
             },
-            AnyObject::Name (ref name) => write!(f, "/{}", name),
-            AnyObject::Null => write!(f, "Null"),
+            Primitive::Name (ref name) => write!(f, "/{}", name),
+            Primitive::Null => write!(f, "Null"),
         }
     }
 }

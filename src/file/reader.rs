@@ -1,7 +1,7 @@
 use err::*;
 
 use file::lexer::Lexer;
-use file::{Dictionary, XrefTable, AnyObject, XrefEntry, XrefSection, ObjectNrIter, ObjectId};
+use file::{Dictionary, XrefTable, Primitive, XrefEntry, XrefSection, ObjectNrIter, ObjectId};
 use std::vec::Vec;
 use std::io::SeekFrom;
 use std::io::Seek;
@@ -62,9 +62,9 @@ impl Reader {
     /// If `obj` is a Reference: reads the indirect object it refers to
     /// Else: Returns a clone of the object.
     // TODO: It shouldn't have to clone..
-    pub fn dereference(&self, obj: &AnyObject) -> Result<AnyObject> {
+    pub fn dereference(&self, obj: &Primitive) -> Result<Primitive> {
         match *obj {
-            AnyObject::Reference (ref id) => {
+            Primitive::Reference (ref id) => {
                 self.read_indirect_object(id.obj_nr)
             },
             _ => {
@@ -73,7 +73,7 @@ impl Reader {
         }
     }
 
-    pub fn read_indirect_object(&self, obj_nr: u32) -> Result<AnyObject> {
+    pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Primitive> {
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
             XrefEntry::Free { .. } => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
@@ -98,7 +98,7 @@ impl Reader {
 
         let result = self.pages_root.get("Count");
         match result {
-            Ok(&AnyObject::Integer(n)) => n,
+            Ok(&Primitive::Integer(n)) => n,
             _ => 0,
         }
     }
@@ -125,10 +125,10 @@ impl Reader {
             bail!("Search has passed the page nr, without finding the page.");
         }
 
-        if let Ok(&AnyObject::Name(ref t)) = node.get("Type") {
+        if let Ok(&Primitive::Name(ref t)) = node.get("Type") {
             if *t == "Pages" { // Intermediate node
                 // Number of leaf nodes (pages) in this subtree
-                let count = if let AnyObject::Integer(n) = *node.get("Count")? {
+                let count = if let Primitive::Integer(n) = *node.get("Count")? {
                         n
                     } else {
                         bail!("No Count.");
@@ -136,7 +136,7 @@ impl Reader {
 
                 // If the target page is a descendant of the intermediate node
                 if *progress + count > page_nr {
-                    let kids = if let AnyObject::Array(ref kids) = *node.get("Kids")? {
+                    let kids = if let Primitive::Array(ref kids) = *node.get("Kids")? {
                             kids
                         } else {
                             bail!("No Kids entry in Pages object.");
@@ -250,8 +250,8 @@ pub struct ObjectIter<'a> {
 }
 
 impl<'a> Iterator for ObjectIter<'a> {
-    type Item = Result<(ObjectId, AnyObject)>;
-    fn next(&mut self) -> Option<Result<(ObjectId, AnyObject)>> {
+    type Item = Result<(ObjectId, Primitive)>;
+    fn next(&mut self) -> Option<Result<(ObjectId, Primitive)>> {
         match self.obj_nr_iter.next() {
             Some(obj_nr) => {
                 let id = ObjectId {obj_nr: obj_nr, gen_nr: 0}; // TODO Get the actual gen nr

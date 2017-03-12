@@ -1,6 +1,6 @@
 /// PDF content streams.
 use file::Reader;
-use file::AnyObject;
+use file::Primitive;
 
 use std;
 use std::fmt::{Display, Formatter};
@@ -12,11 +12,11 @@ use file::lexer::Lexer;
 #[derive(Debug, Clone)]
 pub struct Operation {
 	pub operator: String,
-	pub operands: Vec<AnyObject>,
+	pub operands: Vec<Primitive>,
 }
 
 impl Operation {
-	pub fn new(operator: String, operands: Vec<AnyObject>) -> Operation {
+	pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
 		Operation{
 			operator: operator,
 			operands: operands,

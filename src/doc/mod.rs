@@ -1,4 +1,4 @@
-//! Abstraction over the `file` module. Stores objects in high-level representation. Introduces wrappers for all kinds of PDF Objects (`file::AnyObject`), for easy PDF reference following.
+//! Abstraction over the `file` module. Stores objects in high-level representation. Introduces wrappers for all kinds of PDF Objects (`file::Primitive`), for easy PDF reference following.
 
 mod object;
 
@@ -11,7 +11,7 @@ use std::collections::HashMap;
 /// `Document` keeps all objects of the PDf file stored in a high-level representation.
 
 pub struct Document {
-    objects: HashMap<ObjectId, file::AnyObject>,
+    objects: HashMap<ObjectId, file::Primitive>,
     root_id: ObjectId,
 }
 
@@ -35,7 +35,7 @@ impl Document {
 
     /// Does not follow references.
     pub fn get_object(&self, id: ObjectId) -> Result<Object> {
-        let obj: Result<&file::AnyObject> = self.objects.get(&id).ok_or_else(|| "Error getting object".into());
+        let obj: Result<&file::Primitive> = self.objects.get(&id).ok_or_else(|| "Error getting object".into());
         Ok(
             Object::new(obj?, self)
         )
