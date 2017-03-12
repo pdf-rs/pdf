@@ -18,7 +18,6 @@ pub use err::*;
 // TODO
 // - impl Into<Object>
 // - Consider whether we should enumerate all operations and graphics/text state parameters
-// - _direct, not _as_is or whatever
 
 /// Prints the error if it is an Error
 pub fn print_err<T>(err: Error) -> T {
