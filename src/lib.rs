@@ -4,9 +4,9 @@ extern crate syn;
 extern crate quote;
 
 use proc_macro::TokenStream;
-use syn::{MetaItem, Lit, Body};
+use syn::{MetaItem, NestedMetaItem, Lit, Body};
 
-#[proc_macro_derive(Object, attributes(key, opt))]
+#[proc_macro_derive(Object, attributes(pdf))]
 pub fn object(input: TokenStream) -> TokenStream {
     // Construct a string representation of the type definition
     let s = input.to_string();
@@ -21,6 +21,24 @@ pub fn object(input: TokenStream) -> TokenStream {
     gen.parse().unwrap()
 }
 
+fn get_attrs(list: &[NestedMetaItem]) -> (String, bool) {
+    let (mut key, mut opt) = (None, false);
+    for meta in list {
+        match *meta {
+            NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
+            if ident == "key" => {
+                key = Some(value.clone());
+            },
+            NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Bool(value))) 
+            if ident == "opt" => {
+                opt = value;
+            }
+            _ => panic!(r##"only `key="Key"` and `opt=[true|false]` are supported."##)
+        }
+    }
+    (key.expect("attr `key` missing"), opt)
+}
+
 fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     let name = &ast.ident;
     
@@ -32,21 +50,15 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        let (mut key, mut opt) = (None, false);
-        for attr in field.attrs.iter() {
-            match attr.value {
-                MetaItem::NameValue(ref ident, Lit::Str(ref val, _))
-                if ident == "key" => {
-                    key = Some(val.clone());
-                },
-                MetaItem::Word(ref ident) if ident == "opt" => {
-                    opt = true;
-                },
-                _ => {}
-            }
-        }
+        let (key, opt) = field.attrs.iter()
+        .filter_map(|attr| match attr.value {
+            MetaItem::List(ref ident, ref list) if ident == "pdf" => {
+                Some(get_attrs(&list))
+            },
+            _ => None
+        }).next().expect("no pdf meta attribute");
         
-        (field.ident.clone(), key.expect("key attr missing").clone(), opt)
+        (field.ident.clone(), key, opt)
     }).collect();
     
     let fields_ser: Vec<_> = parts.iter()
