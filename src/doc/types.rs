@@ -1,4 +1,5 @@
-use file::{Object, ObjectId};
+use file::{ObjectId};
+use doc::object::Object;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::io;
@@ -70,8 +71,20 @@ impl_pdf_int!(i8 u8 i16 u16 i32 u32 i64 u64 isize usize f32 f64);
 /* Dictionary Types */
 
 #[derive(Object)]
+pub struct Root {
+    #[pdf(key="Pages")]
+    pages:  Ref<Pages>,
+    
+    #[pdf(key="Count")]
+    count:  i32
+    // #[pdf(key="Labels", opt=false]
+    // labels: HashMap<usize, PageLabel>
+}
+
+
+#[derive(Object)]
 pub struct Catalog {
-    #[pdf(key="Pages", opt=false)]
+    #[pdf(key="Pages")]
     pages:  Ref<Pages>,
     
     // #[pdf(key="Labels", opt=false]
@@ -85,9 +98,9 @@ pub struct Pages { // TODO would like to call it PageTree, but the macro would h
     #[pdf(key="Parent", opt=true)]
     parent: Option<Ref<Pages>>,
     #[pdf(key="Kids", opt=false)]
-    kids: Vec<PagesNode>,
+    kids:   Vec<PagesNode>,
     #[pdf(key="Count", opt=false)]
-    count: i32, // TODO implement Object 
+    count:  i32, // TODO implement Object 
 
     // #[pdf(key="Resources", opt=false]
     // resources: Option<Ref<Resources>>,

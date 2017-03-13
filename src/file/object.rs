@@ -29,6 +29,51 @@ pub enum Primitive<'a> {
     Name (String),
 }
 
+macro_rules! wrong_primitive {
+    ($expected:ident, $found:expr) => (
+        Err(ErrorKind::WrongObjectType {
+            expected: stringify!(expected),
+            found: $found
+        }.into())
+    )
+}
+
+impl<'a> Primitive<'a> {
+    pub fn as_integer(&self) -> Result<i32> {
+        match *self {
+            Primitive::Integer(n) => Ok(n),
+            p => wrong_primitive!(Integer, p)
+        }
+    }
+    pub fn as_reference(&self) -> Result<ObjectId> {
+        match *self {
+            Primitive::Reference(id) => Ok(id),
+            p => wrong_primitive!(Reference, p)
+        }
+    }
+    pub fn as_array(&self, reader: &'a Reader) -> Result<&'a [Primitive]> {
+        match *self {
+            Primitive::Array(ref v) => Ok(v),
+            Primitive::Reference(id) => reader.dereference(&id)?.as_array(reader),
+            p => wrong_primitive!(Array, p)
+        }
+    }
+    pub fn as_dictionary(&self, reader: &'a Reader) -> Result<&Dictionary> {
+        match *self {
+            Primitive::Dictionary(ref dict) => Ok(dict),
+            Primitive::Reference(id) => reader.dereference(&id)?.as_dictionary(reader),
+            p => wrong_primitive!(Dictionary, p)
+        }
+    }
+
+    pub fn as_stream(&self, reader: &'a Reader) -> Result<&Stream> {
+        match *self {
+            Primitive::Stream(ref s) => Ok(s),
+            Primitive::Reference(id) => reader.dereference(&id)?.as_stream(reader),
+            p => wrong_primitive!(Stream, p)
+        }
+    }
+}
 
 /// PDF stream object.
 #[derive(Clone, Debug)]

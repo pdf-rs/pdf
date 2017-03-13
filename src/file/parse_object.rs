@@ -70,21 +70,8 @@ impl Reader {
                     None => dict.get("Length")?.as_integer()?,
                 };
                 // Read the stream
-                let mut content = lexer.offset_pos(length as usize).to_vec();
-                // Uncompress/decode if there is a filter
-                match dict.get("Filter") {
-                    Ok(&Primitive::Name (ref s)) => {
-                        if *s == "FlateDecode" {
-                            content = Reader::flat_decode(&content);
-                        } else {
-                            bail!("NOT IMPLEMENTED: Filter type {}", *s);
-                        }
-                    }
-                    Ok(_) => {
-                        bail!("NOT IMPLEMENTED: Array of filters");
-                    }
-                    _ => {}
-                }
+                let mut content = lexer.offset_pos(length as usize);
+                
                 // Finish
                 lexer.next_expect("endstream")?;
 
@@ -193,21 +180,5 @@ impl Reader {
         })
     }
 
-    // TODO move out to decoding/encoding module
-    fn flat_decode(data: &[u8]) -> Vec<u8> {
-        let mut inflater = InflateStream::from_zlib();
-        let mut out = Vec::<u8>::new();
-        let mut n = 0;
-        while n < data.len() {
-            let res = inflater.update(&data[n..]);
-            if let Ok((num_bytes_read, result)) = res {
-                n += num_bytes_read;
-                out.extend(result);
-            } else {
-                res.unwrap();
-            }
-        }
-        out
-    }
 
 }
