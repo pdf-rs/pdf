@@ -8,9 +8,9 @@ pub struct Ref<T> {
     id: ObjectId,
     _marker: PhantomData<T>,
 }
-impl<T> Object for Ref<T> {
+impl<T> Object for Ref<T> where T: Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{} {}R", self.id.obj_nr, self.id.gen_nr)
+        write!(out, "{} {} R", self.id.obj_nr, self.id.gen_nr)
     }
 }
 
@@ -28,22 +28,44 @@ impl Object for PagesNode {
     }
 }
 
-impl<T> Object for Vec<T>
-    where T: Object
+pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
+where W: io::Write, T: Object, I: Iterator<Item=T>
 {
+    write!(out, "[")?;
+    
+    if let Some(first) = iter.next() {
+        first.serialize(out)?;
+        
+        for other in iter {
+            out.write(b", ")?;
+            other.serialize(out)?;
+        }
+    }
+    
+    write!(out, "]")
+}
+
+impl<T: Object> Object for Vec<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        Ok(()) // TODO
+        write_list(out, self.iter())
+    }
+}
+impl<T: Object> Object for [T] {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write_list(out, self.iter())
     }
 }
 
-
-// TODO: should impl Object for Primitive. But also need it for i32 - is this right?
-impl Object for i32
-{
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        Ok(()) // TODO
+macro_rules! impl_pdf_int {
+    ($($name:ident)*) => { $(
+        impl Object for $name {
+            fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+                write!(out, "{}", self)
+            }
+        } )*
     }
 }
+impl_pdf_int!(i8 u8 i16 u16 i32 u32 i64 u64 isize usize f32 f64);
 
 /* Dictionary Types */
 

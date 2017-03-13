@@ -9,6 +9,16 @@ use std::fmt;
 // my_obj.as_integer() will dereference if needed.
 
 
+pub trait Object {
+    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()>;
+    fn 
+}
+impl<'a, T: Object + 'a> Object for &'a T {
+    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
+        (*self).serialize(out)
+    }
+}
+
 /// Wraps `file::Primitive`.
 pub struct Object<'a> {
     obj: &'a file::Primitive,
@@ -86,34 +96,6 @@ impl<'a> Object<'a> {
             _ => Err (ErrorKind::WrongObjectType {expected: "Name or Reference", found: self.obj.type_str()}.into()),
         }
     }
-}
-
-
-/// Wraps `file::Dictionary`.
-#[derive(Copy, Clone)]
-pub struct Dictionary<'a> {
-    dict: &'a file::Dictionary,
-    doc: &'a Document,
-}
-impl<'a> Dictionary<'a> {
-    pub fn get<K>(&self, key: K) -> Result<Object<'a>>
-        where K: Into<String>
-    {
-        let key = key.into();
-        Ok(Object {
-            obj: self.dict.get(key)?,
-            doc: self.doc,
-        })
-    }
-
-    // TODO write the rest of them? If desired.
-    /// Calls `self.get` and tries to convert to Dictionary.
-    pub fn get_dictionary<K>(&self, key: K) -> Result<Dictionary<'a>>
-        where K: Into<String>
-    {
-        self.get(key)?.as_dictionary()
-    }
-
 }
 
 

@@ -96,7 +96,7 @@ mod tests {
         for i in 0..n {
             println!("Reading page {}", i);
             let page = reader.find_page(i).chain_err(|| format!("Get page {}", i)).unwrap_or_else(|e| print_err(e));
-            for (& ref name, & ref object) in &page.0 {
+            for (& ref name, & ref object) in &page {
                 let object = reader.dereference(object).chain_err(|| "Dereferencing an object...").unwrap_or_else(|e| print_err(e));
                 match object {
                     Primitive::Array (ref arr) => {

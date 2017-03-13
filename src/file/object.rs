@@ -18,6 +18,8 @@ pub struct IndirectObject {
     pub object: Primitive,
 }
 
+pub type Dictionary = HashMap<String, Primitive>;
+
 #[derive(Clone, Debug)]
 pub enum Primitive {
     Null,
@@ -25,14 +27,13 @@ pub enum Primitive {
     Number (f32),
     Boolean (bool),
     String (Vec<u8>),
-    /// Each byte is 0-15
-    HexString (Vec<u8>),
     Stream (Stream),
-    Dictionary (Dictionary),
+    Dictionary (HashMap<String, Primitive>),
     Array (Vec<Primitive>),
     Reference (ObjectId),
     Name (String),
 }
+
 
 /// PDF stream object.
 #[derive(Clone, Debug)]
@@ -46,46 +47,6 @@ pub struct Stream {
 pub struct ObjectId {
     pub obj_nr: u32,
     pub gen_nr: u16,
-}
-
-
-
-
-/// PDF dictionary object, maps from `String` to `file::Object`.
-#[derive(Clone, Debug, Default)]
-pub struct Dictionary (pub HashMap<String, Primitive>);
-
-impl Dictionary {
-    pub fn get<K>(&self, key: K) -> Result<&Primitive>
-        where K: Into<String>
-    {
-        let key = key.into();
-        self.0.get(&key).ok_or_else(|| ErrorKind::NotFound {word: key}.into())
-    }
-    pub fn set<K, V>(&mut self, key: K, value: V)
-		where K: Into<String>,
-		      V: Into<Primitive>
-	{
-		let _ = self.0.insert(key.into(), value.into());
-	}
-
-    /// Mostly used for debugging. If type is not specified, it will return Ok(()).
-    pub fn expect_type<K>(&self, type_name: K) -> Result<()>
-        where K: Into<String>
-    {
-        let type_name = type_name.into();
-        match self.get("Type") {
-            Err(_) => Ok(()),
-            Ok(&Primitive::Name (ref name)) => {
-                if *name == *type_name {
-                    Ok(())
-                } else {
-                    bail!("Expected type {}, found type {}.", type_name, name)
-                }
-            }
-            _ => bail!("???"),
-        }
-    }
 }
 
 impl Primitive {
@@ -210,10 +171,10 @@ impl Display for Primitive {
             Primitive::Stream (ref stream) => {
                 write!(f, "{}", stream)
             }
-            Primitive::Dictionary(Dictionary(ref d)) => {
+            Primitive::Dictionary(ref dict) => {
                 write!(f, "<< ")?;
-                for e in d {
-                    write!(f, "/{} {}", e.0, e.1)?;
+                for (ref key, ref val) in &dict {
+                    write!(f, "/{} {}", key, val)?;
                 }
                 write!(f, ">>\n")
             },
