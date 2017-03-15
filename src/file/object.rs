@@ -16,15 +16,15 @@ pub struct IndirectObject {
 pub type Dictionary = HashMap<String, Primitive>;
 
 #[derive(Clone, Debug)]
-pub enum Primitive<'a> {
+pub enum Primitive {
     Null,
     Integer (i32),
     Number (f32),
     Boolean (bool),
     String (Vec<u8>),
-    Stream (Stream<'a>),
-    Dictionary (HashMap<String, Primitive<'a>>),
-    Array (Vec<Primitive<'a>>),
+    Stream (Stream),
+    Dictionary (HashMap<String, Primitive>),
+    Array (Vec<Primitive>),
     Reference (ObjectId),
     Name (String),
 }
@@ -33,12 +33,12 @@ macro_rules! wrong_primitive {
     ($expected:ident, $found:expr) => (
         Err(ErrorKind::WrongObjectType {
             expected: stringify!(expected),
-            found: $found
+            found: "something else"
         }.into())
     )
 }
 
-impl<'a> Primitive<'a> {
+impl Primitive {
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
@@ -51,14 +51,14 @@ impl<'a> Primitive<'a> {
             p => wrong_primitive!(Reference, p)
         }
     }
-    pub fn as_array(&self, reader: &'a Reader) -> Result<&'a [Primitive]> {
+    pub fn as_array(&self, reader: &Reader) -> Result<&[Primitive]> {
         match *self {
             Primitive::Array(ref v) => Ok(v),
             Primitive::Reference(id) => reader.dereference(&id)?.as_array(reader),
             p => wrong_primitive!(Array, p)
         }
     }
-    pub fn as_dictionary(&self, reader: &'a Reader) -> Result<&Dictionary> {
+    pub fn as_dictionary(&self, reader: &Reader) -> Result<&Dictionary> {
         match *self {
             Primitive::Dictionary(ref dict) => Ok(dict),
             Primitive::Reference(id) => reader.dereference(&id)?.as_dictionary(reader),
@@ -66,7 +66,7 @@ impl<'a> Primitive<'a> {
         }
     }
 
-    pub fn as_stream(&self, reader: &'a Reader) -> Result<&Stream> {
+    pub fn as_stream(&self, reader: &Reader) -> Result<&Stream> {
         match *self {
             Primitive::Stream(ref s) => Ok(s),
             Primitive::Reference(id) => reader.dereference(&id)?.as_stream(reader),
@@ -77,9 +77,15 @@ impl<'a> Primitive<'a> {
 
 /// PDF stream object.
 #[derive(Clone, Debug)]
-pub struct Stream<'a> {
+pub struct Stream {
     pub dictionary: Dictionary,
-    pub content: &'a[u8],
+    offset: usize,
+    length: usize
+}
+impl Stream {
+    pub fn data(reader: &Reader) -> &[u8] {
+        &reader.data()[self.offset .. self.offset + self.length]
+    }
 }
 
 /// Used to identify an object; corresponds to a PDF indirect reference.

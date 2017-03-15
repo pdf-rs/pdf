@@ -68,16 +68,18 @@ impl Reader {
                 let length = match reader {
                     Some(reader) => reader.dereference(dict.get("Length")?)?.as_integer()?,
                     None => dict.get("Length")?.as_integer()?,
-                };
-                // Read the stream
-                let mut content = lexer.offset_pos(length as usize);
+                } as usize;
                 
+                let offset = lexer.get_pos();
+                // Skip the stream
+                lexer.set_pos(offset + length);
                 // Finish
                 lexer.next_expect("endstream")?;
 
                 Primitive::Stream (Stream {
                     dictionary: dict,
-                    content: content,
+                    offset: offset,
+                    length: length
                 })
             } else {
                 Primitive::Dictionary (dict)

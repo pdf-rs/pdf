@@ -48,6 +48,10 @@ impl Reader {
         Ok(pdf_reader)
     }
 
+    pub fn data(&self) -> &[u8] {
+        &self.buf
+    }
+    
     pub fn objects(&self) -> ObjectIter {
         ObjectIter {
             reader: self,
@@ -87,83 +91,10 @@ impl Reader {
                 Ok(indirect_obj.object)
             }
             XrefEntry::InStream {stream_obj_nr, index} => {
-                let obj_stream = self.read_indirect_object(stream_obj_nr)?.into_stream()?;
+                let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
                 self.parse_object_from_stream(&obj_stream, index)
             }
-        }
-    }
-
-    pub fn get_num_pages(&self) -> i32 {
-
-        let result = self.pages_root.get("Count");
-        match result {
-            Ok(&Primitive::Integer(n)) => n,
-            _ => 0,
-        }
-    }
-
-    /// Find a page looking in the page tree. Return the Object.
-    pub fn find_page(&self, page_nr: i32) -> Result<Dictionary> {
-        if page_nr >= self.get_num_pages() {
-            return Err(ErrorKind::OutOfBounds.into());
-        }
-        let result = self.find_page_internal(page_nr, &mut 0, &self.pages_root)?;
-        match result {
-            Some(page) => Ok(page),
-            None => bail!("Failed to find page"),
-        }
-    }
-
-    /// `page_nr`: the number of the wanted page
-    /// `progress` is the page number of the first leaf of the current tree
-    /// A recursive process which returns a page if found, and in any case, the number of pages
-    /// traversed (i32)
-    fn find_page_internal(&self, page_nr: i32, progress: &mut i32, node: &Dictionary ) -> Result<Option<Dictionary>> {
-        if *progress > page_nr {
-            // Search has already passed the correct one...
-            bail!("Search has passed the page nr, without finding the page.");
-        }
-
-        if let Ok(&Primitive::Name(ref t)) = node.get("Type") {
-            if *t == "Pages" { // Intermediate node
-                // Number of leaf nodes (pages) in this subtree
-                let count = if let Primitive::Integer(n) = *node.get("Count")? {
-                        n
-                    } else {
-                        bail!("No Count.");
-                    };
-
-                // If the target page is a descendant of the intermediate node
-                if *progress + count > page_nr {
-                    let kids = if let Primitive::Array(ref kids) = *node.get("Kids")? {
-                            kids
-                        } else {
-                            bail!("No Kids entry in Pages object.");
-                        };
-                    // Traverse children of node.
-                    for kid in kids {
-                        let result = self.find_page_internal(page_nr, progress, &self.dereference(kid)?.into_dictionary()?)?;
-                        if let Some(found_page) = result {
-                            return Ok(Some(found_page));
-                        }
-                    }
-                    Ok(None)
-                } else {
-                    Ok(None)
-                }
-            } else if *t == "Page" { // Leaf node
-                if page_nr == *progress {
-                    Ok(Some(node.clone()))
-                } else {
-                    *progress += 1;
-                    Ok(None)
-                }
-            } else {
-                Err("Dictionary is not of Type Page nor Pages".into())
-            }
-        } else {
-            Err("Dictionary has no Type attribute".into())
         }
     }
 
@@ -231,16 +162,6 @@ impl Reader {
         let (_, trailer) = self.read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
         Ok(trailer)
     }
-
-    /// Read the Root/Catalog object
-    fn read_root(&self) -> Result<Dictionary> {
-        self.dereference(self.trailer.get("Root")?)?.into_dictionary()
-    }
-
-    fn read_pages(&self) -> Result<Dictionary> {
-        self.dereference(self.root.get("Pages")?)?.into_dictionary()
-    }
-
 }
 
 

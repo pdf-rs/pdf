@@ -1,5 +1,5 @@
 use doc::Document;
-use file;
+use file::{Primitive, Reader};
 use err::*;
 use std::{io, fmt};
 
@@ -11,4 +11,8 @@ use std::{io, fmt};
 
 pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
+}
+
+pub trait PrimitiveConv {
+    fn from_primitive(p: &Primitive, reader: &Reader) -> Self;
 }

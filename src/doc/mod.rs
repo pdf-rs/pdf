@@ -2,10 +2,11 @@
 
 pub mod object;
 pub mod types;
+use self::types::{Root, Pages, Page, PagesNode};
 
 pub use self::object::*;
 use file;
-use file::{ObjectId, Reader};
+use file::{ObjectId, Reader, Primitive};
 use err::*;
 use std::collections::HashMap;
 
@@ -39,21 +40,23 @@ impl Document {
         }
         self.find_page(n, 0, &self.root.pages)
     }
-    fn find_page(&self, page_nr: i32, offset: mut i32, pages: &Pages) -> Result<&Page> {
-        for kid in &page.kids match kid {
-            PagesNode::Tree(ref t) => {
-                if offset + t.count < page_nr {
-                    offset += t.count;
-                } else {
-                    self.find_page(page_nr, offset, t)
-                }
-            },
-            PagesNode::Leaf(ref p) => {
-                if offset > page_nr {
-                    offset += 1;
-                } else {
-                    assert_eq!(offset, page_nr);
-                    return Ok(p)
+    fn find_page(&self, page_nr: i32, mut offset: i32, pages: &Pages) -> Result<&Page> {
+        for kid in &pages.kids {
+            match kid {
+                PagesNode::Tree(ref t) => {
+                    if offset + t.count < page_nr {
+                        offset += t.count;
+                    } else {
+                        self.find_page(page_nr, offset, t);
+                    }
+                },
+                PagesNode::Leaf(ref p) => {
+                    if offset > page_nr {
+                        offset += 1;
+                    } else {
+                        assert_eq!(offset, page_nr);
+                        return Ok(p);
+                    }
                 }
             }
         }
