@@ -5,6 +5,7 @@ use file::File;
 use object::{Object, PrimitiveConv};
 use primitive::Primitive;
 use types::StreamFilter;
+use inflate::InflateStream;
 
 #[derive(Object, PrimitiveConv)]
 struct StreamInfo {
