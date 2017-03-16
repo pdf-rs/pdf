@@ -15,13 +15,16 @@ license = "MIT"
 documentation = "https://docs.rs/pdf/0.6.0/pdf/"
 
 [dependencies]
-#pdf_derive= {git = "https://github.com/pdf-rs/pdf_derive.git"}
-pdf_derive= {path = "../pdf_derive"}
+pdf_derive= {git = "https://github.com/pdf-rs/pdf_derive.git"}
+#pdf_derive= {path = "../pdf_derive"}
 error-chain = "0.9.0"
 isatty = "0.1"
 num-traits = "0.1.36"
 inflate = "0.1.1"
 ansi_term = "0.9.0"
+byteorder = "*"
+itertools = "*"
+ordermap = "*"
 
 [lib]
 doctest = false

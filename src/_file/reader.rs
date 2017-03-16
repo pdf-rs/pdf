@@ -1,7 +1,9 @@
 use err::*;
 
 use file::lexer::Lexer;
-use file::{Dictionary, XrefTable, Primitive, XrefEntry, XrefSection, ObjectNrIter, ObjectId};
+use xref::{XRef, XRefTable, XRefSection};
+use primitive::{Dictionary, Primitive};
+use object::PlainRef;
 use std::vec::Vec;
 use std::io::SeekFrom;
 use std::io::Seek;
@@ -12,7 +14,7 @@ use std::iter::Iterator;
 pub struct Reader {
     // Contents
     startxref: usize,
-    xref_table: XrefTable,
+    xref_table: XRefTable,
     root: Dictionary,
     pub trailer: Dictionary, // only the last trailer in the file
     pages_root: Dictionary, // the root of the tree of pages
@@ -29,7 +31,7 @@ impl Reader {
     pub fn new(data: Vec<u8>) -> Result<Reader> {
         let mut pdf_reader = Reader {
             startxref: 0,
-            xref_table: XrefTable::new(0),
+            xref_table: XRefTable::new(0),
             root: Dictionary::default(),
             trailer: Dictionary::default(),
             pages_root: Dictionary::default(),
@@ -51,15 +53,15 @@ impl Reader {
     pub fn data(&self) -> &[u8] {
         &self.buf
     }
-    
+    /*
     pub fn objects(&self) -> ObjectIter {
         ObjectIter {
             reader: self,
             obj_nr_iter: self.xref_table.iter(),
         }
-    }
+    }*/
 
-    pub fn get_xref_table(&self) -> &XrefTable {
+    pub fn get_xref_table(&self) -> &XRefTable {
         &self.xref_table
     }
 
@@ -80,8 +82,8 @@ impl Reader {
     pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Primitive> {
         let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
         match xref_entry {
-            XrefEntry::Free { .. } => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
-            XrefEntry::InUse {pos, ..} => {
+            XRef::Free { .. } => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
+            XRef::InUse {pos, ..} => {
                 let mut lexer = Lexer::new(&self.buf);
                 lexer.set_pos(pos as usize);
                 let indirect_obj = self.parse_indirect_object(&mut lexer)?;
@@ -90,7 +92,7 @@ impl Reader {
                 }
                 Ok(indirect_obj.object)
             }
-            XrefEntry::InStream {stream_obj_nr, index} => {
+            XRef::InStream {stream_obj_nr, index} => {
                 let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
                 obj_stream.dictionary.expect_type("ObjStm")?;
                 self.parse_object_from_stream(&obj_stream, index)
@@ -114,7 +116,7 @@ impl Reader {
     /// Reads xref and trailer at some byte position `start`.
     /// `start` should point to the `xref` keyword of an xref table, or to the start of an xref
     /// stream.
-    fn read_xref_and_trailer_at(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+    fn read_xref_and_trailer_at(&self, lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
         let next_word = lexer.next()?;
         if next_word.equals(b"xref") {
             // Read classic xref table
@@ -128,14 +130,14 @@ impl Reader {
         }
     }
 
-    /// Gathers all xref sections in the file to an XrefTable.
+    /// Gathers all xref sections in the file to an XRefTable.
     /// Agnostic about whether there are xref tables or xref streams. (but haven't thought about
     /// hybrid ones)
-    fn gather_xref(&self) -> Result<XrefTable> {
+    fn gather_xref(&self) -> Result<XRefTable> {
         let mut lexer = Lexer::new(&self.buf);
         let num_objects = self.trailer.get("Size")?.as_integer()?;
 
-        let mut table = XrefTable::new(num_objects as usize);
+        let mut table = XRefTable::new(num_objects as usize);
 
         let mut next_xref_start: Option<i32> = Some(self.startxref as i32);
         
@@ -155,16 +157,17 @@ impl Reader {
 
     }
 
-
+/*
     /// Needs to be called before any other functions on the Reader
     /// Reads the last trailer in the file
     fn read_last_trailer(&mut self) -> Result<Dictionary> {
         let (_, trailer) = self.read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
         Ok(trailer)
     }
+*/
 }
 
-
+/*
 pub struct ObjectIter<'a> {
     reader: &'a Reader,
     obj_nr_iter: ObjectNrIter<'a>,
@@ -182,7 +185,7 @@ impl<'a> Iterator for ObjectIter<'a> {
         }
     }
 }
-
+*/
 
 
 pub fn read_file(path: &str) -> Result<Vec<u8>> {

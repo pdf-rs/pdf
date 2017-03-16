@@ -1,19 +1,7 @@
-use file::{ObjectId};
-use doc::object::Object;
+use object::{Object, PlainRef, Ref};
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::io;
-
-/* Some more basic types for which we explicitly impl Object */
-pub struct Ref<T> {
-    id: ObjectId,
-    _marker: PhantomData<T>,
-}
-impl<T> Object for Ref<T> where T: Object {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{} {} R", self.id.obj_nr, self.id.gen_nr)
-    }
-}
 
 /// Node in a page tree - type is either `Page` or `Pages`
 pub enum PagesNode {
@@ -112,7 +100,25 @@ pub struct Page {
     parent: Ref<Pages>
 }
 
-
+pub enum StreamFilter {
+    AsciiHex,
+    Ascii85,
+    Lzw,
+    Flate,
+    Jpeg2k
+}
+impl Object for StreamFilter {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        let s = match self {
+            &StreamFilter::AsciiHex => "/ASCIIHexDecode",
+            &StreamFilter::Ascii85 => "/ASCII85Decode",
+            &StreamFilter::Lzw => "/LZWDecode",
+            &StreamFilter::Flate => "/FlateDecode",
+            &StreamFilter::Jpeg2k => "/JPXDecode"
+        };
+        write!(out, "{}", s)
+    }
+}
 
 
 

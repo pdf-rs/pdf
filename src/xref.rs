@@ -7,38 +7,48 @@ use std::fmt::{Debug, Formatter};
 ///////////////////////////
 
 #[derive(Copy, Clone, Debug)]
-pub enum XrefEntry {
-    Free {next_obj_nr: u32, gen_nr: u16},
-    InUse {pos: usize, gen_nr: u16},
+pub enum XRef {
+    /// not used currently
+    Free {
+        next_obj_nr: u32,
+        gen_nr: u16
+    },
+    Raw {
+        pos: usize,
+        gen_nr: u16
+    },
     /// In use and compressed inside an Object Stream
-    InStream {stream_obj_nr: u32, index: u16},
-
+    Stream {
+        stream_obj_nr: u32,
+        index: u16
+    },
+    Promised
 }
 
-impl XrefEntry {
+impl XRef {
     pub fn get_gen_nr(&self) -> u16 {
         match *self {
-            XrefEntry::Free {gen_nr, ..}
-            | XrefEntry::InUse {gen_nr, ..} => gen_nr,
-            XrefEntry::InStream { .. } => 0, // TODO I think these always have gen nr 0?
+            XRef::Free {gen_nr, ..}
+            | XRef::Raw {gen_nr, ..} => gen_nr,
+            XRef::Stream { .. } => 0, // TODO I think these always have gen nr 0?
         }
     }
 }
 
 
 /// Runtime lookup table of all objects
-pub struct XrefTable {
+pub struct XRefTable {
     // None means that it's not specified, and should result in an error if used
     // Thought: None could also mean Free?
-    entries: Vec<Option<XrefEntry>>
+    entries: Vec<Option<XRef>>
 }
 
 
-impl XrefTable {
-    pub fn new(num_objects: usize) -> XrefTable {
+impl XRefTable {
+    pub fn new(num_objects: usize) -> XRefTable {
         let mut entries = Vec::new();
         entries.resize(num_objects, None);
-        XrefTable {
+        XRefTable {
             entries: entries,
         }
     }
@@ -50,7 +60,7 @@ impl XrefTable {
         }
     }
 
-    pub fn get(&self, index: usize) -> Result<XrefEntry> {
+    pub fn get(&self, index: usize) -> Result<XRef> {
         match self.entries[index] {
             Some(entry) => Ok(entry),
             None => bail!("Entry {} in xref table unspecified.", index),
@@ -60,7 +70,7 @@ impl XrefTable {
         self.entries.len()
     }
 
-    pub fn add_entries_from(&mut self, section: XrefSection) {
+    pub fn add_entries_from(&mut self, section: XRefSection) {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
             let should_be_updated = match self.entries[i] {
@@ -76,17 +86,17 @@ impl XrefTable {
     }
 }
 
-impl Debug for XrefTable {
+impl Debug for XRefTable {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         for (i, entry) in self.entries.iter().enumerate() {
             match *entry {
-                Some(XrefEntry::Free {next_obj_nr, gen_nr}) => {
+                Some(XRef::Free {next_obj_nr, gen_nr}) => {
                     write!(f, "{:4}: {:010} {:05} f \n", i, next_obj_nr, gen_nr)?
                 },
-                Some(XrefEntry::InUse {pos, gen_nr}) => {
+                Some(XRef::Raw {pos, gen_nr}) => {
                     write!(f, "{:4}: {:010} {:05} n \n", i, pos, gen_nr)?
                 },
-                Some(XrefEntry::InStream {stream_obj_nr, index}) => {
+                Some(XRef::Stream {stream_obj_nr, index}) => {
                     write!(f, "{:4}: in stream {}, index {}\n", i, stream_obj_nr, index)?
                 }
                 None => {
@@ -100,31 +110,31 @@ impl Debug for XrefTable {
 
 /// As found in PDF files
 #[derive(Debug)]
-pub struct XrefSection {
+pub struct XRefSection {
     pub first_id: u32,
-    pub entries: Vec<XrefEntry>,
+    pub entries: Vec<XRef>,
 }
 
 
-impl XrefSection {
-    pub fn new(first_id: u32) -> XrefSection {
-        XrefSection {
+impl XRefSection {
+    pub fn new(first_id: u32) -> XRefSection {
+        XRefSection {
             first_id: first_id,
             entries: Vec::new(),
         }
     }
     pub fn add_free_entry(&mut self, next_obj_nr: u32, gen_nr: u16) {
-        self.entries.push(XrefEntry::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});
+        self.entries.push(XRef::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});
     }
     pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
-        self.entries.push(XrefEntry::InUse{pos: pos, gen_nr: gen_nr});
+        self.entries.push(XRef::Raw{pos: pos, gen_nr: gen_nr});
     }
 }
 
 
 /// Iterates over the used object numbers in this xref table, skips the free objects.
 pub struct ObjectNrIter<'a> {
-    xref_table: &'a XrefTable,
+    xref_table: &'a XRefTable,
     obj_nr: i64,
 }
 
@@ -137,7 +147,7 @@ impl<'a> Iterator for ObjectNrIter<'a> {
             None
         } else {
             match self.xref_table.entries[self.obj_nr as usize] {
-                Some(XrefEntry::Free {..}) | None => self.next(),
+                Some(XRef::Free {..}) | None => self.next(),
                 Some(_) => Some(self.obj_nr as u32),
             }
         }

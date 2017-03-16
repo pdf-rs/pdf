@@ -7,15 +7,30 @@ extern crate error_chain;
 extern crate num_traits;
 extern crate inflate;
 extern crate ansi_term;
+extern crate byteorder;
+extern crate itertools;
+extern crate ordermap;
 
-pub mod doc;
+#[macro_use]
+mod macros;
 pub mod file;
-mod err;
-mod content;
+pub mod object;
+pub mod types;
+pub mod xref;
+pub mod primitive;
+pub mod stream;
 
-pub use content::*;
+mod err;
+// mod content;
+pub mod document;
+
+// pub use content::*;
 pub use err::*;
 
+// hack to use ::pdf::object::Object in the derive
+mod pdf {
+    pub use super::*;
+}
 // TODO
 // - impl Into<Object>
 // - Consider whether we should enumerate all operations and graphics/text state parameters
