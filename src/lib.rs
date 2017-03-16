@@ -82,7 +82,7 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     });
     
     quote! {
-        impl Object for #name {
+        impl ::pdf::object::Object for #name {
             fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "<<")?;
                 writeln!(out, "/Type /{}", stringify!(#name))?;
@@ -146,8 +146,8 @@ fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
     });
     
     quote! {
-        impl PrimitiveConv for #name {
-            fn from_primitive(p: &Primitive, r: &File) -> Result<#name, String> {
+        impl ::pdf::object::PrimitiveConv for #name {
+            fn from_primitive<B>(p: &::pdf::primitive::Primitive, r: &::pdf::file::File<B>) -> #name {
                 #( #aliases )*
                 let dict = p.as_dictionary(r);
                 #name {
