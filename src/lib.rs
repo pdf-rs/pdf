@@ -4,7 +4,7 @@ extern crate syn;
 extern crate quote;
 
 use proc_macro::TokenStream;
-use syn::{MetaItem, NestedMetaItem, Lit, Body};
+use syn::*;
 
 #[proc_macro_derive(Object, attributes(pdf))]
 pub fn object(input: TokenStream) -> TokenStream {
@@ -39,6 +39,16 @@ fn get_attrs(list: &[NestedMetaItem]) -> (String, bool) {
     (key.expect("attr `key` missing"), opt)
 }
 
+fn pdf_attr(field: &Field) -> (String, bool) {
+    field.attrs.iter()
+    .filter_map(|attr| match attr.value {
+        MetaItem::List(ref ident, ref list) if ident == "pdf" => {
+            Some(get_attrs(&list))
+        },
+        _ => None
+    }).next().expect("no pdf meta attribute")
+}
+
 fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     let name = &ast.ident;
     
@@ -50,18 +60,11 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        let (key, opt) = field.attrs.iter()
-        .filter_map(|attr| match attr.value {
-            MetaItem::List(ref ident, ref list) if ident == "pdf" => {
-                Some(get_attrs(&list))
-            },
-            _ => None
-        }).next().expect("no pdf meta attribute");
-        
+        let (key, opt) = pdf_attr(field);
         (field.ident.clone(), key, opt)
     }).collect();
     
-    let fields_ser: Vec<_> = parts.iter()
+    let fields_ser = parts.iter()
     .map(|&(ref field, ref key, opt)| if opt {
         quote! {
             if let Some(ref field) = self.#field {
@@ -76,7 +79,7 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
             self.#field.serialize(out)?;
             writeln!(out, "")?;
         }
-    }).collect();
+    });
     
     quote! {
         impl Object for #name {
@@ -91,8 +94,8 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
     }
 }
 
-/*
-#[proc_macro_derive(PrimitiveConv)]
+
+#[proc_macro_derive(PrimitiveConv, attributes(pdf))]
 pub fn primitive_conv(input: TokenStream) -> TokenStream {
     // Construct a string representation of the type definition
     let s = input.to_string();
@@ -116,13 +119,41 @@ fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
         Body::Enum(_) => panic!("#[derive(PrimitiveConv)] can only be used with structs"),
     };
     
+    let aliases: Vec<_> = fields.iter().enumerate().map(|(i, field)| {
+        let alias = format!("ty_{}", i);
+        Ty::Path(None, Path {
+            global: false,
+            segments: vec![Ident::from(alias).into()]
+        })
+    })
+    .collect();
+    
+    let parts = fields.iter().zip(aliases.iter()).map(|(field, alias)| {
+        let (key, opt) = pdf_attr(field);
+        let ref name = field.ident;
+        
+        quote! {
+            #name: #alias::from_primitive(&dict[#key], r),
+        }
+    });
+    
+    let aliases = fields.iter().zip(aliases.iter()).map(|(field, alias)| {
+        let ref ty = field.ty;
+        
+        quote! {
+            type #alias = #ty;
+        }
+    });
+    
     quote! {
-        impl PrimitiveConf for #name {
-            fn from_primitive(p: Primitive) -> Result<#name, String> {
+        impl PrimitiveConv for #name {
+            fn from_primitive(p: &Primitive, r: &File) -> Result<#name, String> {
+                #( #aliases )*
+                let dict = p.as_dictionary(r);
                 #name {
-                    #( #fields: 
+                    #( #parts )*
                 }
             }
         }
     }
-*/
+}
