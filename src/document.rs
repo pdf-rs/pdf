@@ -1,29 +1,25 @@
 //! Abstraction over the `file` module. Stores objects in high-level representation. Introduces wrappers for all kinds of PDF Objects (`file::Primitive`), for easy PDF reference following.
 
-pub mod object;
-pub mod types;
-use self::types::{Root, Pages, Page, PagesNode};
-
-pub use self::object::*;
+use types::{Root, Pages, Page, PagesNode};
 use file;
-use file::{ObjectId, Reader, Primitive};
+use file::File;
+use primitive::{Primitive};
+use object::PlainRef;
 use err::*;
 use std::collections::HashMap;
 
 /// `Document` keeps all objects of the PDf file stored in a high-level representation.
 
 pub struct Document {
-    root_id:    ObjectId,
     root:       Root
 }
 
 impl Document {
-    pub fn from_root(root: &Primitive, reader: &Reader) -> Result<Document> {
+    pub fn from_root<B>(root: &Primitive, reader: &File<B>) -> Result<Document> {
         let root_ref = reader.trailer.get("Root").chain_err(|| "No root entry in trailer.")?;
         let root = Root::from_primitive(&root_ref, reader)?;
         
         Ok(Document {
-            root_id:    root_ref.as_reference()?,
             root:       root
         })
     }
