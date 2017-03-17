@@ -132,8 +132,14 @@ fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
         let (key, opt) = pdf_attr(field);
         let ref name = field.ident;
         
-        quote! {
-            #name: #alias::from_primitive(&dict[#key], r),
+        if opt {
+            quote! {
+                #name: #alias::from_primitive(&dict.get(#key), r)?,
+            }
+        } else {
+            quote! {
+                #name: #alias::from_primitive(&dict.get(#key).unwrap(), r)?,
+            }
         }
     });
     
@@ -147,12 +153,12 @@ fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
     
     quote! {
         impl ::pdf::object::PrimitiveConv for #name {
-            fn from_primitive<B>(p: &::pdf::primitive::Primitive, r: &::pdf::file::File<B>) -> #name {
+            fn from_primitive<B>(p: &::pdf::primitive::Primitive, r: &::pdf::file::File<B>) -> ::std::result::Result<#name, ::pdf::err::Error> {
                 #( #aliases )*
-                let dict = p.as_dictionary(r);
-                #name {
+                let dict = p.as_dictionary(r)?;
+                Ok(#name {
                     #( #parts )*
-                }
+                })
             }
         }
     }
