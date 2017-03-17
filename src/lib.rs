@@ -10,10 +10,12 @@ extern crate ansi_term;
 extern crate byteorder;
 extern crate itertools;
 extern crate ordermap;
+extern crate memmap;
+extern crate encoding;
 
 #[macro_use]
 mod macros;
-pub mod _file;
+pub mod parser;
 pub mod object;
 pub mod types;
 pub mod xref;

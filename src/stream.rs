@@ -21,19 +21,20 @@ pub struct Stream {
     info:       StreamInfo
 }
 impl Stream {
+    /*
     pub fn from_file(p: &Primitive, data: &[u8]) -> Self {
-        Ok(Stream {
+        Stream {
             info:   StreamInfo::from_primitive(p),
-            data:   data
-        })
+            data:   data.to_owned()
+        }
     }
-
+    */
     pub fn empty(ty: &str) -> Stream {
         Stream {
             data:   Vec::new(),
             info:   StreamInfo {
                 filter: vec![],
-                ty:     ty
+                ty:     ty.to_string()
             }
         }
     }

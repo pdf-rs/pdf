@@ -1,7 +1,12 @@
-use object::{Object, PlainRef, Ref};
+use object::{Object, PlainRef, Ref, PrimitiveConv};
+use primitive::Primitive;
+use file::File;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::io;
+use err::Error;
+use std::io::Write;
+use encoding::all::UTF_16BE;
 
 /// Node in a page tree - type is either `Page` or `Pages`
 pub enum PagesNode {
@@ -14,6 +19,56 @@ impl Object for PagesNode {
             PagesNode::Tree (ref t) => t.serialize(out),
             PagesNode::Leaf (ref l) => l.serialize(out),
         }
+    }
+}
+
+
+impl Object for str {
+    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
+        for b in self.chars() {
+            match b {
+                '\\' | '(' | ')' => write!(out, r"\")?,
+                c if c > '~' => panic!("only ASCII"),
+                _ => ()
+            }
+            write!(out, "{}", b)?;
+        }
+        Ok(())
+    }
+}
+impl Object for String {
+    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
+        (self as &str).serialize(out)
+    }
+}
+impl PrimitiveConv for String {
+    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+        Ok(p.as_name()?.to_owned())
+    }
+}
+
+struct Text {
+    data:   Vec<u8>
+}
+impl Text {
+    pub fn new(s: &str) -> Text {
+        use encoding::{Encoding, EncoderTrap};
+        Text {
+            data: UTF_16BE.encode(s, EncoderTrap::Strict).expect("encoding is broken")
+        }
+    }
+}
+impl Object for Text {
+    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
+        out.write(b"(")?;
+        out.write(&self.data)?;
+        out.write(b")")?;
+        Ok(())
+    }
+}
+impl PrimitiveConv for Text {
+    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+        Ok(Text{ data: p.as_string()?.to_owned() })
     }
 }
 
@@ -39,22 +94,27 @@ impl<T: Object> Object for Vec<T> {
         write_list(out, self.iter())
     }
 }
+impl<T: PrimitiveConv> PrimitiveConv for Vec<T> {
+    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+        Ok(p.as_array(reader)?.iter().map(|p| T::from_primitive(reader)).collect())
+    }
+}
 impl<T: Object> Object for [T] {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write_list(out, self.iter())
     }
 }
 
-macro_rules! impl_pdf_int {
-    ($($name:ident)*) => { $(
-        impl Object for $name {
-            fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-                write!(out, "{}", self)
-            }
-        } )*
+impl Object for i32 {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
     }
 }
-impl_pdf_int!(i8 u8 i16 u16 i32 u32 i64 u64 isize usize f32 f64);
+impl PrimitiveConv for i32 {
+    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+        p.as_integer()
+    }
+}
 
 /* Dictionary Types */
 
@@ -117,6 +177,17 @@ impl Object for StreamFilter {
             &StreamFilter::Jpeg2k => "/JPXDecode"
         };
         write!(out, "{}", s)
+    }
+}
+impl PrimitiveConv for StreamFilter {
+    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+        match p.as_name()? {
+            "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
+            "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
+            "LZWDecode"         => Ok(StreamFilter::Lzw),
+            "FlateDecode"       => Ok(StreamFilter::Flate),
+            "JPXDecode"         => Ok(StreamFilter::Jpeg2k)
+        }
     }
 }
 

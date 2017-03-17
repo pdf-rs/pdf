@@ -1,6 +1,6 @@
 use err::*;
 
-use _file::lexer::Lexer;
+use super::lexer::Lexer;
 use xref::{XRef, XRefTable, XRefSection};
 use primitive::{Dictionary, Primitive};
 use object::PlainRef;

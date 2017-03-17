@@ -2,7 +2,7 @@ use document::Document;
 use file::File;
 use primitive::Primitive;
 use xref::XRef;
-use err::*;
+use err::Error;
 use std::{io, fmt};
 use types::StreamFilter;
 use std::marker::PhantomData;
@@ -18,8 +18,8 @@ pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
 }
 
-pub trait PrimitiveConv {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Self;
+pub trait PrimitiveConv: Sized {
+    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error>;
 }
 
 
@@ -34,7 +34,7 @@ impl Object for PlainRef {
 }
 
 pub struct PromisedRef<T> {
-    id:         u64,
+    inner:      PlainRef,
     _marker:    PhantomData<T>
 }
 
@@ -88,8 +88,7 @@ pub struct ObjectStream<'a, W: io::Write + 'a> {
 }
 impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {
     pub fn new(file: &'a mut File<W>) -> ObjectStream<'a, W> {
-        let id = file.refs.len() as u64;
-        file.refs.push(XRef::Promised);
+        let id = file.promise();
         
         ObjectStream {
             filters:    Vec::new(),

@@ -1,7 +1,6 @@
 //! Abstraction over the `file` module. Stores objects in high-level representation. Introduces wrappers for all kinds of PDF Objects (`file::Primitive`), for easy PDF reference following.
 
 use types::{Root, Pages, Page, PagesNode};
-use file;
 use file::File;
 use primitive::{Primitive};
 use object::PlainRef;

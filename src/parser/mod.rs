@@ -1,16 +1,15 @@
 //! Basic functionality for parsing a PDF file.
 pub mod lexer;
 mod reader;
-mod writer;
+//mod writer;
 
 pub use self::reader::*;
-pub use self::writer::*;
+//pub use self::writer::*;
 
 use err::*;
-use self::lexer::Lexer;
+use self::lexer::{Lexer, StringLexer};
 use primitive::{Primitive, Dictionary};
 use object::PlainRef;
-use _file::lexer::StringLexer;
 
 pub fn parse(data: &[u8]) -> Result<Primitive> {
     parse_internal(&mut Lexer::new(data))
