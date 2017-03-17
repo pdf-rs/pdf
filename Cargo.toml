@@ -25,6 +25,8 @@ ansi_term = "0.9.0"
 byteorder = "*"
 itertools = "*"
 ordermap = "*"
+memmap = "*"
+encoding = "*"
 
 [lib]
 doctest = false
