@@ -1,5 +1,5 @@
 use document::Document;
-use file::{File};
+use file::File;
 use primitive::Primitive;
 use xref::XRef;
 use err::*;
