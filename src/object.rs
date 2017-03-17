@@ -23,9 +23,10 @@ pub trait PrimitiveConv: Sized {
 }
 
 
+#[derive(Clone)]
 pub struct PlainRef {
-    id:     u64,
-    gen:    u32
+    pub id:     u64,
+    pub gen:    u32
 }
 impl Object for PlainRef {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {

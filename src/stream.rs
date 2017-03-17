@@ -17,8 +17,8 @@ struct StreamInfo {
 }
 
 pub struct Stream {
-    data:       Vec<u8>,
-    info:       StreamInfo
+    pub data:       Vec<u8>,
+    pub info:       StreamInfo
 }
 impl Stream {
     /*

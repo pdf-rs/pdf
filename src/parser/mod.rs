@@ -2,6 +2,8 @@
 pub mod lexer;
 mod reader;
 //mod writer;
+mod parse_object;
+mod parse_xref;
 
 pub use self::reader::*;
 //pub use self::writer::*;
@@ -26,8 +28,8 @@ fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.as_string();
-                let obj = Reader::parse_internal(lexer)?;
-                dict.set(key, obj);
+                let obj = parse_internal(lexer)?;
+                dict[&key] = obj;
             } else if delimiter.equals(b">>") {
                 break;
             } else {
@@ -95,7 +97,7 @@ fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
         let mut array = Vec::new();
         // Array
         loop {
-            let element = Reader::parse_internal(lexer)?;
+            let element = parse_internal(lexer)?;
             array.push(element.clone());
 
             // Exit if closing delimiter
@@ -125,7 +127,7 @@ fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
     } else if first_lexeme.equals(b"<") {
         let hex_str = lexer.next()?.to_vec();
         lexer.next_expect(">")?;
-        Primitive::HexString (hex_str)
+        Primitive::String (hex_str) // TODO no HexString - problem?
     } else {
         bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
               lexer.get_pos(),

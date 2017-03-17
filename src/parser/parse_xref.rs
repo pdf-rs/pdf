@@ -1,14 +1,13 @@
-use file::Reader;
-use file::xref::*;
-use file::object::*;
+use parser::Reader;
 use err::*;
 use num_traits::PrimInt;
-use file::lexer::Lexer;
+use parser::lexer::Lexer;
+use xref::XRefSection;
 
 // Just the part of Parser which reads xref sections from xref stream.
 impl Reader {
     /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-    pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XrefSection> {
+    pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XRefSection> {
         let mut entries = Vec::new();
         for _ in 0..num_entries {
             let _type = Reader::read_u64_from_stream(width[0], data);
@@ -17,9 +16,9 @@ impl Reader {
 
             let entry =
             match _type {
-                0 => XrefEntry::Free {next_obj_nr: field1 as u32, gen_nr: field2 as u16},
-                1 => XrefEntry::InUse {pos: field1 as usize, gen_nr: field2 as u16},
-                2 => XrefEntry::InStream {stream_obj_nr: field1 as u32, index: field2 as u16},
+                0 => XRef::Free {next_obj_nr: field1 as u32, gen_nr: field2 as u16},
+                1 => XRef::Raw {pos: field1 as usize, gen_nr: field2 as u16},
+                2 => XRef::Stream {stream_obj_nr: field1 as u32, index: field2 as u16},
                 _ => bail!("Reading xref stream, The first field 'type' is {} - must be 0, 1 or 2", _type),
             };
             entries.push(entry);

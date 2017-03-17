@@ -19,7 +19,7 @@ pub enum Primitive {
     Boolean (bool),
     String (Vec<u8>),
     //Stream (Stream),
-    Dictionary (HashMap<String, Primitive>),
+    Dictionary (Dictionary),
     Array (Vec<Primitive>),
     Reference (PlainRef),
     Name (String),
@@ -69,7 +69,7 @@ impl Primitive {
     }
     pub fn as_string(&self) -> Result<&[u8]> {
         match *self {
-            Primitive::String(ref data) => Ok(data)
+            Primitive::String(ref data) => Ok(data),
             p => wrong_primitive!(String, p)
         }
     }
