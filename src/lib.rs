@@ -1,3 +1,5 @@
+#![recursion_limit="128"]
+
 extern crate proc_macro;
 extern crate syn;
 #[macro_use]
@@ -12,7 +14,7 @@ pub fn object(input: TokenStream) -> TokenStream {
     let s = input.to_string();
     
     // Parse the string representation
-    let ast = syn::parse_macro_input(&s).unwrap();
+    let ast = syn::parse_derive_input(&s).unwrap();
 
     // Build the impl
     let gen = impl_object(&ast);
@@ -49,7 +51,27 @@ fn pdf_attr(field: &Field) -> (String, bool) {
     }).next().expect("no pdf meta attribute")
 }
 
-fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
+fn pdf_type(ast: &DeriveInput) -> String {
+    ast.attrs.iter()
+    .filter_map(|attr| match attr.value {
+        MetaItem::List(ref ident, ref list) if ident == "pdf" => {
+            list.iter().filter_map(|meta| {
+                match *meta {
+                    NestedMetaItem::MetaItem(
+                        MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
+                    if ident == "type" =>
+                        Some(value.clone()),
+                    _ => None
+                }
+            }).next()
+        },
+        _ => None
+    })
+    .next()
+    .unwrap_or_else(|| String::from(ast.ident.as_ref()))
+}
+
+fn impl_object(ast: &DeriveInput) -> quote::Tokens {
     let name = &ast.ident;
     
     let fields = match ast.body {
@@ -81,11 +103,12 @@ fn impl_object(ast: &syn::MacroInput) -> quote::Tokens {
         }
     });
     
+    let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::Object for #name {
             fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "<<")?;
-                writeln!(out, "/Type /{}", stringify!(#name))?;
+                writeln!(out, "/Type /{}", stringify!(#type_name))?;
                 #(#fields_ser)*
                 writeln!(out, ">>")?;
                 Ok(())
@@ -101,7 +124,7 @@ pub fn primitive_conv(input: TokenStream) -> TokenStream {
     let s = input.to_string();
     
     // Parse the string representation
-    let ast = syn::parse_macro_input(&s).unwrap();
+    let ast = syn::parse_derive_input(&s).unwrap();
 
     // Build the impl
     let gen = impl_primitive_conv(&ast);
@@ -111,7 +134,7 @@ pub fn primitive_conv(input: TokenStream) -> TokenStream {
 }
 
 
-fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
+fn impl_primitive_conv(ast: &syn::DeriveInput) -> quote::Tokens {
     let name = &ast.ident;
     
     let fields = match ast.body {
@@ -151,11 +174,13 @@ fn impl_primitive_conv(ast: &syn::MacroInput) -> quote::Tokens {
         }
     });
     
+    let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::PrimitiveConv for #name {
             fn from_primitive<B>(p: &::pdf::primitive::Primitive, r: &::pdf::file::File<B>) -> ::std::result::Result<#name, ::pdf::err::Error> {
                 #( #aliases )*
                 let dict = p.as_dictionary(r)?;
+                assert_eq!(dict.get("Type").unwrap().as_name()?, stringify!(#type_name));
                 Ok(#name {
                     #( #parts )*
                 })
