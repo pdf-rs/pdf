@@ -39,3 +39,53 @@ fn locate_offset() {
     f.read_to_end(&mut buf);
     locate_xref_offset(&buf);
 }
+
+
+#[derive(Object, PrimitiveConv, pdf(type = "XRef"))]
+struct XRefInfo {
+    // Normal Stream fields
+    #[pdf(key = "Filter")]
+    filter: Vec<StreamFilter>,
+
+    // XRefStream fields
+    #[pdf(key = "Size")]
+    size: i32,
+
+    #[pdf(key = "Index")]
+    index: Vec<(i32, i32)>,
+
+    #[pdf(key = "Prev")]
+    prev: i32,
+
+    #[pdf(key = "W")]
+    w: Vec<i32,>
+}
+
+struct XRefStream {
+    pub data: Vec<u8>,
+    pub info: XRefInfo,
+}
+
+
+#[derive(Object, PrimitiveConv, pdf(type = "ObjStm"))]
+struct ObjStmInfo {
+    // Normal Stream fields
+    #[pdf(key = "Filter")]
+    filter: Vec<StreamFilter>,
+
+    // ObjStmStream fields
+    #[pdf(key = "N")]
+    n: i32,
+
+    #[pdf(key = "First")]
+    first: i32,
+
+    #[pdf(key = "Extends")]
+    extends: i32,
+
+}
+
+struct ObjectStream {
+    pub data: Vec<u8>,
+    pub info: ObjStmInfo,
+}

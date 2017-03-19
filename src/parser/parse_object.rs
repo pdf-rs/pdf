@@ -1,10 +1,11 @@
 // Considering whether to impl Object and IndirectObject here.
 //
 
-use file::Reader;
-use file::object::*;
-use file::lexer::*;
+use parser::Reader;
+use parser::lexer::*;
+use stream::Stream;
 use err::*;
+use primitive::Primitive;
 
 use inflate::InflateStream;
 

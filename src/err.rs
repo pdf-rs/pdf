@@ -46,7 +46,7 @@ error_chain! {
             description("Word not found.")
             display("'{}' not found.", word)
         }
-        FreeObject {obj_nr: u32} {
+        FreeObject {obj_nr: u64} {
             description("Tried to dereference free object.")
             display("Tried to dereference free object nr {}.", obj_nr)
         }

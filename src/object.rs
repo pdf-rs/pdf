@@ -22,16 +22,16 @@ pub trait PrimitiveConv: Sized {
     fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error>;
 }
 
-
 impl<'a, T> Object for &'a T where T: Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         self.serialize(out)
     }
 }
 
+#[derive(Clone)]
 pub struct PlainRef {
-    id:     u64,
-    gen:    u32
+    pub id:     u64,
+    pub gen:    u32
 }
 impl Object for PlainRef {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {

@@ -15,9 +15,7 @@ pub struct Reader {
     // Contents
     startxref: usize,
     xref_table: XRefTable,
-    root: Dictionary,
     pub trailer: Dictionary, // only the last trailer in the file
-    pages_root: Dictionary, // the root of the tree of pages
 
     buf: Vec<u8>,
 }
@@ -32,9 +30,7 @@ impl Reader {
         let mut pdf_reader = Reader {
             startxref: 0,
             xref_table: XRefTable::new(0),
-            root: Dictionary::default(),
             trailer: Dictionary::default(),
-            pages_root: Dictionary::default(),
             buf: data,
         };
         let startxref = pdf_reader.read_startxref()?;
@@ -45,8 +41,6 @@ impl Reader {
 
         pdf_reader.startxref = startxref;
         pdf_reader.xref_table = pdf_reader.gather_xref().chain_err(|| "Error reading xref table.")?;
-        pdf_reader.root = pdf_reader.read_root().chain_err(|| "Error reading root.")?;
-        pdf_reader.pages_root = pdf_reader.read_pages().chain_err(|| "Error reading pages.")?;
         Ok(pdf_reader)
     }
 
@@ -71,7 +65,7 @@ impl Reader {
     pub fn dereference(&self, obj: &Primitive) -> Result<Primitive> {
         match *obj {
             Primitive::Reference (ref id) => {
-                self.read_indirect_object(id.obj_nr)
+                self.read_indirect_object(id.id)
             },
             _ => {
                 Ok(obj.clone())
@@ -79,11 +73,11 @@ impl Reader {
         }
     }
 
-    pub fn read_indirect_object(&self, obj_nr: u32) -> Result<Primitive> {
-        let xref_entry = self.xref_table.get(obj_nr as usize)?; // TODO why usize?
+    pub fn read_indirect_object(&self, obj_nr: u64) -> Result<Primitive> {
+        let xref_entry = self.xref_table.get(obj_nr as usize)?;
         match xref_entry {
             XRef::Free { .. } => Err(ErrorKind::FreeObject {obj_nr: obj_nr}.into()),
-            XRef::InUse {pos, ..} => {
+            XRef::Raw {pos, ..} => {
                 let mut lexer = Lexer::new(&self.buf);
                 lexer.set_pos(pos as usize);
                 let indirect_obj = self.parse_indirect_object(&mut lexer)?;
@@ -92,10 +86,12 @@ impl Reader {
                 }
                 Ok(indirect_obj.object)
             }
-            XRef::InStream {stream_obj_nr, index} => {
-                let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
-                obj_stream.dictionary.expect_type("ObjStm")?;
-                self.parse_object_from_stream(&obj_stream, index)
+            XRef::Stream {stream_obj_nr, index} => {
+                unimplemented!();
+                // Commented because of lacking stream implementation:
+                // let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
+                // obj_stream.dictionary.expect_type("ObjStm")?;
+                // self.parse_object_from_stream(&obj_stream, index)
             }
         }
     }
@@ -157,14 +153,12 @@ impl Reader {
 
     }
 
-/*
     /// Needs to be called before any other functions on the Reader
     /// Reads the last trailer in the file
     fn read_last_trailer(&mut self) -> Result<Dictionary> {
         let (_, trailer) = self.read_xref_and_trailer_at(&mut self.lexer_at(self.startxref))?;
         Ok(trailer)
     }
-*/
 }
 
 /*
