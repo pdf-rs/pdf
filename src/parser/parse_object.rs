@@ -5,7 +5,7 @@ use parser::Reader;
 use parser::lexer::*;
 use stream::Stream;
 use err::*;
-use primitive::Primitive;
+use primitive::{Primitive, Dictionary};
 
 use inflate::InflateStream;
 
@@ -16,7 +16,7 @@ impl Reader {
         let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
         let first = obj_stream.dictionary.get("First")?.as_integer()?;
 
-        let mut lexer = Lexer::new(&obj_stream.content);
+        let mut lexer = Lexer::new(&obj_stream.data);
 
         // Just find the byte offset of the one we are interested in
         let mut byte_offset = 0;
@@ -54,7 +54,7 @@ impl Reader {
                 if delimiter.equals(b"/") {
                     let key = lexer.next()?.as_string();
                     let obj = Reader::parse_object_internal(lexer, reader)?;
-                    dict.set(key, obj);
+                    dict[&key] = obj;
                 } else if delimiter.equals(b">>") {
                     break;
                 } else {

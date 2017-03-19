@@ -23,7 +23,7 @@ pub trait PrimitiveConv: Sized {
 }
 
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PlainRef {
     pub id:     u64,
     pub gen:    u32

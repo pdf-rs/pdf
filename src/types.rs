@@ -73,7 +73,7 @@ impl PrimitiveConv for Text {
 }
 
 pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
-where W: io::Write, T: Object, I: Iterator<Item=T>
+    where W: io::Write, T: Object, I: Iterator<Item=T>
 {
     write!(out, "[")?;
     
@@ -94,6 +94,7 @@ impl<T: Object> Object for Vec<T> {
         write_list(out, self.iter())
     }
 }
+
 impl<T: PrimitiveConv> PrimitiveConv for Vec<T> {
     fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
         Ok(p.as_array(reader)?.iter().map(|p| T::from_primitive(reader)).collect())
@@ -190,6 +191,7 @@ impl PrimitiveConv for StreamFilter {
         }
     }
 }
+
 
 
 
