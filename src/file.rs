@@ -43,7 +43,7 @@ fn locate_offset() {
 
 
 #[derive(Object, PrimitiveConv)]
-#[pdf(Type="XRef")]
+#[pdf(Type = "XRef")]
 struct XRefInfo {
     // Normal Stream fields
     #[pdf(key = "Filter")]
@@ -70,7 +70,7 @@ struct XRefStream {
 
 
 #[derive(Object, PrimitiveConv)]
-#[pdf(Type="ObjStm")]
+#[pdf(Type = "ObjStm")]
 struct ObjStmInfo {
     // Normal Stream fields
     #[pdf(key = "Filter")]
