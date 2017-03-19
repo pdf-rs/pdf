@@ -23,6 +23,12 @@ pub trait PrimitiveConv: Sized {
 }
 
 
+impl<'a, T> Object for &'a T where T: Object {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        self.serialize(out)
+    }
+}
+
 pub struct PlainRef {
     id:     u64,
     gen:    u32
