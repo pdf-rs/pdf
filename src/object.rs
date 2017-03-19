@@ -14,6 +14,9 @@ use std::ops::{Deref};
 // e.g.
 // my_obj.as_integer() will dereference if needed.
 
+pub type ObjNr = u64;
+pub type GenNr = u16;
+
 pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
 }
@@ -30,8 +33,8 @@ impl<'a, T> Object for &'a T where T: Object {
 
 #[derive(Clone, Debug)]
 pub struct PlainRef {
-    pub id:     u64,
-    pub gen:    u32
+    pub id:     ObjNr,
+    pub gen:    GenNr,
 }
 impl Object for PlainRef {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
@@ -85,88 +88,3 @@ impl<T: Object> Object for RealizedRef<T> {
 }
 
 
-pub struct ObjectStream<'a, W: io::Write + 'a> {
-    filters:    Vec<StreamFilter>,
-    items:      Vec<usize>,
-    data:       Vec<u8>,
-    id:         u64,
-    file:       &'a mut File<W>
-}
-impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {
-    pub fn new(file: &'a mut File<W>) -> ObjectStream<'a, W> {
-        let id = file.promise();
-        
-        ObjectStream {
-            filters:    Vec::new(),
-            items:      Vec::new(),
-            data:       Vec::new(),
-            id:         id,
-            file:       file
-        }
-    }
-    pub fn add<T: Object>(&mut self, o: T) -> io::Result<RealizedRef<T>> {
-        let start = self.data.len();
-        o.serialize(&mut self.data)?;
-        let end = self.data.len();
-        
-        let id = self.file.refs.len() as u64;
-        
-        self.file.refs.push(XRef::Stream {
-            stream_id:  self.id,
-            index:      self.items.len() as u32
-        });
-        
-        self.items.push(end - start);
-        
-        Ok(RealizedRef {
-            id:     id,
-            obj:    Box::new(o),
-        })
-    }
-    pub fn fulfill<T: Object>(&mut self, promise: PromisedRef<T>, o: T)
-     -> io::Result<RealizedRef<T>>
-    {
-        let start = self.data.len();
-        o.serialize(&mut self.data)?;
-        let end = self.data.len();
-        
-        self.file.refs[promise.id as usize] = XRef::Stream {
-            stream_id:  self.id,
-            index:      self.items.len() as u32
-        };
-        
-        self.items.push(end - start);
-        
-        Ok(RealizedRef {
-            id:     promise.id,
-            obj:    Box::new(o),
-        })
-    }
-    pub fn finish(self) -> io::Result<PlainRef> {
-        let stream_pos = self.file.cursor.position();
-        let ref mut out = self.file.cursor;
-        
-        write!(out, "{} 0 obj\n", self.id)?;
-        let indices = self.items.iter().enumerate().map(|(n, item)| format!("{} {}", n, item)).join(" ");
-        
-        write_dict!(out,
-            "/Type"     << "/ObjStm",
-            "/Length"   << self.data.len() + indices.len() + 1,
-            "/Filter"   << self.filters,
-            "/N"        << self.items.len(),
-            "/First"    << indices.len() + 1
-        );
-        write!(out, "\nstream\n{}\n", indices)?;
-        out.write(&self.data)?;
-        write!(out, "\nendstream\nendobj\n")?;
-        
-        
-        self.file.refs[self.id as usize] = XRef::Raw {
-            offset:  stream_pos
-        };
-        
-        Ok(PlainRef {
-            id: self.id
-        })
-    }
-}

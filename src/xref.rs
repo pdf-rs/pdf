@@ -1,6 +1,7 @@
 use err::*;
 use std;
 use std::fmt::{Debug, Formatter};
+use object::*;
 
 ///////////////////////////
 // Cross-reference table //
@@ -8,19 +9,21 @@ use std::fmt::{Debug, Formatter};
 
 #[derive(Copy, Clone, Debug)]
 pub enum XRef {
-    /// not used currently
+    /// Not currently used.
     Free {
-        next_obj_nr: u32,
-        gen_nr: u16
+        next_obj_nr: ObjNr,
+        gen_nr: GenNr
     },
+
+    /// In use.
     Raw {
         pos: usize,
-        gen_nr: u16
+        gen_nr: GenNr
     },
     /// In use and compressed inside an Object Stream
     Stream {
-        stream_obj_nr: u32,
-        index: u16
+        stream_id: ObjNr,
+        index: usize,
     },
     Promised
 }
@@ -66,6 +69,13 @@ impl XRefTable {
             None => bail!("Entry {} in xref table unspecified.", index),
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    pub fn push(&mut self, new_entry: XRef) {
+        self.entries.push(Some(new_entry));
+    }
     pub fn num_entries(&self) -> usize {
         self.entries.len()
     }
@@ -96,8 +106,8 @@ impl Debug for XRefTable {
                 Some(XRef::Raw {pos, gen_nr}) => {
                     write!(f, "{:4}: {:010} {:05} n \n", i, pos, gen_nr)?
                 },
-                Some(XRef::Stream {stream_obj_nr, index}) => {
-                    write!(f, "{:4}: in stream {}, index {}\n", i, stream_obj_nr, index)?
+                Some(XRef::Stream {stream_id, index}) => {
+                    write!(f, "{:4}: in stream {}, index {}\n", i, stream_id, index)?
                 }
                 None => {
                     write!(f, "{:4}: None!\n", i)?
@@ -123,7 +133,7 @@ impl XRefSection {
             entries: Vec::new(),
         }
     }
-    pub fn add_free_entry(&mut self, next_obj_nr: u32, gen_nr: u16) {
+    pub fn add_free_entry(&mut self, next_obj_nr: ObjNr, gen_nr: GenNr) {
         self.entries.push(XRef::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});
     }
     pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {

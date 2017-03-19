@@ -2,7 +2,9 @@ use parser::Reader;
 use err::*;
 use num_traits::PrimInt;
 use parser::lexer::Lexer;
-use xref::XRefSection;
+use xref::{XRef, XRefSection};
+use primitive::*;
+
 
 // Just the part of Parser which reads xref sections from xref stream.
 impl Reader {
@@ -23,7 +25,7 @@ impl Reader {
             };
             entries.push(entry);
         }
-        Ok(XrefSection {
+        Ok(XRefSection {
             first_id: first_id as u32,
             entries: entries,
         })
@@ -42,7 +44,7 @@ impl Reader {
 
 
     /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-    pub fn parse_xref_stream_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+    pub fn parse_xref_stream_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
         let xref_stream = self.parse_indirect_object(lexer).chain_err(|| "Reading Xref stream")?.object.into_stream()?;
 
         // Get 'W' as array of integers
@@ -73,7 +75,7 @@ impl Reader {
 
 
     /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-    pub fn parse_xref_table_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XrefSection>, Dictionary)> {
+    pub fn parse_xref_table_and_trailer(&self, lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
         let mut sections = Vec::new();
         
         // Keep reading subsections until we hit `trailer`
@@ -81,7 +83,7 @@ impl Reader {
             let start_id = lexer.next_as::<u32>()?;
             let num_ids = lexer.next_as::<u32>()?;
 
-            let mut section = XrefSection::new(start_id);
+            let mut section = XRefSection::new(start_id);
 
             for _ in 0..num_ids {
                 let w1 = lexer.next()?;

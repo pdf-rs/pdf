@@ -1,11 +1,11 @@
 // Considering whether to impl Object and IndirectObject here.
 //
 
-use parser::Reader;
 use parser::lexer::*;
 use stream::Stream;
 use err::*;
 use primitive::{Primitive, Dictionary};
+use object::PlainRef;
 
 use inflate::InflateStream;
 
@@ -96,7 +96,7 @@ impl Reader {
                 let third_lexeme = lexer.next()?;
                 if third_lexeme.equals(b"R") {
                     // It is indeed a reference to an indirect object
-                    Primitive::Reference (ObjectId {
+                    Primitive::Reference (PlainRef {
                         obj_nr: first_lexeme.to::<u32>()?,
                         gen_nr: second_lexeme.to::<u16>()?,
                     })
@@ -163,6 +163,9 @@ impl Reader {
 
         Ok(obj)
     }
+
+    // TODO: IndirectObject is no more.
+    /*
     /// Parses an Object starting at the current position of `lexer`. Almost as
     /// `Reader::parse_object`, but this function does not take `Reader`, at the expense that it
     /// cannot dereference 
@@ -182,6 +185,7 @@ impl Reader {
             object: obj,
         })
     }
+    */
 
 
 }

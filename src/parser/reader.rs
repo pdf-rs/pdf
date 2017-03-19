@@ -10,7 +10,7 @@ use std::io::Seek;
 use std::io::Read;
 use std::fs::File;
 use std::iter::Iterator;
-
+/*
 pub struct Reader {
     // Contents
     startxref: usize,
@@ -47,13 +47,12 @@ impl Reader {
     pub fn data(&self) -> &[u8] {
         &self.buf
     }
-    /*
     pub fn objects(&self) -> ObjectIter {
         ObjectIter {
             reader: self,
             obj_nr_iter: self.xref_table.iter(),
         }
-    }*/
+    }
 
     pub fn get_xref_table(&self) -> &XRefTable {
         &self.xref_table
@@ -61,7 +60,6 @@ impl Reader {
 
     /// If `obj` is a Reference: reads the indirect object it refers to
     /// Else: Returns a clone of the object.
-    // TODO: It shouldn't have to clone..
     pub fn dereference(&self, obj: &Primitive) -> Result<Primitive> {
         match *obj {
             Primitive::Reference (ref id) => {
@@ -72,7 +70,6 @@ impl Reader {
             }
         }
     }
-
     pub fn read_indirect_object(&self, obj_nr: u64) -> Result<Primitive> {
         let xref_entry = self.xref_table.get(obj_nr as usize)?;
         match xref_entry {
@@ -86,7 +83,7 @@ impl Reader {
                 }
                 Ok(indirect_obj.object)
             }
-            XRef::Stream {stream_obj_nr, index} => {
+            XRef::Stream {stream_id, index} => {
                 unimplemented!();
                 // Commented because of lacking stream implementation:
                 // let obj_stream = self.read_indirect_object(stream_obj_nr)?.as_stream()?;
@@ -161,7 +158,6 @@ impl Reader {
     }
 }
 
-/*
 pub struct ObjectIter<'a> {
     reader: &'a Reader,
     obj_nr_iter: ObjectNrIter<'a>,
