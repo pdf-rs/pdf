@@ -6,186 +6,48 @@ use stream::Stream;
 use err::*;
 use primitive::{Primitive, Dictionary};
 use object::PlainRef;
+use file::ObjectStream;
+use parser::{parse_with_lexer, parse};
+use object::{GenNr, ObjNr};
 
 use inflate::InflateStream;
 
+use std::io;
 
-impl Reader {
-    /// Parser an Object from an Object Stream at index `index`.
-    pub fn parse_object_from_stream(&self, obj_stream: &Stream, index: u16) -> Result<Primitive> {
-        let _ = obj_stream.dictionary.get("N")?.as_integer()?; /* num object */
-        let first = obj_stream.dictionary.get("First")?.as_integer()?;
 
-        let mut lexer = Lexer::new(&obj_stream.data);
+/// Parser an Object from an Object Stream at index `index`.
+pub fn parse_object_from_stream<'a, W: io::Write + 'a>(obj_stream: &ObjectStream<W>, index: u16) -> Result<Primitive> {
+    let _ = obj_stream.info.n; /* num object */
+    let first = obj_stream.info.first;
 
-        // Just find the byte offset of the one we are interested in
-        let mut byte_offset = 0;
-        for _ in 0..index+1 {
-            lexer.next()?.to::<u32>()?; /* obj_nr. Might want to check whether it's the rigth object. */
-            byte_offset = lexer.next()?.to::<u16>()?;
-        }
+    let mut lexer = Lexer::new(&obj_stream.data);
 
-        lexer.set_pos(first as usize + byte_offset as usize);
-        self.parse_object(&mut lexer)
+    // Just find the byte offset of the one we are interested in
+    let mut byte_offset = 0;
+    for _ in 0..index+1 {
+        lexer.next()?.to::<u32>()?; /* obj_nr. Might want to check whether it's the rigth object. */
+        byte_offset = lexer.next()?.to::<u16>()?;
     }
 
-    /// Parses an Object starting at the current position of `lexer`.
-    pub fn parse_object(&self, lexer: &mut Lexer) -> Result<Primitive> {
-        Reader::parse_object_internal(lexer, Some(self))
-    }
-    /// Parses an Objec starting at the current position of `lexer`. It
-    /// will not follow references when reading the "/Length" of a Stream - but rather return an
-    /// `Error`.
-    pub fn parse_direct_object(lexer: &mut Lexer) -> Result<Primitive> {
-        Reader::parse_object_internal(lexer, None)
-    }
+    // lexer.set_pos(first as usize + byte_offset as usize);
+    let obj_start = first as usize + byte_offset as usize;
+    parse(&obj_stream.data[obj_start..])
+}
 
-    /// The reason for this is to support two modes of parsing: with and without `&self`. `&self`
-    /// is only needed for following references, then especially considering that the "/Length"
-    /// entry of a Stream Dictionary may be a Reference.
-    fn parse_object_internal(lexer: &mut Lexer, reader: Option<&Reader>) -> Result<Primitive> {
-        let first_lexeme = lexer.next()?;
-
-        let obj = if first_lexeme.equals(b"<<") {
-            let mut dict = Dictionary::default();
-            loop {
-                // Expect a Name (and Object) or the '>>' delimiter
-                let delimiter = lexer.next()?;
-                if delimiter.equals(b"/") {
-                    let key = lexer.next()?.as_string();
-                    let obj = Reader::parse_object_internal(lexer, reader)?;
-                    dict[&key] = obj;
-                } else if delimiter.equals(b">>") {
-                    break;
-                } else {
-                    bail!(ErrorKind::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.as_string(), expected: "/ or >>"});
-                }
-            }
-            // It might just be the dictionary in front of a stream.
-            if lexer.peek()?.equals(b"stream") {
-                lexer.next()?;
-
-                // Get length
-                let length = match reader {
-                    Some(reader) => reader.dereference(dict.get("Length")?)?.as_integer()?,
-                    None => dict.get("Length")?.as_integer()?,
-                } as usize;
-                
-                let offset = lexer.get_pos();
-                // Skip the stream
-                lexer.set_pos(offset + length);
-                // Finish
-                lexer.next_expect("endstream")?;
-
-                Primitive::Stream (Stream {
-                    dictionary: dict,
-                    offset: offset,
-                    length: length
-                })
-            } else {
-                Primitive::Dictionary (dict)
-            }
-        } else if first_lexeme.is_integer() {
-            // May be Integer or Reference
-
-            // First backup position
-            let pos_bk = lexer.get_pos();
-            
-            let second_lexeme = lexer.next()?;
-            if second_lexeme.is_integer() {
-                let third_lexeme = lexer.next()?;
-                if third_lexeme.equals(b"R") {
-                    // It is indeed a reference to an indirect object
-                    Primitive::Reference (PlainRef {
-                        obj_nr: first_lexeme.to::<u32>()?,
-                        gen_nr: second_lexeme.to::<u16>()?,
-                    })
-                } else {
-                    // We are probably in an array of numbers - it's not a reference anyway
-                    lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
-                    Primitive::Integer(first_lexeme.to::<i32>()?)
-                }
-            } else {
-                // It is but a number
-                lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
-                Primitive::Integer(first_lexeme.to::<i32>()?)
-            }
-        } else if first_lexeme.is_real_number() {
-            // Real Number
-            Primitive::Number (first_lexeme.to::<f32>()?)
-        } else if first_lexeme.equals(b"/") {
-            // Name
-            let s = lexer.next()?.as_string();
-            Primitive::Name(s)
-        } else if first_lexeme.equals(b"[") {
-            let mut array = Vec::new();
-            // Array
-            loop {
-                let element = Reader::parse_object_internal(lexer, reader)?;
-                array.push(element.clone());
-
-                // Exit if closing delimiter
-                if lexer.peek()?.equals(b"]") {
-                    break;
-                }
-            }
-            lexer.next()?; // Move beyond closing delimiter
-
-            Primitive::Array (array)
-        } else if first_lexeme.equals(b"(") {
-
-            let mut string: Vec<u8> = Vec::new();
-
-            let bytes_traversed = {
-                let mut string_lexer = StringLexer::new(lexer.get_remaining_slice());
-                for character in string_lexer.iter() {
-                    let character = character?;
-                    string.push(character);
-                }
-                string_lexer.get_offset() as i64
-            };
-            // Advance to end of string
-            lexer.offset_pos(bytes_traversed as usize);
-
-            Primitive::String (string)
-        } else if first_lexeme.equals(b"<") {
-            let hex_str = lexer.next()?.to_vec();
-            lexer.next_expect(">")?;
-            Primitive::HexString (hex_str)
-        } else {
-            bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
-                  lexer.get_pos(),
-                  first_lexeme.as_string(),
-                  lexer.read_n(50).as_string());
-        };
-
-        // trace!("Read object"; "Obj" => format!("{}", obj));
-
-        Ok(obj)
-    }
-
-    // TODO: IndirectObject is no more.
-    /*
-    /// Parses an Object starting at the current position of `lexer`. Almost as
-    /// `Reader::parse_object`, but this function does not take `Reader`, at the expense that it
-    /// cannot dereference 
+// TODO: IndirectObject is no more.
+/// Parses an Object starting at the current position of `lexer`. Almost as
+/// `Reader::parse_object`, but this function does not take `Reader`, at the expense that it
+/// cannot dereference 
 
 
-    pub fn parse_indirect_object(&self, lexer: &mut Lexer) -> Result<IndirectObject> {
-        let obj_nr = lexer.next()?.to::<u32>()?;
-        let gen_nr = lexer.next()?.to::<u16>()?;
-        lexer.next_expect("obj")?;
+pub fn parse_indirect_object(lexer: &mut Lexer) -> Result<(PlainRef, Primitive)> {
+    let obj_nr = lexer.next()?.to::<ObjNr>()?;
+    let gen_nr = lexer.next()?.to::<GenNr>()?;
+    lexer.next_expect("obj")?;
 
-        let obj = self.parse_object(lexer)?;
+    let obj = parse_with_lexer(lexer)?;
 
-        lexer.next_expect("endobj")?;
+    lexer.next_expect("endobj")?;
 
-        Ok(IndirectObject {
-            id: ObjectId {obj_nr: obj_nr, gen_nr: gen_nr},
-            object: obj,
-        })
-    }
-    */
-
-
+    Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
 }

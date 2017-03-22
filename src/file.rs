@@ -47,7 +47,7 @@ fn locate_offset() {
 
 #[derive(Object, PrimitiveConv)]
 #[pdf(Type = "XRef")]
-struct XRefInfo {
+pub struct XRefInfo {
     // Normal Stream fields
     #[pdf(key = "Filter")]
     filter: Vec<StreamFilter>,
@@ -66,7 +66,7 @@ struct XRefInfo {
     w: Vec<i32,>
 }
 
-struct XRefStream {
+pub struct XRefStream {
     pub data: Vec<u8>,
     pub info: XRefInfo,
 }
@@ -74,29 +74,29 @@ struct XRefStream {
 
 #[derive(Object, PrimitiveConv, Default)]
 #[pdf(Type = "ObjStm")]
-struct ObjStmInfo {
+pub struct ObjStmInfo {
     // Normal Stream fields - added as fields are added to Stream
     #[pdf(key = "Filter")]
-    filter: Vec<StreamFilter>,
+    pub filter: Vec<StreamFilter>,
 
     // ObjStmStream fields
     #[pdf(key = "N")]
-    n: i32,
+    pub n: i32,
 
     #[pdf(key = "First")]
-    first: i32,
+    pub first: i32,
 
     #[pdf(key = "Extends", opt=true)]
-    extends: Option<i32>,
+    pub extends: Option<i32>,
 
 }
 
-struct ObjectStream<'a, W: io::Write + 'a> {
-    data:       Vec<u8>,
+pub struct ObjectStream<'a, W: io::Write + 'a> {
+    pub data:       Vec<u8>,
     /// Byte offset of each object. Index is the object number. (TODO: should probably)
     offsets:    Vec<usize>,
     /// Fields in the stream dictionary.
-    info:       ObjStmInfo,
+    pub info:       ObjStmInfo,
     /// The object number of this object.
     id:         ObjNr,
 

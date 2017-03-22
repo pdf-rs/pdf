@@ -12,14 +12,15 @@ use err::*;
 use self::lexer::{Lexer, StringLexer};
 use primitive::{Primitive, Dictionary};
 use object::{ObjNr, GenNr, PlainRef};
-use stream::Stream;
+use stream::{Stream, StreamInfo};
+use object::PrimitiveConv;
 
 pub fn parse(data: &[u8]) -> Result<Primitive> {
-    parse_internal(&mut Lexer::new(data))
+    parse_with_lexer(&mut Lexer::new(data))
 }
 
 /// Recursive.
-fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
+pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -29,7 +30,7 @@ fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.as_string();
-                let obj = parse_internal(lexer)?;
+                let obj = parse_with_lexer(lexer)?;
                 dict[&key] = obj;
             } else if delimiter.equals(b">>") {
                 break;
@@ -79,7 +80,7 @@ fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
         let mut array = Vec::new();
         // Array
         loop {
-            let element = parse_internal(lexer)?;
+            let element = parse_with_lexer(lexer)?;
             array.push(element.clone());
 
             // Exit if closing delimiter
@@ -123,7 +124,7 @@ fn parse_internal(lexer: &mut Lexer) -> Result<Primitive> {
 }
 
 
-pub fn parse_stream(data: &[u8], resolve_fn: Option<&Fn(PlainRef) -> Result<Primitive>>) -> Result<Primitive> {
+pub fn parse_stream(data: &[u8], resolve_fn: Option<&Fn(PlainRef) -> Result<Primitive>>) -> Result<Stream> {
     parse_stream_internal(&mut Lexer::new(data), resolve_fn)
 }
 
@@ -138,7 +139,7 @@ fn parse_stream_internal(lexer: &mut Lexer, resolve_fn: Option<&Fn(PlainRef) -> 
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.as_string();
-                let obj = parse_internal(lexer)?;
+                let obj = parse_with_lexer(lexer)?;
                 dict[&key] = obj;
             } else if delimiter.equals(b">>") {
                 break;
@@ -151,35 +152,36 @@ fn parse_stream_internal(lexer: &mut Lexer, resolve_fn: Option<&Fn(PlainRef) -> 
             lexer.next()?;
 
             // Get length - look up in `resolve_fn` if necessary
-            let length = match dict.get("Length")? {
-                &Primitive::References (reference) =>
+            let length = match dict.get("Length") {
+                Some(&Primitive::Reference (reference)) =>
                     match resolve_fn {
                         Some(resolve_fn) =>
-                            match resolve_fn(references)? {
+                            match resolve_fn(reference)? {
                                 Primitive::Integer (n) => n,
                                 _ => bail!("Wrong type for stream's /Length."),
                             },
                         None => bail!("Reading stream: Can't follow reference without `resolve_fn` function."),
                     },
-                &Primitive::Integer (n) => n,
+                Some(&Primitive::Integer (n)) => n,
+                _ => bail!("Length non existent or wrong type."),
             };
 
             
-            let offset = lexer.get_pos();
             // Skip the stream
-            lexer.set_pos(offset + length);
+            let stream_substr = lexer.offset_pos(length as usize);
             // Finish
             lexer.next_expect("endstream")?;
 
-            Primitive::Stream (Stream {
-                dictionary: dict,
-                offset: offset,
-                length: length
-            })
+            Stream {
+                info: StreamInfo::from_primitive(dict /* TODO File? */)?,
+                data: stream_substr.to_vec(),
+            }
         } else {
             bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "Dictionary" });
         }
     } else {
         bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "something else" });
-    }
+    };
+
+    Ok(obj)
 }

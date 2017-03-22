@@ -8,9 +8,9 @@ use types::StreamFilter;
 use inflate::InflateStream;
 
 #[derive(Object, PrimitiveConv)]
-struct StreamInfo {
+pub struct StreamInfo {
     #[pdf(key = "Filter")]
-    filter: Vec<StreamFilter>,
+    pub filter: Vec<StreamFilter>,
     
     #[pdf(key = "Type")]
     ty:     String
