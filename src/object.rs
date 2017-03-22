@@ -16,13 +16,14 @@ use std::ops::{Deref};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
+pub type Resolve = Fn(PlainRef) -> Result<Primitive, Error>;
 
 pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
 }
 
 pub trait PrimitiveConv: Sized {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error>;
+    fn from_primitive(p: &Primitive, resolve: &Resolve) -> Result<Self, Error>;
 }
 
 impl<'a, T> Object for &'a T where T: Object {

@@ -1,4 +1,4 @@
-use object::{Object, PlainRef, Ref, PrimitiveConv};
+use object::{Object, PlainRef, Ref, PrimitiveConv, Resolve};
 use primitive::Primitive;
 use file::File;
 use std::marker::PhantomData;
@@ -42,7 +42,7 @@ impl Object for String {
     }
 }
 impl PrimitiveConv for String {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
         Ok(p.as_name()?.to_owned())
     }
 }
@@ -67,7 +67,7 @@ impl Object for Text {
     }
 }
 impl PrimitiveConv for Text {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
         Ok(Text{ data: p.as_string()?.to_owned() })
     }
 }
@@ -96,8 +96,8 @@ impl<T: Object> Object for Vec<T> {
 }
 
 impl<T: PrimitiveConv> PrimitiveConv for Vec<T> {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
-        Ok(p.as_array(reader)?.iter().map(|p| T::from_primitive(reader)).collect())
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
+        Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect())
     }
 }
 impl<T: Object> Object for [T] {
@@ -112,7 +112,7 @@ impl Object for i32 {
     }
 }
 impl PrimitiveConv for i32 {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
         p.as_integer()
     }
 }
@@ -181,7 +181,7 @@ impl Object for StreamFilter {
     }
 }
 impl PrimitiveConv for StreamFilter {
-    fn from_primitive<B>(p: &Primitive, reader: &File<B>) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
         match p.as_name()? {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
             "ASCII85Decode"     => Ok(StreamFilter::Ascii85),

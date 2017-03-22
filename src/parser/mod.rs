@@ -11,7 +11,7 @@ pub use self::reader::*;
 use err::*;
 use self::lexer::{Lexer, StringLexer};
 use primitive::{Primitive, Dictionary};
-use object::{ObjNr, GenNr, PlainRef};
+use object::{ObjNr, GenNr, PlainRef, Resolve};
 use stream::{Stream, StreamInfo};
 use object::PrimitiveConv;
 
@@ -124,12 +124,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 }
 
 
-pub fn parse_stream(data: &[u8], resolve_fn: Option<&Fn(PlainRef) -> Result<Primitive>>) -> Result<Stream> {
-    parse_stream_internal(&mut Lexer::new(data), resolve_fn)
+pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<Stream> {
+    parse_stream_internal(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_internal(lexer: &mut Lexer, resolve_fn: Option<&Fn(PlainRef) -> Result<Primitive>>) -> Result<Stream> {
+fn parse_stream_internal(lexer: &mut Lexer, resolve: &Resolve) -> Result<Stream> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -153,15 +153,10 @@ fn parse_stream_internal(lexer: &mut Lexer, resolve_fn: Option<&Fn(PlainRef) -> 
 
             // Get length - look up in `resolve_fn` if necessary
             let length = match dict.get("Length") {
-                Some(&Primitive::Reference (reference)) =>
-                    match resolve_fn {
-                        Some(resolve_fn) =>
-                            match resolve_fn(reference)? {
-                                Primitive::Integer (n) => n,
-                                _ => bail!("Wrong type for stream's /Length."),
-                            },
-                        None => bail!("Reading stream: Can't follow reference without `resolve_fn` function."),
-                    },
+                Some(&Primitive::Reference (reference)) => match resolve(reference)? {
+                    Primitive::Integer (n) => n,
+                    _ => bail!("Wrong type for stream's /Length."),
+                },
                 Some(&Primitive::Integer (n)) => n,
                 _ => bail!("Length non existent or wrong type."),
             };
@@ -173,7 +168,7 @@ fn parse_stream_internal(lexer: &mut Lexer, resolve_fn: Option<&Fn(PlainRef) -> 
             lexer.next_expect("endstream")?;
 
             Stream {
-                info: StreamInfo::from_primitive(dict /* TODO File? */)?,
+                info: StreamInfo::from_primitive(&Primitive::Dictionary(dict), resolve)?,
                 data: stream_substr.to_vec(),
             }
         } else {
