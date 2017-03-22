@@ -157,11 +157,15 @@ fn impl_primitive_conv(ast: &syn::DeriveInput) -> quote::Tokens {
         
         if opt {
             quote! {
-                #name: #alias::from_primitive(&dict.get(#key), r)?,
+                #name: #alias::from_primitive(dict.get(#key), r)?,
             }
         } else {
             quote! {
-                #name: #alias::from_primitive(&dict.get(#key).unwrap(), r)?,
+                #name: #alias::from_primitive(
+                    dict.get(#key)
+                    .ok_or(::pdf::err::Error::KeyNotFound { key: #key })?,
+                    r
+                )?,
             }
         }
     });
@@ -177,7 +181,7 @@ fn impl_primitive_conv(ast: &syn::DeriveInput) -> quote::Tokens {
     let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::PrimitiveConv for #name {
-            fn from_primitive<B>(p: &::pdf::primitive::Primitive, r: &::pdf::file::File<B>) -> ::std::result::Result<#name, ::pdf::err::Error> {
+            fn from_primitive(p: &::pdf::primitive::Primitive, r: &::pdf::object::Resolve) -> ::std::result::Result<#name, ::pdf::err::Error> {
                 #( #aliases )*
                 let dict = p.as_dictionary(r)?;
                 assert_eq!(dict.get("Type").unwrap().as_name()?, stringify!(#type_name));
