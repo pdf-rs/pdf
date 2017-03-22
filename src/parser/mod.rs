@@ -123,12 +123,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 }
 
 
-pub fn parse_stream<'a>(data: &[u8], resolve: &Resolve) -> Result<Stream<'a>> {
+pub fn parse_stream<'a>(data: &'a [u8], resolve: &Resolve) -> Result<Stream<'a>> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_with_lexer<'a: 'b, 'b>(lexer: &'b mut Lexer, resolve: &Resolve) -> Result<Stream<'a>> {
+fn parse_stream_with_lexer<'a>(lexer: &mut Lexer<'a>, resolve: &Resolve) -> Result<Stream<'a>> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {

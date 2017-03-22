@@ -62,7 +62,7 @@ impl Primitive {
     pub fn as_dictionary(&self, resolve: &Resolve) -> Result<&Dictionary> {
         match *self {
             Primitive::Dictionary(ref dict) => Ok(dict),
-            Primitive::Reference(id) => resolve(id)?.as_dictionary(reader),
+            Primitive::Reference(id) => resolve(id)?.as_dictionary(resolve),
             p => wrong_primitive!(Dictionary, p)
         }
     }

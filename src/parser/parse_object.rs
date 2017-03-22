@@ -49,7 +49,7 @@ pub fn parse_indirect_object(lexer: &mut Lexer) -> Result<(PlainRef, Primitive)>
 
     Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
 }
-pub fn parse_indirect_stream<'a>(lexer: &mut Lexer) -> Result<(PlainRef, Stream<'a>)> {
+pub fn parse_indirect_stream<'a>(lexer: &mut Lexer<'a>) -> Result<(PlainRef, Stream<'a>)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;

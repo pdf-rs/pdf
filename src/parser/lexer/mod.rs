@@ -63,7 +63,7 @@ impl<'a> Lexer<'a> {
         if word.equals(expected.as_bytes()) {
             Ok(())
         } else {
-            Err(ErrorKind::UnexpectedLexeme {pos: self.pos, lexeme: word.as_string(), expected: expected}.into())
+            Err(ErrorKind::UnexpectedLexeme {pos: self.pos, lexeme: word.to_string(), expected: expected}.into())
         }
     }
 
