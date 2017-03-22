@@ -16,11 +16,11 @@ pub struct StreamInfo {
     ty:     String
 }
 
-pub struct Stream {
+pub struct GeneralStream {
     pub data:       Vec<u8>,
     pub info:       StreamInfo
 }
-impl Stream {
+impl GeneralStream {
     /*
     pub fn from_file(p: &Primitive, data: &[u8]) -> Self {
         Stream {
@@ -29,8 +29,8 @@ impl Stream {
         }
     }
     */
-    pub fn empty(ty: &str) -> Stream {
-        Stream {
+    pub fn empty(ty: &str) -> GeneralStream {
+        GeneralStream {
             data:   Vec::new(),
             info:   StreamInfo {
                 filter: vec![],
@@ -39,7 +39,7 @@ impl Stream {
         }
     }
 }
-impl Object for Stream {
+impl Object for GeneralStream {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         self.info.serialize(out)?;
         

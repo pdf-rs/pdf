@@ -2,9 +2,8 @@
 //
 
 use parser::lexer::*;
-use stream::Stream;
 use err::*;
-use primitive::{Primitive, Dictionary};
+use primitive::{Primitive, Dictionary, Stream};
 use object::PlainRef;
 use file::ObjectStream;
 use parser::{parse_with_lexer, parse_stream_with_lexer, parse};
@@ -50,7 +49,7 @@ pub fn parse_indirect_object(lexer: &mut Lexer) -> Result<(PlainRef, Primitive)>
 
     Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
 }
-pub fn parse_indirect_stream(lexer: &mut Lexer) -> Result<(PlainRef, Stream)> {
+pub fn parse_indirect_stream<'a>(lexer: &mut Lexer) -> Result<(PlainRef, Stream<'a>)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;

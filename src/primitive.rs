@@ -11,12 +11,10 @@ use object::PlainRef;
 
 pub type Dictionary = HashMap<String, Primitive>;
 
-/*
 pub struct Stream<'a> {
     info: Dictionary,
     data: &'a [u8]
 }
-*/
 
 #[derive(Clone, Debug)]
 pub enum Primitive {

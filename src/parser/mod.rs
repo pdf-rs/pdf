@@ -10,9 +10,8 @@ pub use self::reader::*;
 
 use err::*;
 use self::lexer::{Lexer, StringLexer};
-use primitive::{Primitive, Dictionary};
+use primitive::{Primitive, Dictionary, Stream};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
-use stream::{Stream, StreamInfo};
 use object::PrimitiveConv;
 
 pub fn parse(data: &[u8]) -> Result<Primitive> {
@@ -29,13 +28,13 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
             // Expect a Name (and Object) or the '>>' delimiter
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
-                let key = lexer.next()?.as_string();
+                let key = lexer.next()?.to_string();
                 let obj = parse_with_lexer(lexer)?;
                 dict[&key] = obj;
             } else if delimiter.equals(b">>") {
                 break;
             } else {
-                bail!(ErrorKind::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.as_string(), expected: "/ or >>"});
+                bail!(ErrorKind::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.to_string(), expected: "/ or >>"});
             }
         }
         // It might just be the dictionary in front of a stream.
@@ -74,7 +73,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
         Primitive::Number (first_lexeme.to::<f32>()?)
     } else if first_lexeme.equals(b"/") {
         // Name
-        let s = lexer.next()?.as_string();
+        let s = lexer.next()?.to_string();
         Primitive::Name(s)
     } else if first_lexeme.equals(b"[") {
         let mut array = Vec::new();
@@ -114,8 +113,8 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
     } else {
         bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
               lexer.get_pos(),
-              first_lexeme.as_string(),
-              lexer.read_n(50).as_string());
+              first_lexeme.to_string(),
+              lexer.read_n(50).to_string());
     };
 
     // trace!("Read object"; "Obj" => format!("{}", obj));
@@ -124,12 +123,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 }
 
 
-pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<Stream> {
+pub fn parse_stream<'a>(data: &[u8], resolve: &Resolve) -> Result<Stream<'a>> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Stream> {
+fn parse_stream_with_lexer<'a: 'b, 'b>(lexer: &'b mut Lexer, resolve: &Resolve) -> Result<Stream<'a>> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -138,13 +137,13 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
             // Expect a Name (and Object) or the '>>' delimiter
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
-                let key = lexer.next()?.as_string();
+                let key = lexer.next()?.to_string();
                 let obj = parse_with_lexer(lexer)?;
                 dict[&key] = obj;
             } else if delimiter.equals(b">>") {
                 break;
             } else {
-                bail!(ErrorKind::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.as_string(), expected: "/ or >>"});
+                bail!(ErrorKind::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.to_string(), expected: "/ or >>"});
             }
         }
         // It might just be the dictionary in front of a stream.
@@ -168,8 +167,8 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
             lexer.next_expect("endstream")?;
 
             Stream {
-                info: StreamInfo::from_primitive(&Primitive::Dictionary(dict), resolve)?,
-                data: stream_substr.to_vec(),
+                info: dict,
+                data: stream_substr.as_slice(),
             }
         } else {
             bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "Dictionary" });
