@@ -2,7 +2,7 @@ use document::Document;
 use file::File;
 use primitive::Primitive;
 use xref::XRef;
-use err::{Error, ErrorKind};
+use err::{Result, ErrorKind};
 use std::{io, fmt};
 use types::StreamFilter;
 use std::marker::PhantomData;
@@ -16,7 +16,7 @@ use std::ops::{Deref};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
-pub type Resolve = Fn(PlainRef) -> Result<Primitive, Error>;
+pub type Resolve = Fn(PlainRef) -> Result<Primitive>;
 
 /// Resolve function that just throws an error
 pub const no_resolve: &'static Resolve =  &|plain_ref| {
@@ -28,7 +28,7 @@ pub trait Object {
 }
 
 pub trait PrimitiveConv: Sized {
-    fn from_primitive(p: &Primitive, resolve: &Resolve) -> Result<Self, Error>;
+    fn from_primitive(p: &Primitive, resolve: &Resolve) -> Result<Self>;
 }
 
 impl<'a, T> Object for &'a T where T: Object {

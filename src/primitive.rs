@@ -7,7 +7,7 @@ use std::str::from_utf8;
 use std::fmt::{Display, Formatter};
 use std::collections::HashMap;
 use file::File;
-use object::PlainRef;
+use object::{PlainRef, Resolve};
 
 pub type Dictionary = HashMap<String, Primitive>;
 
@@ -52,17 +52,17 @@ impl Primitive {
             p => wrong_primitive!(Reference, p)
         }
     }
-    pub fn as_array<B>(&self, reader: &File<B>) -> Result<&[Primitive]> {
+    pub fn as_array(&self, resolve: &Resolve) -> Result<&[Primitive]> {
         match *self {
             Primitive::Array(ref v) => Ok(v),
-            Primitive::Reference(id) => reader.dereference(&id)?.as_array(reader),
+            Primitive::Reference(id) => resolve(id)?.as_array(resolve),
             p => wrong_primitive!(Array, p)
         }
     }
-    pub fn as_dictionary<B>(&self, reader: &File<B>) -> Result<&Dictionary> {
+    pub fn as_dictionary(&self, resolve: &Resolve) -> Result<&Dictionary> {
         match *self {
             Primitive::Dictionary(ref dict) => Ok(dict),
-            Primitive::Reference(id) => reader.dereference(&id)?.as_dictionary(reader),
+            Primitive::Reference(id) => resolve(id)?.as_dictionary(reader),
             p => wrong_primitive!(Dictionary, p)
         }
     }

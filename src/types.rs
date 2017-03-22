@@ -4,7 +4,7 @@ use file::File;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::io;
-use err::Error;
+use err::Result;
 use std::io::Write;
 use encoding::all::UTF_16BE;
 
@@ -42,7 +42,7 @@ impl Object for String {
     }
 }
 impl PrimitiveConv for String {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(p.as_name()?.to_owned())
     }
 }
@@ -67,7 +67,7 @@ impl Object for Text {
     }
 }
 impl PrimitiveConv for Text {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(Text{ data: p.as_string()?.to_owned() })
     }
 }
@@ -96,7 +96,7 @@ impl<T: Object> Object for Vec<T> {
 }
 
 impl<T: PrimitiveConv> PrimitiveConv for Vec<T> {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect())
     }
 }
@@ -112,7 +112,7 @@ impl Object for i32 {
     }
 }
 impl PrimitiveConv for i32 {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         p.as_integer()
     }
 }
@@ -181,7 +181,7 @@ impl Object for StreamFilter {
     }
 }
 impl PrimitiveConv for StreamFilter {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self, Error> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         match p.as_name()? {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
             "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
