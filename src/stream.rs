@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::io;
 
 use file::File;
-use object::{Object, PrimitiveConv};
-use primitive::Primitive;
+use object::{Object, PrimitiveConv, FromStream, Resolve};
+use primitive::{Primitive, Stream};
 use types::StreamFilter;
 use inflate::InflateStream;
 
@@ -50,6 +50,17 @@ impl Object for GeneralStream {
     }
 }
 
+impl FromStream for GeneralStream {
+    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<GeneralStream> {
+        let info = StreamInfo::from_dict(stream.info, resolve)?;
+        // TODO: Look at filters of `info` and decode the stream.
+        let data = stream.data.to_vec();
+        Ok(GeneralStream {
+            data: data,
+            info: info,
+        })
+    }
+}
 
 
 // TODO move out to decoding/encoding module

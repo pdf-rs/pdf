@@ -6,6 +6,8 @@ use types::StreamFilter;
 use std::io;
 use object::*;
 use xref::XRef;
+use primitive::{Primitive, Stream};
+use err::*;
 
 pub struct File<B> {
     backend:    B,
@@ -45,7 +47,7 @@ fn locate_offset() {
 }
 
 
-#[derive(Object, PrimitiveConv)]
+#[derive(Object, FromDict)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
     // Normal Stream fields
@@ -71,8 +73,20 @@ pub struct XRefStream {
     pub info: XRefInfo,
 }
 
+impl FromStream for XRefStream {
+    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<XRefStream> {
+        let info = XRefInfo::from_dict(stream.info, resolve)?;
+        // TODO: Look at filters of `info` and decode the stream.
+        let data = stream.data.to_vec();
+        Ok(XRefStream {
+            data: data,
+            info: info,
+        })
+    }
+}
 
-#[derive(Object, PrimitiveConv, Default)]
+
+#[derive(Object, FromDict, Default)]
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
     // Normal Stream fields - added as fields are added to Stream
@@ -101,6 +115,18 @@ pub struct ObjectStream<'a, W: io::Write + 'a> {
     id:         ObjNr,
 
     file:       &'a mut File<W>,
+}
+
+impl FromStream for ObjectStream {
+    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<ObjectStream> {
+        let info = ObjStmInfo::from_dict(stream.info, resolve)?;
+        // TODO: Look at filters of `info` and decode the stream.
+        let data = stream.data.to_vec();
+        Ok(XRefStream {
+            data: data,
+            info: info,
+        })
+    }
 }
 
 impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {

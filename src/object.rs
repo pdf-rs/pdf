@@ -16,7 +16,7 @@ use std::ops::{Deref};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
-pub type Resolve = Fn(PlainRef) -> Result<Primitive>;
+pub type Resolve<'a> = Fn(PlainRef) -> Result<Primitive<'a>>;
 
 /// Resolve function that just throws an error
 pub const no_resolve: &'static Resolve =  &|plain_ref| {
@@ -27,8 +27,15 @@ pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
 }
 
+
 pub trait PrimitiveConv: Sized {
     fn from_primitive(p: &Primitive, resolve: &Resolve) -> Result<Self>;
+}
+pub trait FromDict: Sized {
+    fn from_dict(dict: &Dictionary, resolve: &Resolve) -> Result<Self>;
+}
+pub trait FromStream: Sized {
+    fn from_stream(dict: &Stream, resolve: &Resolve) -> Result<Self>;
 }
 
 impl<'a, T> Object for &'a T where T: Object {

@@ -2,6 +2,7 @@ use err::*;
 use num_traits::PrimInt;
 use parser::lexer::Lexer;
 use xref::{XRef, XRefSection};
+use file::{XRefStream};
 use primitive::*;
 use object::*;
 use parser::parse;
@@ -45,9 +46,11 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary<'a>)> {
     let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
-    // TODO HERE ^ Need parse_indirect_stream?
+    let xref_stream = Primitive::Stream(xref_stream);
+    let xref_stream = XRefStream::from_primitive(&xref_stream, no_resolve);
+
 
     // Get 'W' as array of integers
     let width = xref_stream["W"].ok_or_else(|| "/W not found in dict".into()).as_integer_array()?;
@@ -77,7 +80,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSecti
 
 
 /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-pub fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn parse_xref_table_and_trailer<'a>(lexer: &mut Lexer<'a>) -> Result<(Vec<XRefSection>, Dictionary<'a>)> {
     let mut sections = Vec::new();
     
     // Keep reading subsections until we hit `trailer`

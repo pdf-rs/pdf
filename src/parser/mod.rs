@@ -19,7 +19,7 @@ pub fn parse(data: &[u8]) -> Result<Primitive> {
 }
 
 /// Recursive.
-pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
+pub fn parse_with_lexer<'a>(lexer: &mut Lexer<'a>) -> Result<Primitive<'a>> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
