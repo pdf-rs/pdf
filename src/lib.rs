@@ -163,7 +163,7 @@ fn impl_primitive_conv(ast: &syn::DeriveInput) -> quote::Tokens {
             quote! {
                 #name: #alias::from_primitive(
                     dict.get(#key)
-                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key: #key }).into()?,
+                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key: #key }.into())?,
                     r
                 )?,
             }
@@ -186,7 +186,7 @@ fn impl_primitive_conv(ast: &syn::DeriveInput) -> quote::Tokens {
                 let dict = p.as_dictionary(r)?;
                 assert_eq!(
                     dict.get("Type")
-                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key:"Type" }).into()?
+                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key:"Type" }.into())?
                     .as_name()?,
                     stringify!(#type_name)
                 );
