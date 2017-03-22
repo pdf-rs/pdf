@@ -56,16 +56,16 @@ pub struct XRefInfo {
 
     // XRefStream fields
     #[pdf(key = "Size")]
-    size: i32,
+    pub size: i32,
 
     #[pdf(key = "Index")]
-    index: Vec<i32>,
+    pub index: Vec<i32>,
 
     #[pdf(key = "Prev")]
     prev: i32,
 
     #[pdf(key = "W")]
-    w: Vec<i32>
+    pub w: Vec<i32>
 }
 
 pub struct XRefStream {
@@ -117,8 +117,9 @@ pub struct ObjectStream<'a, W: io::Write + 'a> {
     file:       &'a mut File<W>,
 }
 
-impl FromStream for ObjectStream {
-    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<ObjectStream> {
+impl<'a, W> FromStream for ObjectStream<'a, W> where W: io::Write + 'a
+{
+    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<Self> {
         let info = ObjStmInfo::from_dict(stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();

@@ -6,8 +6,9 @@ use object::{Object, PrimitiveConv, FromStream, Resolve};
 use primitive::{Primitive, Stream};
 use types::StreamFilter;
 use inflate::InflateStream;
+use err::Result;
 
-#[derive(Object, PrimitiveConv)]
+#[derive(Object, FromDict)]
 pub struct StreamInfo {
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
@@ -15,6 +16,7 @@ pub struct StreamInfo {
     #[pdf(key = "Type")]
     ty:     String
 }
+
 
 pub struct GeneralStream {
     pub data:       Vec<u8>,

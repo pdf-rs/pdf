@@ -46,27 +46,17 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary<'a>)> {
+pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<Vec<XRefSection>> {
     let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
-    let xref_stream = Primitive::Stream(xref_stream);
-    let xref_stream = XRefStream::from_primitive(&xref_stream, no_resolve);
+    let xref_stream = XRefStream::from_stream(&xref_stream, no_resolve)?;
 
 
     // Get 'W' as array of integers
-    let width = xref_stream["W"].ok_or_else(|| "/W not found in dict".into()).as_integer_array()?;
-    let num_entries = xref_stream["Size"].ok_or_else(|| "/Size not found in dict".into()).as_integer()?;
-
-    let indices: Vec<(i32, i32)> = {
-        match xref_stream.dictionary.get("Index") {
-            Ok(obj) => obj.as_integer_array()?,
-            Err(_) => vec![0, num_entries],
-        }.chunks(2).map(|c| (c[0], c[1])).collect()
-        // ^^ TODO panics if odd number of elements - how to handle it?
-    };
+    let width = &xref_stream.info.w;
+    let num_entries = &xref_stream.info.size;
+    let indices = &xref_stream.info.index;
     
-    let (dict, data) = (xref_stream.dictionary, xref_stream.content);
-    
-    let mut data_left = &data[..];
+    let mut data_left = &xref_stream.data[..];
 
     let mut sections = Vec::new();
     for (first_id, num_objects) in indices {
@@ -75,7 +65,7 @@ pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<(Vec<XRefS
     }
     // debug!("Xref stream"; "Sections" => format!("{:?}", sections));
 
-    Ok((sections, dict))
+    Ok(sections)
 }
 
 

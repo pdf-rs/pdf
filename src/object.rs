@@ -1,6 +1,6 @@
 use document::Document;
 use file::File;
-use primitive::Primitive;
+use primitive::{Primitive, Dictionary, Stream};
 use xref::XRef;
 use err::{Result, ErrorKind};
 use std::{io, fmt};
