@@ -63,7 +63,7 @@ pub struct XRefInfo {
     prev: i32,
 
     #[pdf(key = "W")]
-    w: Vec<i32,>
+    w: Vec<i32>
 }
 
 pub struct XRefStream {

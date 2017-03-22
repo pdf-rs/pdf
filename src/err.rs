@@ -42,6 +42,7 @@ error_chain! {
             description("Word not found.")
             display("'{}' not found.", word)
         }
+        EntryNotFound{key: &'static str}
         FreeObject {obj_nr: u64} {
             description("Tried to dereference free object.")
             display("Tried to dereference free object nr {}.", obj_nr)
