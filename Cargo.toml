@@ -1,6 +1,6 @@
 [package]
 name = "pdf_derive"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Sebastian Köln <sebk@rynx.org>"]
 
 [dependencies]
