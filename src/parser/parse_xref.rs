@@ -5,7 +5,7 @@ use xref::{XRef, XRefSection};
 use primitive::*;
 use object::*;
 use parser::parse;
-use parser::parse_object::parse_indirect_object;
+use parser::parse_object::{parse_indirect_object, parse_indirect_stream};
 
 
 // Just the part of Parser which reads xref sections from xref stream.
@@ -46,12 +46,12 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
 pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
-    let xref_stream = parse_indirect_object(lexer).chain_err(|| "Reading Xref stream")?.1.as_stream()?;
+    let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
     // TODO HERE ^ Need parse_indirect_stream?
 
     // Get 'W' as array of integers
-    let width = xref_stream.dictionary.get("W")?.as_integer_array()?;
-    let num_entries = xref_stream.dictionary.get("Size")?.as_integer()?;
+    let width = xref_stream["W"].ok_or_else(|| "/W not found in dict".into()).as_integer_array()?;
+    let num_entries = xref_stream["Size"].ok_or_else(|| "/Size not found in dict".into()).as_integer()?;
 
     let indices: Vec<(i32, i32)> = {
         match xref_stream.dictionary.get("Index") {

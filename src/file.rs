@@ -93,7 +93,7 @@ pub struct ObjStmInfo {
 
 pub struct ObjectStream<'a, W: io::Write + 'a> {
     pub data:       Vec<u8>,
-    /// Byte offset of each object. Index is the object number. (TODO: should probably)
+    /// Byte offset of each object. Index is the object number.
     offsets:    Vec<usize>,
     /// Fields in the stream dictionary.
     pub info:       ObjStmInfo,

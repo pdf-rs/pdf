@@ -38,15 +38,10 @@ error_chain! {
             description("Unexpected token.")
             display("Unexpected token '{}' at {} - expected '{}'", lexeme, pos, expected)
         }
-        UnwrapInteger {pos: usize} {
-            description("Expected integer...")
-            display("Expected integer at {}", pos)
-        }
         NotFound {word: String} {
             description("Word not found.")
             display("'{}' not found.", word)
         }
-        KeyNotFound { key: &'static str }
         FreeObject {obj_nr: u64} {
             description("Tried to dereference free object.")
             display("Tried to dereference free object nr {}.", obj_nr)
@@ -55,15 +50,16 @@ error_chain! {
             description("Function called on object of wrong type.")
             display("Expected {}, found {}.", expected, found)
         }
-        /// Should be chained after WrongObjectType.
-        ExpectedType {expected: &'static str} {
-            description("Expected type")
-            display("Expected type: {}", expected)
-        }
         /// Page out of bounds / doesn't exist
         OutOfBounds {
             description("Page out of bounds.")
             display("Page out of bounds.")
+        }
+
+        /// Cannot follow reference during parsing (most likely /Length of Stream)
+        FollowReference {
+            description("Cannot follow reference during parsing.")
+            display("Cannot follow reference during parsing.")
         }
     }
 }

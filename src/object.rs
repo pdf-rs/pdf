@@ -2,7 +2,7 @@ use document::Document;
 use file::File;
 use primitive::Primitive;
 use xref::XRef;
-use err::Error;
+use err::{Error, ErrorKind};
 use std::{io, fmt};
 use types::StreamFilter;
 use std::marker::PhantomData;
@@ -17,6 +17,11 @@ use std::ops::{Deref};
 pub type ObjNr = u64;
 pub type GenNr = u16;
 pub type Resolve = Fn(PlainRef) -> Result<Primitive, Error>;
+
+/// Resolve function that just throws an error
+pub const no_resolve: &'static Resolve =  &|plain_ref| {
+    Err(ErrorKind::FollowReference.into())
+};
 
 pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
