@@ -14,9 +14,11 @@ keywords = ["pdf"]
 license = "MIT"
 documentation = "https://docs.rs/pdf/0.6.0/pdf/"
 
+[dependencies.pdf_derive]
+git = "https://github.com/pdf-rs/pdf_derive.git"
+version = "= 0.1.1"
+
 [dependencies]
-pdf_derive= {git = "https://github.com/pdf-rs/pdf_derive.git"}
-#pdf_derive= {path = "../pdf_derive"}
 error-chain = "0.9.0"
 isatty = "0.1"
 num-traits = "0.1.36"
