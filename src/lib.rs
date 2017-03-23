@@ -134,7 +134,7 @@ pub fn from_dict(input: TokenStream) -> TokenStream {
 }
 
 fn make_aliases(fields: &[Field]) -> Vec<Ty> {
-    fields.iter().enumerate().map(|(i, field)| {
+    fields.iter().enumerate().map(|(i, _field)| {
         let alias = format!("ty_{}", i);
         Ty::Path(None, Path {
             global: false,
@@ -146,7 +146,7 @@ fn make_aliases(fields: &[Field]) -> Vec<Ty> {
 
 fn define_alises(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
     fields.iter().zip(aliases.iter()).map(|(field, alias)| {
-        let (name, opt) = pdf_attr(field);
+        let (_name, opt) = pdf_attr(field);
         let ty = match opt {
             false => &field.ty,
             true => {
@@ -185,11 +185,12 @@ fn impl_parts(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
             }
         } else {
             quote! {
-                #name: #alias::from_primitive(
-                    dict.get(#key)
-                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key: #key }.into())?,
-                    r
-                )?,
+                #name: {
+                    let result_p: ::pdf::err::Result<&Primitive> = dict.get(#key).ok_or(
+                        ::pdf::err::ErrorKind::EntryNotFound { key: #key }.into()
+                    );
+                    #alias::from_primitive(result_p?, r)?
+                },
             }
         }
     })
@@ -213,15 +214,16 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
     let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::FromDict for #name {
-            fn from_dict(dict: &::pdf::primitive::Dictionary, r: &::pdf::object::Resolve) -> ::std::result::Result<#name, ::pdf::err::Error> {
+            fn from_dict(dict: &::pdf::primitive::Dictionary, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
                 use ::pdf::object::PrimitiveConv;
                 #( #impl_aliases )*
-                assert_eq!(
-                    dict.get("Type")
-                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key:"Type" }.into())?
-                    .as_name()?,
-                    stringify!(#type_name)
+                
+                // Type check
+                let result_p: ::pdf::err::Result<&Primitive> = dict.get("Type").ok_or(
+                    ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
                 );
+                assert_eq!(result_p?.as_name()?, stringify!(#type_name));
+                
                 Ok(#name {
                     #( #parts )*
                 })
@@ -263,16 +265,17 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::FromStream for #name {
-            fn from_stream(dict: &::pdf::primitive::Stream, r: &::pdf::object::Resolve) -> ::std::result::Result<#name, ::pdf::err::Error> {
+            fn from_stream(dict: &::pdf::primitive::Stream, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
                 use ::pdf::object::PrimitiveConv;
                 #( #impl_aliases )*
                 let dict = &stream.info;
-                assert_eq!(
-                    dict.get("Type")
-                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key:"Type" }.into())?
-                    .as_name()?,
-                    stringify!(#type_name)
+                
+                // Type check
+                let result_p: ::pdf::err::Result<&Primitive> = dict.get("Type").ok_or(
+                    ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
                 );
+                assert_eq!(result_p?.as_name()?, stringify!(#type_name));
+                
                 Ok(#name {
                     #( #parts )*
                 })
