@@ -19,7 +19,7 @@ pub fn parse(data: &[u8]) -> Result<Primitive> {
 }
 
 /// Recursive.
-pub fn parse_with_lexer<'a>(lexer: &mut Lexer<'a>) -> Result<Primitive<'a>> {
+pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -123,12 +123,12 @@ pub fn parse_with_lexer<'a>(lexer: &mut Lexer<'a>) -> Result<Primitive<'a>> {
 }
 
 
-pub fn parse_stream<'a>(data: &'a [u8], resolve: &Resolve) -> Result<Stream<'a>> {
+pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<Stream> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_with_lexer<'a>(lexer: &mut Lexer<'a>, resolve: &Resolve) -> Result<Stream<'a>> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Stream> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -168,7 +168,7 @@ fn parse_stream_with_lexer<'a>(lexer: &mut Lexer<'a>, resolve: &Resolve) -> Resu
 
             Stream {
                 info: dict,
-                data: stream_substr.as_slice(),
+                data: stream_substr.to_vec(),
             }
         } else {
             bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "Dictionary" });

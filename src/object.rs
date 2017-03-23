@@ -16,7 +16,7 @@ use std::ops::{Deref};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
-pub type Resolve<'a> = Fn(PlainRef) -> Result<Primitive<'a>>;
+pub type Resolve = Fn(PlainRef) -> Result<Primitive>;
 
 /// Resolve function that just throws an error
 pub const no_resolve: &'static Resolve =  &|plain_ref| {

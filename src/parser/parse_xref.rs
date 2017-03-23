@@ -70,7 +70,7 @@ pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<Vec<XRefSe
 
 
 /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-pub fn parse_xref_table_and_trailer<'a>(lexer: &mut Lexer<'a>) -> Result<(Vec<XRefSection>, Dictionary<'a>)> {
+pub fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSection>, Dictionary)> {
     let mut sections = Vec::new();
     
     // Keep reading subsections until we hit `trailer`

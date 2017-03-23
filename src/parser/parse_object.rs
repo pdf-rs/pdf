@@ -16,7 +16,7 @@ use std::io;
 
 /// Parser an Object from an Object Stream at index `index`.
 // TODO: Have a feeling there is some redundance in these lifetimes. (?)
-pub fn parse_object_from_stream<'a, 'b, W: io::Write + 'a>(obj_stream: &'b ObjectStream<W>, index: u16) -> Result<Primitive<'b>> {
+pub fn parse_object_from_stream<'a, W: io::Write + 'a>(obj_stream: &ObjectStream<W>, index: u16) -> Result<Primitive> {
     let _ = obj_stream.info.n; /* num object */
     let first = obj_stream.info.first;
 
@@ -39,7 +39,7 @@ pub fn parse_object_from_stream<'a, 'b, W: io::Write + 'a>(obj_stream: &'b Objec
 /// cannot dereference 
 
 
-pub fn parse_indirect_object<'a>(lexer: &mut Lexer<'a>) -> Result<(PlainRef, Primitive<'a>)> {
+pub fn parse_indirect_object(lexer: &mut Lexer) -> Result<(PlainRef, Primitive)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;
@@ -50,7 +50,7 @@ pub fn parse_indirect_object<'a>(lexer: &mut Lexer<'a>) -> Result<(PlainRef, Pri
 
     Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
 }
-pub fn parse_indirect_stream<'a>(lexer: &mut Lexer<'a>) -> Result<(PlainRef, Stream<'a>)> {
+pub fn parse_indirect_stream(lexer: &mut Lexer) -> Result<(PlainRef, Stream)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;

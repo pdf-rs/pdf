@@ -9,24 +9,24 @@ use std::collections::HashMap;
 use file::File;
 use object::{PlainRef, Resolve};
 
-pub type Dictionary<'a> = HashMap<String, Primitive<'a>>;
+pub type Dictionary = HashMap<String, Primitive>;
 
 #[derive(Clone, Debug)]
-pub struct Stream<'a> {
-    pub info: Dictionary<'a>,
-    pub data: &'a [u8]
+pub struct Stream {
+    pub info: Dictionary,
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
-pub enum Primitive<'a> {
+pub enum Primitive {
     Null,
     Integer (i32),
     Number (f32),
     Boolean (bool),
     String (Vec<u8>), // TODO borrow slice?
-    Stream (Stream<'a>),
-    Dictionary (Dictionary<'a>),
-    Array (Vec<Primitive<'a>>),
+    Stream (Stream),
+    Dictionary (Dictionary),
+    Array (Vec<Primitive>),
     Reference (PlainRef),
     Name (String),
 }
@@ -40,7 +40,7 @@ macro_rules! wrong_primitive {
     )
 }
 
-impl<'a> Primitive<'a> {
+impl Primitive {
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
