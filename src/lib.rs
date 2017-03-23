@@ -144,23 +144,44 @@ fn make_aliases(fields: &[Field]) -> Vec<Ty> {
     .collect()
 }
 
-fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
-    let name = &ast.ident;
-    
-    let fields = match ast.body {
-        Body::Struct(ref data) => data.fields(),
-        Body::Enum(_) => panic!("#[derive(FromDict)] can only be used with structs"),
-    };
-    
-    let aliases = make_aliases(&fields);
-    
-    let parts = fields.iter().zip(aliases.iter()).map(|(field, alias)| {
+fn define_alises(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
+    fields.iter().zip(aliases.iter()).map(|(field, alias)| {
+        let (name, opt) = pdf_attr(field);
+        let ty = match opt {
+            false => &field.ty,
+            true => {
+                let path = match field.ty {
+                    Ty::Path(_, ref path) => path,
+                    _ => panic!()
+                };
+                assert_eq!(1, path.segments.len());
+                let data = match path.segments[0].parameters {
+                    PathParameters::AngleBracketed(ref data) => data,
+                    _ => panic!()
+                };
+                assert_eq!(1, data.types.len());
+                &data.types[0]
+            }
+        };
+        
+        quote! {
+            type #alias = #ty;
+        }
+    })
+    .collect()
+}
+
+fn impl_parts(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
+    fields.iter().zip(aliases.iter()).map(|(field, alias)| {
         let (key, opt) = pdf_attr(field);
         let ref name = field.ident;
         
         if opt {
             quote! {
-                #name: #alias::from_primitive(dict.get(#key), r)?,
+                #name: match dict.get(#key) {
+                    Some(p) => Some(#alias::from_primitive(p, r)?),
+                    None => None
+                },
             }
         } else {
             quote! {
@@ -171,22 +192,30 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
                 )?,
             }
         }
-    });
+    })
+    .collect()
+}
+
+fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
+    let name = &ast.ident;
     
-    let aliases = fields.iter().zip(aliases.iter()).map(|(field, alias)| {
-        let ref ty = field.ty;
-        
-        quote! {
-            type #alias = #ty;
-        }
-    });
+    let fields = match ast.body {
+        Body::Struct(ref data) => data.fields(),
+        Body::Enum(_) => panic!("#[derive(FromDict)] can only be used with structs"),
+    };
+    
+    let aliases = make_aliases(&fields);
+    
+    let parts = impl_parts(&fields, &aliases);
+    
+    let impl_aliases = define_alises(&fields, &aliases);
     
     let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::FromDict for #name {
             fn from_dict(dict: &::pdf::primitive::Dictionary, r: &::pdf::object::Resolve) -> ::std::result::Result<#name, ::pdf::err::Error> {
                 use ::pdf::object::PrimitiveConv;
-                #( #aliases )*
+                #( #impl_aliases )*
                 assert_eq!(
                     dict.get("Type")
                     .ok_or(::pdf::err::ErrorKind::EntryNotFound { key:"Type" }.into())?
@@ -227,39 +256,16 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     
     let aliases = make_aliases(&fields);
     
-    let parts = fields.iter().zip(aliases.iter()).map(|(field, alias)| {
-        let (key, opt) = pdf_attr(field);
-        let ref name = field.ident;
-        
-        if opt {
-            quote! {
-                #name: #alias::from_primitive(dict.get(#key), r)?,
-            }
-        } else {
-            quote! {
-                #name: #alias::from_primitive(
-                    dict.get(#key)
-                    .ok_or(::pdf::err::ErrorKind::EntryNotFound { key: #key }.into())?,
-                    r
-                )?,
-            }
-        }
-    });
+    let parts = impl_parts(&fields, &aliases);
     
-    let aliases = fields.iter().zip(aliases.iter()).map(|(field, alias)| {
-        let ref ty = field.ty;
-        
-        quote! {
-            type #alias = #ty;
-        }
-    });
+    let impl_aliases = define_alises(&fields, &aliases);
     
     let type_name = pdf_type(&ast);
     quote! {
         impl ::pdf::object::FromStream for #name {
             fn from_stream(dict: &::pdf::primitive::Stream, r: &::pdf::object::Resolve) -> ::std::result::Result<#name, ::pdf::err::Error> {
                 use ::pdf::object::PrimitiveConv;
-                #( #aliases )*
+                #( #impl_aliases )*
                 let dict = &stream.info;
                 assert_eq!(
                     dict.get("Type")

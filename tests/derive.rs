@@ -1,3 +1,4 @@
+#![feature(attr_literals)]
 #[macro_use]
 extern crate pdf_derive;
 
@@ -48,6 +49,8 @@ mod test {
     #[pdf(Type="X")]
     struct Test {
         #[pdf(key="Foo")]
-        a:  String
+        a:  String,
+        #[pdf(key="Foo", opt=true)]
+        b:  Option<String>
     }
 }
