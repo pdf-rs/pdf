@@ -5,7 +5,7 @@ use xref::{XRef, XRefSection};
 use file::{XRefStream};
 use primitive::*;
 use object::*;
-use parser::parse;
+use parser::{parse, parse_with_lexer};
 use parser::parse_object::{parse_indirect_object, parse_indirect_stream};
 
 
@@ -59,7 +59,7 @@ pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<Vec<XRefSe
     let mut data_left = &xref_stream.data[..];
 
     let mut sections = Vec::new();
-    for (first_id, num_objects) in indices {
+    for (first_id, num_objects) in indices.chunks(2).map(|c| (c[0], c[1])) {
         let section = parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
         sections.push(section);
     }
@@ -89,14 +89,14 @@ pub fn parse_xref_table_and_trailer<'a>(lexer: &mut Lexer<'a>) -> Result<(Vec<XR
             } else if w3.equals(b"n") {
                 section.add_inuse_entry(w1.to::<usize>()?, w2.to::<GenNr>()?);
             } else {
-                bail!(ErrorKind::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.as_string(), expected: "f or n"});
+                bail!(ErrorKind::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.to_string(), expected: "f or n"});
             }
         }
         sections.push(section);
     }
     // Read trailer
     lexer.next_expect("trailer")?;
-    let trailer = parse(lexer)?.into_dictionary()?;
+    let trailer = parse_with_lexer(lexer)?.as_dictionary(no_resolve)?.clone(); // TODO clones dictionary. Better solution?
  
     Ok((sections, trailer))
 }

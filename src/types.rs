@@ -97,7 +97,7 @@ impl<T: Object> Object for Vec<T> {
 
 impl<T: PrimitiveConv> PrimitiveConv for Vec<T> {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
-        Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect())
+        Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect::<Result<Vec<T>>>()?)
     }
 }
 impl<T: Object> Object for [T] {

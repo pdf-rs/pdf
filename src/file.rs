@@ -75,7 +75,7 @@ pub struct XRefStream {
 
 impl FromStream for XRefStream {
     fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<XRefStream> {
-        let info = XRefInfo::from_dict(stream.info, resolve)?;
+        let info = XRefInfo::from_dict(&stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
         Ok(XRefStream {

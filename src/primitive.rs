@@ -11,6 +11,7 @@ use object::{PlainRef, Resolve};
 
 pub type Dictionary<'a> = HashMap<String, Primitive<'a>>;
 
+#[derive(Clone, Debug)]
 pub struct Stream<'a> {
     pub info: Dictionary<'a>,
     pub data: &'a [u8]
