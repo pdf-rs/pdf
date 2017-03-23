@@ -120,7 +120,7 @@ pub struct ObjectStream<'a, W: io::Write + 'a> {
 impl<'a, W> FromStream for ObjectStream<'a, W> where W: io::Write + 'a
 {
     fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<Self> {
-        let info = ObjStmInfo::from_dict(stream.info, resolve)?;
+        let info = ObjStmInfo::from_dict(&stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
         Ok(XRefStream {
