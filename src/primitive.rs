@@ -48,14 +48,14 @@ impl Primitive {
             ref p => wrong_primitive!(Reference, p)
         }
     }
-    pub fn as_array(&self, resolve: &Resolve) -> Result<&[Primitive]> {
+    pub fn as_array<'a>(&'a self, resolve: &Resolve<'a>) -> Result<&'a [Primitive]> {
         match *self {
             Primitive::Array(ref v) => Ok(v),
             Primitive::Reference(id) => resolve(id)?.as_array(resolve),
             ref p => wrong_primitive!(Array, p)
         }
     }
-    pub fn as_dictionary(&self, resolve: &Resolve) -> Result<&Dictionary> {
+    pub fn as_dictionary<'a>(&'a self, resolve: &Resolve<'a>) -> Result<&'a Dictionary> {
         match *self {
             Primitive::Dictionary(ref dict) => Ok(dict),
             Primitive::Reference(id) => resolve(id)?.as_dictionary(resolve),
