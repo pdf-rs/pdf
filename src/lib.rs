@@ -22,7 +22,6 @@ pub mod xref;
 pub mod primitive;
 pub mod stream;
 pub mod file;
-pub mod document;
 
 mod err;
 // mod content;

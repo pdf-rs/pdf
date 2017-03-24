@@ -1,8 +1,6 @@
-use std::collections::HashMap;
 use std::io;
 
-use file::File;
-use object::{Object, PrimitiveConv, FromStream, FromDict, Resolve};
+use object::{Object, FromStream, FromDict, Resolve};
 use primitive::{Primitive, Stream};
 use types::StreamFilter;
 use inflate::InflateStream;

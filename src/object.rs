@@ -1,10 +1,6 @@
-use document::Document;
-use file::File;
 use primitive::{Primitive, Dictionary, Stream};
-use xref::XRef;
 use err::{Result, ErrorKind};
-use std::{io, fmt};
-use types::StreamFilter;
+use std::io;
 use std::marker::PhantomData;
 use std::ops::{Deref};
 
@@ -16,10 +12,10 @@ use std::ops::{Deref};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
-pub type Resolve = Fn(PlainRef) -> Result<Primitive>;
+pub type Resolve<'a> = Fn(PlainRef) -> Result<&'a Primitive>;
 
 /// Resolve function that just throws an error
-pub const no_resolve: &'static Resolve =  &|plain_ref| {
+pub const NO_RESOLVE: &'static Resolve =  &|_| {
     Err(ErrorKind::FollowReference.into())
 };
 
@@ -40,7 +36,7 @@ pub trait FromStream: Sized {
 
 impl<'a, T> Object for &'a T where T: Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        self.serialize(out)
+        unimplemented!();
     }
 }
 

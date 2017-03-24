@@ -3,9 +3,7 @@ use memmap::{Mmap, Protection};
 use std::str;
 use std::io::Read;
 use types::StreamFilter;
-use std::io;
 use object::*;
-use xref::XRef;
 use primitive::{Primitive, Stream};
 use err::*;
 
@@ -45,7 +43,7 @@ fn locate_offset() {
     use std::fs::File;
     let mut buf = Vec::new();
     let mut f = File::open("example.pdf").unwrap();
-    f.read_to_end(&mut buf);
+    f.read_to_end(&mut buf).unwrap();
     locate_xref_offset(&buf);
 }
 

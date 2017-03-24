@@ -1,12 +1,7 @@
 use err::*;
 
-use std;
-use std::io::Write;
 use std::vec::Vec;
-use std::str::from_utf8;
-use std::fmt::{Display, Formatter};
 use std::collections::HashMap;
-use file::File;
 use object::{PlainRef, Resolve};
 
 pub type Dictionary = HashMap<String, Primitive>;

@@ -1,8 +1,5 @@
-use object::{Object, PlainRef, Ref, PrimitiveConv, Resolve};
+use object::{Object, Ref, PrimitiveConv, Resolve};
 use primitive::Primitive;
-use file::File;
-use std::marker::PhantomData;
-use std::collections::HashMap;
 use std::io;
 use err::Result;
 use std::io::Write;
@@ -42,7 +39,7 @@ impl Object for String {
     }
 }
 impl PrimitiveConv for String {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
         Ok(p.as_name()?.to_owned())
     }
 }

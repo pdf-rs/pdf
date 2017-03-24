@@ -12,7 +12,6 @@ use err::*;
 use self::lexer::{Lexer, StringLexer};
 use primitive::{Primitive, Dictionary, Stream};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
-use object::PrimitiveConv;
 
 pub fn parse(data: &[u8]) -> Result<Primitive> {
     parse_with_lexer(&mut Lexer::new(data))
@@ -152,7 +151,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
 
             // Get length - look up in `resolve_fn` if necessary
             let length = match dict.get("Length") {
-                Some(&Primitive::Reference (reference)) => match resolve(reference)? {
+                Some(&Primitive::Reference (reference)) => match *resolve(reference)? {
                     Primitive::Integer (n) => n,
                     _ => bail!("Wrong type for stream's /Length."),
                 },

@@ -5,8 +5,8 @@ use xref::{XRef, XRefSection};
 use file::{XRefStream};
 use primitive::*;
 use object::*;
-use parser::{parse, parse_with_lexer};
-use parser::parse_object::{parse_indirect_object, parse_indirect_stream};
+use parser::{parse_with_lexer};
+use parser::parse_object::{parse_indirect_stream};
 
 
 // Just the part of Parser which reads xref sections from xref stream.
@@ -48,12 +48,11 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
 pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer) -> Result<Vec<XRefSection>> {
     let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
-    let xref_stream = XRefStream::from_stream(&xref_stream, no_resolve)?;
+    let xref_stream = XRefStream::from_stream(&xref_stream, NO_RESOLVE)?;
 
 
     // Get 'W' as array of integers
     let width = &xref_stream.info.w;
-    let num_entries = &xref_stream.info.size;
     let indices = &xref_stream.info.index;
     
     let mut data_left = &xref_stream.data[..];
@@ -96,7 +95,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSectio
     }
     // Read trailer
     lexer.next_expect("trailer")?;
-    let trailer = parse_with_lexer(lexer)?.as_dictionary(no_resolve)?.clone(); // TODO clones dictionary. Better solution?
+    let trailer = parse_with_lexer(lexer)?.as_dictionary(NO_RESOLVE)?.clone(); // TODO clones dictionary. Better solution?
  
     Ok((sections, trailer))
 }

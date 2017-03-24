@@ -3,15 +3,13 @@
 
 use parser::lexer::*;
 use err::*;
-use primitive::{Primitive, Dictionary, Stream};
+use primitive::{Primitive, Stream};
 use object::PlainRef;
 use file::ObjectStream;
 use parser::{parse_with_lexer, parse_stream_with_lexer, parse};
-use object::{GenNr, ObjNr};
+use object::{GenNr, ObjNr, NO_RESOLVE};
 
-use inflate::InflateStream;
 
-use std::io;
 
 
 /// Parser an Object from an Object Stream at index `index`.
@@ -55,7 +53,7 @@ pub fn parse_indirect_stream(lexer: &mut Lexer) -> Result<(PlainRef, Stream)> {
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;
 
-    let stm = parse_stream_with_lexer(lexer, &|plain_ref| Err(ErrorKind::FollowReference.into()))?;
+    let stm = parse_stream_with_lexer(lexer, &NO_RESOLVE)?;
 
     lexer.next_expect("endobj")?;
 
