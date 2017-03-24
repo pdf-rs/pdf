@@ -44,7 +44,7 @@ impl<'a, T> Object for &'a T where T: Object {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct PlainRef {
     pub id:     ObjNr,
     pub gen:    GenNr,

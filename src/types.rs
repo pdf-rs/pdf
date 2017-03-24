@@ -187,7 +187,8 @@ impl PrimitiveConv for StreamFilter {
             "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
             "LZWDecode"         => Ok(StreamFilter::Lzw),
             "FlateDecode"       => Ok(StreamFilter::Flate),
-            "JPXDecode"         => Ok(StreamFilter::Jpeg2k)
+            "JPXDecode"         => Ok(StreamFilter::Jpeg2k),
+            _                   => Err("Filter not recognized".into()),
         }
     }
 }

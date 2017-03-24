@@ -44,39 +44,45 @@ impl Primitive {
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
-            p => wrong_primitive!(Integer, p)
+            ref p => wrong_primitive!(Integer, p)
         }
     }
     pub fn as_reference(&self) -> Result<PlainRef> {
         match *self {
             Primitive::Reference(id) => Ok(id),
-            p => wrong_primitive!(Reference, p)
+            ref p => wrong_primitive!(Reference, p)
         }
     }
     pub fn as_array(&self, resolve: &Resolve) -> Result<&[Primitive]> {
         match *self {
             Primitive::Array(ref v) => Ok(v),
+            // TODO: the Primitive returned by `resolve` doesn't live outside of function.
+            /*
             Primitive::Reference(id) => resolve(id)?.as_array(resolve),
-            p => wrong_primitive!(Array, p)
+            */
+            ref p => wrong_primitive!(Array, p)
         }
     }
     pub fn as_dictionary(&self, resolve: &Resolve) -> Result<&Dictionary> {
         match *self {
             Primitive::Dictionary(ref dict) => Ok(dict),
+            // TODO: the Primitive returned by `resolve` doesn't live outside of function.
+            /*
             Primitive::Reference(id) => resolve(id)?.as_dictionary(resolve),
-            p => wrong_primitive!(Dictionary, p)
+            */
+            ref p => wrong_primitive!(Dictionary, p)
         }
     }
     pub fn as_name(&self) -> Result<&str> {
         match *self {
             Primitive::Name(ref name) => Ok(name as &str),
-            p => wrong_primitive!(Name, p)
+            ref p => wrong_primitive!(Name, p)
         }
     }
     pub fn as_string(&self) -> Result<&[u8]> {
         match *self {
             Primitive::String(ref data) => Ok(data),
-            p => wrong_primitive!(String, p)
+            ref p => wrong_primitive!(String, p)
         }
     }
 /*

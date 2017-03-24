@@ -34,6 +34,7 @@ impl XRef {
             XRef::Free {gen_nr, ..}
             | XRef::Raw {gen_nr, ..} => gen_nr,
             XRef::Stream { .. } => 0, // TODO I think these always have gen nr 0?
+            XRef::Promised => unimplemented!(), // TODO what do
         }
     }
 }
@@ -109,6 +110,7 @@ impl Debug for XRefTable {
                 Some(XRef::Stream {stream_id, index}) => {
                     write!(f, "{:4}: in stream {}, index {}\n", i, stream_id, index)?
                 }
+                Some(XRef::Promised) => unimplemented!(), // TODO what do
                 None => {
                     write!(f, "{:4}: None!\n", i)?
                 }

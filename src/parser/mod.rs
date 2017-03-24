@@ -30,7 +30,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.to_string();
                 let obj = parse_with_lexer(lexer)?;
-                dict[&key] = obj;
+                dict.insert(key, obj);
             } else if delimiter.equals(b">>") {
                 break;
             } else {
@@ -139,7 +139,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.to_string();
                 let obj = parse_with_lexer(lexer)?;
-                dict[&key] = obj;
+                dict.insert(key, obj);
             } else if delimiter.equals(b">>") {
                 break;
             } else {

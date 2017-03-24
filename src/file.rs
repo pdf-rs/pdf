@@ -28,8 +28,11 @@ fn locate_xref_offset(data: &[u8]) -> usize {
 impl<B> File<B> {
     fn open(path: &str) -> File<Mmap> {
         let file_mmap = Mmap::open_path(path, Protection::Read).unwrap();
-        
-        let data = file_mmap.as_slice();
+
+        let data;
+        unsafe {
+            data = file_mmap.as_slice();
+        };
         let xref_offset = locate_xref_offset(data);
         println!("xref offset: {}", xref_offset);
         
@@ -93,7 +96,7 @@ pub struct ObjStmInfo {
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
 
-    // ObjStmStream fields
+    // ObjStm fields
     #[pdf(key = "N")]
     pub n: i32,
 
@@ -105,31 +108,32 @@ pub struct ObjStmInfo {
 
 }
 
-pub struct ObjectStream<'a, W: io::Write + 'a> {
+pub struct ObjectStream {
     pub data:       Vec<u8>,
-    /// Byte offset of each object. Index is the object number.
-    offsets:    Vec<usize>,
     /// Fields in the stream dictionary.
     pub info:       ObjStmInfo,
+    /// Byte offset of each object. Index is the object number.
+    offsets:    Vec<usize>,
     /// The object number of this object.
     id:         ObjNr,
-
-    file:       &'a mut File<W>,
 }
 
-impl<'a, W> FromStream for ObjectStream<'a, W> where W: io::Write + 'a
-{
+impl FromStream for ObjectStream {
     fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<Self> {
         let info = ObjStmInfo::from_dict(&stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
-        Ok(XRefStream {
+        Ok(ObjectStream {
             data: data,
             info: info,
+            offsets: Vec::new(), // TODO: Parse from stream
+            id: 0, // TODO
         })
     }
 }
 
+// TODO: This doesn't work after removing the `File`
+/*
 impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {
     pub fn new(file: &'a mut File<W>) -> ObjectStream<'a, W> {
         let id = file.promise();
@@ -208,3 +212,4 @@ impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {
         })
     }
 }
+*/

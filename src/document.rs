@@ -1,5 +1,3 @@
-//! Abstraction over the `file` module. Stores objects in high-level representation. Introduces wrappers for all kinds of PDF Objects (`file::Primitive`), for easy PDF reference following.
-
 use types::{Root, Pages, Page, PagesNode};
 use file::File;
 use primitive::{Primitive};
@@ -7,12 +5,12 @@ use object::PlainRef;
 use err::*;
 use std::collections::HashMap;
 
-/// `Document` keeps all objects of the PDf file stored in a high-level representation.
-
 pub struct Document {
     root:       Root
 }
 
+// TODO a lot of errors here, not sure what to do
+/*
 impl Document {
     pub fn from_root<B>(root: &Primitive, reader: &File<B>) -> Result<Document> {
         let root_ref = reader.trailer.get("Root").chain_err(|| "No root entry in trailer.")?;
@@ -58,3 +56,4 @@ impl Document {
         bail!("not found!");
     }
 }
+*/
