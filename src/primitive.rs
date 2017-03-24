@@ -51,20 +51,14 @@ impl Primitive {
     pub fn as_array(&self, resolve: &Resolve) -> Result<&[Primitive]> {
         match *self {
             Primitive::Array(ref v) => Ok(v),
-            // TODO: the Primitive returned by `resolve` doesn't live outside of function.
-            /*
             Primitive::Reference(id) => resolve(id)?.as_array(resolve),
-            */
             ref p => wrong_primitive!(Array, p)
         }
     }
     pub fn as_dictionary(&self, resolve: &Resolve) -> Result<&Dictionary> {
         match *self {
             Primitive::Dictionary(ref dict) => Ok(dict),
-            // TODO: the Primitive returned by `resolve` doesn't live outside of function.
-            /*
             Primitive::Reference(id) => resolve(id)?.as_dictionary(resolve),
-            */
             ref p => wrong_primitive!(Dictionary, p)
         }
     }
