@@ -18,7 +18,7 @@ pub enum Primitive {
     Integer (i32),
     Number (f32),
     Boolean (bool),
-    String (Vec<u8>), // TODO borrow slice?
+    String (Vec<u8>),
     Stream (Stream),
     Dictionary (Dictionary),
     Array (Vec<Primitive>),

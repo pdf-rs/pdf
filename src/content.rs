@@ -49,7 +49,7 @@ impl Content {
                 Err(_) => {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
-                    let operator = lexer.next()?.as_string(); // TODO will this work as expected?
+                    let operator = lexer.next()?.as_string();
                     let mut operation = Operation::new(operator, Vec::new());
                     // Give operands to operation and empty buffer.
                     swap(&mut buffer, &mut operation.operands);

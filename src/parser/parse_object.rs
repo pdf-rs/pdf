@@ -13,7 +13,6 @@ use object::{GenNr, ObjNr, NO_RESOLVE};
 
 
 /// Parser an Object from an Object Stream at index `index`.
-// TODO: Have a feeling there is some redundance in these lifetimes. (?)
 pub fn parse_object_from_stream(obj_stream: &ObjectStream, index: u16) -> Result<Primitive> {
     let _ = obj_stream.info.n; /* num object */
     let first = obj_stream.info.first;

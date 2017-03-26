@@ -95,7 +95,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer) -> Result<(Vec<XRefSectio
     }
     // Read trailer
     lexer.next_expect("trailer")?;
-    let trailer = parse_with_lexer(lexer)?.as_dictionary(NO_RESOLVE)?.clone(); // TODO clones dictionary. Better solution?
+    let trailer = parse_with_lexer(lexer)?.as_dictionary(NO_RESOLVE)?.clone();
  
     Ok((sections, trailer))
 }

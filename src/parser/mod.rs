@@ -5,6 +5,7 @@ mod reader;
 mod parse_object;
 mod parse_xref;
 
+use inflate::InflateStream;
 pub use self::reader::*;
 //pub use self::writer::*;
 
@@ -108,7 +109,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
     } else if first_lexeme.equals(b"<") {
         let hex_str = lexer.next()?.to_vec();
         lexer.next_expect(">")?;
-        Primitive::String (hex_str) // TODO no HexString - problem?
+        Primitive::String (hex_str)
     } else {
         bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
               lexer.get_pos(),
@@ -160,14 +161,27 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
             };
 
             
-            // Skip the stream
             let stream_substr = lexer.offset_pos(length as usize);
+            // Uncompress/decode if there is a filter
+            let content = match dict.get("Filter") {
+                Some(&Primitive::Name (ref s)) => {
+                    if *s == "FlateDecode" {
+                        flat_decode(stream_substr.as_slice())
+                    } else {
+                        bail!("NOT IMPLEMENTED: Filter type {}", *s);
+                    }
+                }
+                Some(_) => {
+                    bail!("NOT IMPLEMENTED: Array of filters");
+                }
+                None => stream_substr.to_vec()
+            };
             // Finish
             lexer.next_expect("endstream")?;
 
             Stream {
                 info: dict,
-                data: stream_substr.to_vec(),
+                data: content,
             }
         } else {
             bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "Dictionary" });
@@ -177,4 +191,22 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
     };
 
     Ok(obj)
+}
+
+
+// TODO move out to decoding/encoding module
+fn flat_decode(data: &[u8]) -> Vec<u8> {
+    let mut inflater = InflateStream::from_zlib();
+    let mut out = Vec::<u8>::new();
+    let mut n = 0;
+    while n < data.len() {
+        let res = inflater.update(&data[n..]);
+        if let Ok((num_bytes_read, result)) = res {
+            n += num_bytes_read;
+            out.extend(result);
+        } else {
+            res.unwrap();
+        }
+    }
+    out
 }
