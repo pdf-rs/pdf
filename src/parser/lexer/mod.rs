@@ -71,6 +71,7 @@ impl<'a> Lexer<'a> {
     /// Used by next, peek and back - returns substring and new position
     /// If forward, places pointer at the next non-whitespace character.
     /// If backward, places pointer at the start of the current word.
+    // TODO ^ backward case is actually not tested or.. thought about that well.
     fn next_word(&self, forward: bool) -> Result<(Substr<'a>, usize)> {
         let mut pos = self.pos;
         // Move away from eventual whitespace

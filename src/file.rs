@@ -6,36 +6,38 @@ use types::StreamFilter;
 use object::*;
 use primitive::{Primitive, Stream};
 use err::*;
+use parser::lexer::Lexer;
 
 pub struct File<B> {
     backend:    B,
     refs:       XRefTable
 }
 
-fn locate_xref_offset(data: &[u8]) -> usize {
-    // locate the xref offset at the end of the file
-    // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
-    // u64::MAX has 20 digits + \n\n(2) + %%EOF(5) = 27 bytes max.
-    let mut it = data.iter();
-    let end = it.rposition(|&n| n == b'\n').unwrap();
-    let start = it.rposition(|&n| n == b'\n').unwrap();
-    assert_eq!(&data[end ..], b"%%EOF");
-    str::from_utf8(&data[start + 1 .. end]).unwrap().parse().unwrap()
-}
 
 impl<B> File<B> {
-    fn open(path: &str) -> File<Mmap> {
+    fn open(path: &str) -> Result<File<Mmap>> {
         let file_mmap = Mmap::open_path(path, Protection::Read).unwrap();
 
         let data;
         unsafe {
             data = file_mmap.as_slice();
         };
-        let xref_offset = locate_xref_offset(data);
+        let xref_offset = locate_xref_offset(data)?;
         println!("xref offset: {}", xref_offset);
         
         unimplemented!()
     }
+}
+
+fn locate_xref_offset(data: &[u8]) -> Result<usize> {
+    // locate the xref offset at the end of the file
+    // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
+    // u64::MAX has 20 digits + \n\n(2) + %%EOF(5) = 27 bytes max.
+
+    let mut lexer = Lexer::new(data);
+    lexer.set_pos_from_end(0);
+    lexer.seek_substr_back(b"startxref")?;
+    Ok(lexer.next()?.to::<usize>()?)
 }
 
 #[test]

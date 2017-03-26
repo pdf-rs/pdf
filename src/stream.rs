@@ -63,19 +63,3 @@ impl FromStream for GeneralStream {
 }
 
 
-// TODO move out to decoding/encoding module
-fn flat_decode(data: &[u8]) -> Vec<u8> {
-    let mut inflater = InflateStream::from_zlib();
-    let mut out = Vec::<u8>::new();
-    let mut n = 0;
-    while n < data.len() {
-        let res = inflater.update(&data[n..]);
-        if let Ok((num_bytes_read, result)) = res {
-            n += num_bytes_read;
-            out.extend(result);
-        } else {
-            res.unwrap();
-        }
-    }
-    out
-}
