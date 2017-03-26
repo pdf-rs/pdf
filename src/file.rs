@@ -1,5 +1,4 @@
 use xref::XRefTable;
-use memmap::{Mmap, Protection};
 use std::str;
 use std::io::Read;
 use types::StreamFilter;
@@ -7,25 +6,26 @@ use object::*;
 use primitive::{Primitive, Stream};
 use err::*;
 use parser::lexer::Lexer;
+use std::ops::{Range};
+use backend::Backend;
 
-pub struct File<B> {
+
+pub struct File<B: Backend> {
     backend:    B,
-    refs:       XRefTable
+    refs:       XRefTable,
 }
 
 
-impl<B> File<B> {
-    fn open(path: &str) -> Result<File<Mmap>> {
-        let file_mmap = Mmap::open_path(path, Protection::Read).unwrap();
-
-        let data;
-        unsafe {
-            data = file_mmap.as_slice();
-        };
-        let xref_offset = locate_xref_offset(data)?;
+impl<B: Backend> File<B> {
+    fn open(path: &str) -> Result<File<B>> {
+        let backend = B::open(path)?;
+        let xref_offset = locate_xref_offset(backend.read(0..)?)?;
         println!("xref offset: {}", xref_offset);
         
-        unimplemented!()
+        Ok(File {
+            backend: backend,
+            refs: XRefTable::new(0),
+        })
     }
 }
 
@@ -213,3 +213,12 @@ impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {
     }
 }
 */
+
+#[cfg(test)]
+mod tests {
+    use file::File;
+    #[test]
+    fn new_File() {
+        let _ = File::<Vec<u8>>::open("example.pdf").unwrap();
+    }
+}

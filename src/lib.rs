@@ -1,4 +1,6 @@
 #![feature(attr_literals)] 
+#![feature(collections_range)]
+#![feature(slice_get_slice)]
 
 #[macro_use]
 extern crate pdf_derive;
@@ -22,6 +24,7 @@ pub mod xref;
 pub mod primitive;
 pub mod stream;
 pub mod file;
+pub mod backend;
 
 mod err;
 // mod content;
