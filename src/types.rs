@@ -1,4 +1,4 @@
-use object::{Object, Ref, PrimitiveConv, Resolve, MaybeRef};
+use object::{Object, Ref, FromPrimitive, Resolve, MaybeRef};
 use primitive::Primitive;
 use std::io;
 use err::Result;
@@ -38,7 +38,7 @@ impl Object for String {
         (self as &str).serialize(out)
     }
 }
-impl PrimitiveConv for String {
+impl FromPrimitive for String {
     fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
         Ok(p.as_name()?.to_owned())
     }
@@ -63,7 +63,7 @@ impl Object for Text {
         Ok(())
     }
 }
-impl PrimitiveConv for Text {
+impl FromPrimitive for Text {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(Text{ data: p.as_string()?.to_owned() })
     }
@@ -92,7 +92,7 @@ impl<T: Object> Object for Vec<T> {
     }
 }
 
-impl<T: PrimitiveConv> PrimitiveConv for Vec<T> {
+impl<T: FromPrimitive> FromPrimitive for Vec<T> {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect::<Result<Vec<T>>>()?)
     }
@@ -119,18 +119,18 @@ impl Object for bool {
         write!(out, "{}", self)
     }
 }
-impl PrimitiveConv for i32 {
+impl FromPrimitive for i32 {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         p.as_integer()
     }
 }
 
-impl<T> PrimitiveConv for Ref<T> {
+impl<T> FromPrimitive for Ref<T> {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(Ref::new(p.as_reference()?))
     }
 }
-impl<T> PrimitiveConv for MaybeRef<T> {
+impl<T> FromPrimitive for MaybeRef<T> {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         Ok(
         match *p {
@@ -204,7 +204,7 @@ impl Object for StreamFilter {
         write!(out, "{}", s)
     }
 }
-impl PrimitiveConv for StreamFilter {
+impl FromPrimitive for StreamFilter {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         match p.as_name()? {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),

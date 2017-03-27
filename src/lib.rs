@@ -1,6 +1,6 @@
 #![feature(attr_literals)] 
-#![feature(collections_range)]
-#![feature(slice_get_slice)]
+//#![feature(collections_range)]
+//#![feature(slice_get_slice)]
 
 #[macro_use]
 extern crate pdf_derive;

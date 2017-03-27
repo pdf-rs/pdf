@@ -24,7 +24,7 @@ pub trait Object {
 }
 
 
-pub trait PrimitiveConv: Sized {
+pub trait FromPrimitive: Sized {
     fn from_primitive(p: &Primitive, resolve: &Resolve) -> Result<Self>;
 }
 pub trait FromDict: Sized {
