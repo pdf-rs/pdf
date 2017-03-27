@@ -159,93 +159,18 @@ impl FromStream for ObjectStream {
 }
 
 
-// TODO: This doesn't work after removing the `File`
-/*
-impl<'a, W: io::Write + 'a> ObjectStream<'a, W> {
-    pub fn new(file: &'a mut File<W>) -> ObjectStream<'a, W> {
-        let id = file.promise();
-        
-        ObjectStream {
-            data:       Vec::new(),
-            offsets:    Vec::new(),
-            info:       ObjStmInfo::default(),
-            id:         id,
-            file:       file
-        }
-    }
-    pub fn add<T: Object>(&mut self, o: T) -> io::Result<RealizedRef<T>> {
-        let start = self.data.len();
-        o.serialize(&mut self.data)?;
-        let end = self.data.len();
-        
-        let id = self.file.refs.len() as u64;
-        
-        self.file.refs.push(XRef::Stream {
-            stream_id:  self.id,
-            index:      self.items.len()
-        });
-        
-        self.items.push(start);
-        
-        Ok(RealizedRef {
-            id:     id,
-            obj:    Box::new(o),
-        })
-    }
-    pub fn fulfill<T: Object>(&mut self, promise: PromisedRef<T>, o: T)
-     -> io::Result<RealizedRef<T>>
-    {
-        let start = self.data.len();
-        o.serialize(&mut self.data)?;
-        let end = self.data.len();
-        
-        self.file.refs[promise.id as usize] = XRef::Stream {
-            stream_id:  self.id,
-            index:      self.items.len() as u32
-        };
-        
-        self.items.push(start);
-        
-        Ok(RealizedRef {
-            id:     promise.id,
-            obj:    Box::new(o),
-        })
-    }
-    pub fn finish(self) -> io::Result<PlainRef> {
-        let stream_pos = self.file.cursor.position();
-        let ref mut out = self.file.cursor;
-        
-        write!(out, "{} 0 obj\n", self.id)?;
-        let indices = self.items.iter().enumerate().map(|(n, item)| format!("{} {}", n, item)).join(" ");
-        
-        write_dict!(out,
-            "/Type"     << "/ObjStm",
-            "/Length"   << self.data.len() + indices.len() + 1,
-            "/Filter"   << self.filters,
-            "/N"        << self.items.len(),
-            "/First"    << indices.len() + 1
-        );
-        write!(out, "\nstream\n{}\n", indices)?;
-        out.write(&self.data)?;
-        write!(out, "\nendstream\nendobj\n")?;
-        
-        
-        self.file.refs[self.id as usize] = XRef::Raw {
-            offset:  stream_pos
-        };
-        
-        Ok(PlainRef {
-            id: self.id
-        })
-    }
-}
-*/
-
 #[cfg(test)]
 mod tests {
     use file::File;
+    use memmap::Mmap;
     #[test]
     fn new_File() {
+        let _ = File::<Vec<u8>>::open("example.pdf").unwrap();
+        let _ = File::<Mmap>::open("example.pdf").unwrap();
+    }
+
+    #[test]
+    fn read_pages() {
         let _ = File::<Vec<u8>>::open("example.pdf").unwrap();
     }
 }

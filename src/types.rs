@@ -46,22 +46,6 @@ impl FromPrimitive for Text {
     }
 }
 
-pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
-    where W: io::Write, T: Object, I: Iterator<Item=T>
-{
-    write!(out, "[")?;
-    
-    if let Some(first) = iter.next() {
-        first.serialize(out)?;
-        
-        for other in iter {
-            out.write(b", ")?;
-            other.serialize(out)?;
-        }
-    }
-    
-    write!(out, "]")
-}
 
 
 
@@ -139,4 +123,22 @@ impl FromPrimitive for StreamFilter {
             _                   => Err("Filter not recognized".into()),
         }
     }
+}
+
+
+pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
+    where W: io::Write, T: Object, I: Iterator<Item=T>
+{
+    write!(out, "[")?;
+    
+    if let Some(first) = iter.next() {
+        first.serialize(out)?;
+        
+        for other in iter {
+            out.write(b", ")?;
+            other.serialize(out)?;
+        }
+    }
+    
+    write!(out, "]")
 }

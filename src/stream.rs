@@ -3,7 +3,6 @@ use std::io;
 use object::{Object, FromStream, FromDict, Resolve};
 use primitive::{Primitive, Stream};
 use types::StreamFilter;
-use inflate::InflateStream;
 use err::Result;
 
 #[derive(Object, FromDict)]

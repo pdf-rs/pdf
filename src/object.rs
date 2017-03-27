@@ -68,14 +68,6 @@ impl<T: Object> Object for Ref<T> {
         self.inner.serialize(out)
     }
 }
-impl<'a, T: Object> From<&'a PromisedRef<T>> for Ref<T> {
-    fn from(p: &'a PromisedRef<T>) -> Ref<T> {
-        Ref {
-            inner:      p.inner,
-            _marker:    PhantomData
-        }
-    }
-}
 impl<T> FromPrimitive for Ref<T> {
     fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
         Ok(Ref::new(p.as_reference()?))
@@ -107,34 +99,6 @@ impl<T> FromPrimitive for MaybeRef<T>
             ref p => MaybeRef::Owned (T::from_primitive(p, r)?),
         }
         )
-    }
-}
-
-/* PromisedRef<T> */
-pub struct PromisedRef<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
-}
-impl<T: Object> Object for PromisedRef<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
-        self.inner.serialize(out)
-    }
-}
-
-/* RealizedRef<T> */
-pub struct RealizedRef<T> {
-    inner:      PlainRef,
-    obj:        Box<T>
-}
-impl<T: Object> Object for RealizedRef<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
-        self.inner.serialize(out)
-    }
-}
-impl<T: Object> Deref for RealizedRef<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        &self.obj
     }
 }
 
