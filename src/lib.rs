@@ -135,7 +135,7 @@ pub fn from_dict(input: TokenStream) -> TokenStream {
 
 fn make_aliases(fields: &[Field]) -> Vec<Ty> {
     fields.iter().enumerate().map(|(i, _field)| {
-        let alias = format!("ty_{}", i);
+        let alias = format!("Ty_{}", i);
         Ty::Path(None, Path {
             global: false,
             segments: vec![Ident::from(alias).into()]
@@ -215,7 +215,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
     quote! {
         impl ::pdf::object::FromDict for #name {
             fn from_dict(dict: &::pdf::primitive::Dictionary, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
-                use ::pdf::object::PrimitiveConv;
+                use ::pdf::object::FromPrimitive;
                 #( #impl_aliases )*
                 
                 // Type check
@@ -266,7 +266,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     quote! {
         impl ::pdf::object::FromStream for #name {
             fn from_stream(dict: &::pdf::primitive::Stream, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
-                use ::pdf::object::PrimitiveConv;
+                use ::pdf::object::FromPrimitive;
                 #( #impl_aliases )*
                 let dict = &stream.info;
                 
