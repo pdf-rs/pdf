@@ -1,7 +1,7 @@
 use object::{Object, Ref, FromPrimitive, Resolve, MaybeRef};
-use primitive::Primitive;
+use primitive::{Primitive, Dictionary};
 use std::io;
-use err::Result;
+use err::*;
 use std::io::Write;
 use encoding::all::UTF_16BE;
 
@@ -20,29 +20,6 @@ impl Object for PagesNode {
 }
 
 
-impl Object for str {
-    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
-        for b in self.chars() {
-            match b {
-                '\\' | '(' | ')' => write!(out, r"\")?,
-                c if c > '~' => panic!("only ASCII"),
-                _ => ()
-            }
-            write!(out, "{}", b)?;
-        }
-        Ok(())
-    }
-}
-impl Object for String {
-    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
-        (self as &str).serialize(out)
-    }
-}
-impl FromPrimitive for String {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
-        Ok(p.as_name()?.to_owned())
-    }
-}
 
 struct Text {
     data:   Vec<u8>
@@ -64,7 +41,7 @@ impl Object for Text {
     }
 }
 impl FromPrimitive for Text {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
         Ok(Text{ data: p.as_string()?.to_owned() })
     }
 }
@@ -86,60 +63,7 @@ pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
     write!(out, "]")
 }
 
-impl<T: Object> Object for Vec<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write_list(out, self.iter())
-    }
-}
 
-impl<T: FromPrimitive> FromPrimitive for Vec<T> {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
-        Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect::<Result<Vec<T>>>()?)
-    }
-}
-impl<T: Object> Object for [T] {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write_list(out, self.iter())
-    }
-}
-
-
-impl Object for i32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
-    }
-}
-impl Object for f32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
-    }
-}
-impl Object for bool {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "{}", self)
-    }
-}
-impl FromPrimitive for i32 {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
-        p.as_integer()
-    }
-}
-
-impl<T> FromPrimitive for Ref<T> {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
-        Ok(Ref::new(p.as_reference()?))
-    }
-}
-impl<T> FromPrimitive for MaybeRef<T> {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
-        Ok(
-        match *p {
-            Primitive::Reference (r) => MaybeRef::Reference (Ref::new(r)),
-            _ => unimplemented!(), // TODO: how to check whether inner value is T...
-        }
-        )
-    }
-}
 
 /* Dictionary Types */
 
@@ -205,7 +129,7 @@ impl Object for StreamFilter {
     }
 }
 impl FromPrimitive for StreamFilter {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
         match p.as_name()? {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
             "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
@@ -216,52 +140,3 @@ impl FromPrimitive for StreamFilter {
         }
     }
 }
-
-
-
-
-/*
-/// `/Type Page`
-qtyped!(Page {
-    parent: PageTree,
-    resources: Option<Resources>,
-});
-/// `/Type Pages`
-qtyped!(PageTree {
-    parent: Option<PageTree>,
-    kids: Vec<ObjectId>,
-    count: i32,
-    resources: Option<Resources>,
-});
-/// `/Type Resources` - resource dictionary.
-qtyped!(Resources {
-    ext_g_state: Option<ExtGState>,
-    color_space: Dictionary,
-    // TODO:
-    // Pattern
-    // Shading
-    // XObject
-    // Font
-    // ProcSet
-    // Properties
-
-});
-
-/// `/Type ExtGState` - graphics state parameter dictionary.
-qtyped!(ExtGState {
-    line_width: Option<String>,
-    line_cap_style: Option<i32>,
-    line_join_style: Option<i32>,
-    // TODO ETC
-});
-
-/// `/Type Catalog`
-pub struct Catalog {
-    pub version: Option<String>,
-    /// `/Pages`
-    pub page_tree: PageTree,
-    // TODO PageLabels
-    pub names: Option<Dictionary>,
-    // TODO rest
-}
- */

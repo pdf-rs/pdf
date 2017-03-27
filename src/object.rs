@@ -3,6 +3,7 @@ use err::{Result, ErrorKind};
 use std::io;
 use std::marker::PhantomData;
 use std::ops::{Deref};
+use types::write_list;
 
 // use std::fmt::{Formatter, Debug};
 
@@ -34,11 +35,22 @@ pub trait FromStream: Sized {
     fn from_stream(dict: &Stream, resolve: &Resolve) -> Result<Self>;
 }
 
+
+
+/* PlainRef */
 #[derive(Copy, Clone, Debug)]
 pub struct PlainRef {
     pub id:     ObjNr,
     pub gen:    GenNr,
 }
+impl Object for PlainRef {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+        write!(out, "{} {} R", self.id, self.gen)
+    }
+}
+
+
+/* Ref<T> */
 pub struct Ref<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
@@ -51,42 +63,11 @@ impl<T> Ref<T> {
         }
     }
 }
-
-
-/// Either a reference or the object itself.
-pub enum MaybeRef<T> {
-    Owned (T),
-    Reference (Ref<T>),
-}
-pub struct PromisedRef<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
-}
-pub struct RealizedRef<T> {
-    inner:      PlainRef,
-    obj:        Box<T>
-}
-
-
-impl<'a, T> Object for &'a T where T: Object {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        unimplemented!();
-    }
-}
-
-impl Object for PlainRef {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
-        write!(out, "{} {} R", self.id, self.gen)
-    }
-}
-
-
-impl<T: Object> Object for PromisedRef<T> {
+impl<T: Object> Object for Ref<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
         self.inner.serialize(out)
     }
 }
-
 impl<'a, T: Object> From<&'a PromisedRef<T>> for Ref<T> {
     fn from(p: &'a PromisedRef<T>) -> Ref<T> {
         Ref {
@@ -95,10 +76,18 @@ impl<'a, T: Object> From<&'a PromisedRef<T>> for Ref<T> {
         }
     }
 }
-impl<T: Object> Object for Ref<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
-        self.inner.serialize(out)
+impl<T> FromPrimitive for Ref<T> {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+        Ok(Ref::new(p.as_reference()?))
     }
+}
+
+
+/* MaybeRef<T> */
+/// Either a reference or the object itself.
+pub enum MaybeRef<T> {
+    Owned (T),
+    Reference (Ref<T>),
 }
 impl<T: Object> Object for MaybeRef<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
@@ -108,19 +97,69 @@ impl<T: Object> Object for MaybeRef<T> {
         }
     }
 }
-
-impl<T: Object> Deref for RealizedRef<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        &self.obj
+impl<T> FromPrimitive for MaybeRef<T>
+    where T: FromPrimitive
+{
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+        Ok(
+        match *p {
+            Primitive::Reference (r) => MaybeRef::Reference (Ref::new(r)),
+            ref p => MaybeRef::Owned (T::from_primitive(p, r)?),
+        }
+        )
     }
+}
+
+/* PromisedRef<T> */
+pub struct PromisedRef<T> {
+    inner:      PlainRef,
+    _marker:    PhantomData<T>
+}
+impl<T: Object> Object for PromisedRef<T> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+        self.inner.serialize(out)
+    }
+}
+
+/* RealizedRef<T> */
+pub struct RealizedRef<T> {
+    inner:      PlainRef,
+    obj:        Box<T>
 }
 impl<T: Object> Object for RealizedRef<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
         self.inner.serialize(out)
     }
 }
+impl<T: Object> Deref for RealizedRef<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.obj
+    }
+}
 
+
+
+
+////////////////////////
+// Other Object impls //
+////////////////////////
+
+impl Object for i32 {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
+    }
+}
+impl Object for f32 {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
+    }
+}
+impl Object for bool {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
+    }
+}
 impl Object for Dictionary {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write!(out, "<<")?;
@@ -131,6 +170,36 @@ impl Object for Dictionary {
         write!(out, ">>")
     }
 }
+impl Object for str {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        for b in self.chars() {
+            match b {
+                '\\' | '(' | ')' => write!(out, r"\")?,
+                c if c > '~' => panic!("only ASCII"),
+                _ => ()
+            }
+            write!(out, "{}", b)?;
+        }
+        Ok(())
+    }
+}
+impl Object for String {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        (self as &str).serialize(out)
+    }
+}
+
+impl<T: Object> Object for Vec<T> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write_list(out, self.iter())
+    }
+}
+impl<T: Object> Object for [T] {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write_list(out, self.iter())
+    }
+}
+
 impl Object for Primitive {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         match *self {
@@ -148,5 +217,8 @@ impl Object for Primitive {
     }
 }
 
-
-
+impl<'a, T> Object for &'a T where T: Object {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        unimplemented!();
+    }
+}

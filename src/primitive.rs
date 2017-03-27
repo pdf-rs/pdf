@@ -2,7 +2,7 @@ use err::*;
 
 use std::vec::Vec;
 use std::collections::HashMap;
-use object::{PlainRef, Resolve};
+use object::{PlainRef, Resolve, FromPrimitive};
 
 pub type Dictionary = HashMap<String, Primitive>;
 
@@ -74,13 +74,43 @@ impl Primitive {
             ref p => wrong_primitive!(String, p)
         }
     }
-/*
-    pub fn as_stream(&self, reader: &File) -> Result<&Stream> {
+    pub fn as_stream<'a>(&'a self, resolve: &Resolve<'a>) -> Result<&'a Stream> {
         match *self {
-            Primitive::Stream(ref s) => Ok(s),
-            Primitive::Reference(id) => reader.dereference(&id)?.as_stream(reader),
-            p => wrong_primitive!(Stream, p)
+            Primitive::Stream (ref s) => Ok(s),
+            Primitive::Reference (id) => resolve(id)?.as_stream(resolve),
+            ref p => wrong_primitive!(Stream, p)
         }
     }
-    */
+}
+
+
+
+impl FromPrimitive for String {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+        Ok(p.as_name()?.to_owned())
+    }
+}
+
+impl<T: FromPrimitive> FromPrimitive for Vec<T> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+        Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect::<Result<Vec<T>>>()?)
+    }
+}
+
+
+impl FromPrimitive for i32 {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+        p.as_integer()
+    }
+}
+
+
+// FromPrimitive for inner values of Primitive variants - target for macro rules?
+impl FromPrimitive for Dictionary {
+    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+        match *p {
+            Primitive::Dictionary (ref d) => Ok(d.clone()),
+            _ => Err(ErrorKind::WrongObjectType { expected: "Dictionary", found: "something else"}.into()),
+        }
+    }
 }
