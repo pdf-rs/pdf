@@ -1,4 +1,4 @@
-use object::{Object, Ref, PrimitiveConv, Resolve};
+use object::{Object, Ref, PrimitiveConv, Resolve, MaybeRef};
 use primitive::Primitive;
 use std::io;
 use err::Result;
@@ -103,7 +103,18 @@ impl<T: Object> Object for [T] {
     }
 }
 
+
 impl Object for i32 {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
+    }
+}
+impl Object for f32 {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
+    }
+}
+impl Object for bool {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write!(out, "{}", self)
     }
@@ -111,6 +122,22 @@ impl Object for i32 {
 impl PrimitiveConv for i32 {
     fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
         p.as_integer()
+    }
+}
+
+impl<T> PrimitiveConv for Ref<T> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+        Ok(Ref::new(p.as_reference()?))
+    }
+}
+impl<T> PrimitiveConv for MaybeRef<T> {
+    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+        Ok(
+        match *p {
+            Primitive::Reference (r) => MaybeRef::Reference (Ref::new(r)),
+            _ => unimplemented!(), // TODO: how to check whether inner value is T...
+        }
+        )
     }
 }
 

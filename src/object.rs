@@ -34,27 +34,52 @@ pub trait FromStream: Sized {
     fn from_stream(dict: &Stream, resolve: &Resolve) -> Result<Self>;
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct PlainRef {
+    pub id:     ObjNr,
+    pub gen:    GenNr,
+}
+pub struct Ref<T> {
+    inner:      PlainRef,
+    _marker:    PhantomData<T>
+}
+impl<T> Ref<T> {
+    pub fn new(inner: PlainRef) -> Ref<T> {
+        Ref {
+            inner:      inner,
+            _marker:    PhantomData::default(),
+        }
+    }
+}
+
+
+/// Either a reference or the object itself.
+pub enum MaybeRef<T> {
+    Owned (T),
+    Reference (Ref<T>),
+}
+pub struct PromisedRef<T> {
+    inner:      PlainRef,
+    _marker:    PhantomData<T>
+}
+pub struct RealizedRef<T> {
+    inner:      PlainRef,
+    obj:        Box<T>
+}
+
+
 impl<'a, T> Object for &'a T where T: Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct PlainRef {
-    pub id:     ObjNr,
-    pub gen:    GenNr,
-}
 impl Object for PlainRef {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
         write!(out, "{} {} R", self.id, self.gen)
     }
 }
 
-pub struct PromisedRef<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
-}
 
 impl<T: Object> Object for PromisedRef<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
@@ -62,10 +87,6 @@ impl<T: Object> Object for PromisedRef<T> {
     }
 }
 
-pub struct Ref<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
-}
 impl<'a, T: Object> From<&'a PromisedRef<T>> for Ref<T> {
     fn from(p: &'a PromisedRef<T>) -> Ref<T> {
         Ref {
@@ -79,11 +100,15 @@ impl<T: Object> Object for Ref<T> {
         self.inner.serialize(out)
     }
 }
-
-pub struct RealizedRef<T> {
-    inner:      PlainRef,
-    obj:        Box<T>
+impl<T: Object> Object for MaybeRef<T> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+        match *self {
+            MaybeRef::Owned (ref obj) => obj.serialize(out),
+            MaybeRef::Reference (ref r) => r.serialize(out),
+        }
+    }
 }
+
 impl<T: Object> Deref for RealizedRef<T> {
     type Target = T;
     fn deref(&self) -> &T {
@@ -95,5 +120,33 @@ impl<T: Object> Object for RealizedRef<T> {
         self.inner.serialize(out)
     }
 }
+
+impl Object for Dictionary {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "<<")?;
+        for (key, val) in self.iter() {
+            write!(out, "/{} ", key);
+            val.serialize(out)?;
+        }
+        write!(out, ">>")
+    }
+}
+impl Object for Primitive {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        match *self {
+            Primitive::Null => write!(out, "null"),
+            Primitive::Integer (ref x) => x.serialize(out),
+            Primitive::Number (ref x) => x.serialize(out),
+            Primitive::Boolean (ref x) => x.serialize(out),
+            Primitive::String (_) => unimplemented!(),
+            Primitive::Stream (_) => unimplemented!(),
+            Primitive::Dictionary (ref x) => x.serialize(out),
+            Primitive::Array (ref x) => x.serialize(out),
+            Primitive::Reference (ref x) => x.serialize(out),
+            Primitive::Name (ref x) => x.serialize(out),
+        }
+    }
+}
+
 
 

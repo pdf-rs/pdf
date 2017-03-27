@@ -3,11 +3,12 @@ use std::str;
 use std::io::Read;
 use types::StreamFilter;
 use object::*;
-use primitive::{Primitive, Stream};
+use primitive::{Primitive, Stream, Dictionary};
 use err::*;
 use parser::lexer::Lexer;
 use std::ops::{Range};
 use backend::Backend;
+use object::Object;
 
 
 pub struct File<B: Backend> {
@@ -20,7 +21,6 @@ impl<B: Backend> File<B> {
     fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
         let xref_offset = locate_xref_offset(backend.read(0..)?)?;
-        println!("xref offset: {}", xref_offset);
         
         Ok(File {
             backend: backend,
@@ -29,6 +29,7 @@ impl<B: Backend> File<B> {
     }
 }
 
+// Returns the value of startxref
 fn locate_xref_offset(data: &[u8]) -> Result<usize> {
     // locate the xref offset at the end of the file
     // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
@@ -48,6 +49,31 @@ fn locate_offset() {
     f.read_to_end(&mut buf).unwrap();
     locate_xref_offset(&buf);
 }
+
+#[derive(Object, FromDict)]
+pub struct Trailer {
+    #[pdf(key = "Size")]
+    pub highest_id:         i32,
+
+    #[pdf(key = "Prev", opt = true)]
+    pub prev_trailer_pos:   Option<i32>,
+
+    #[pdf(key = "Root")]
+    pub root:               Ref<Dictionary>,
+
+    #[pdf(key = "Encrypt", opt = true)]
+    pub encrypt_dict:       Option<MaybeRef<Dictionary>>,
+
+    #[pdf(key = "Info", opt = true)]
+    pub info_dict:          Option<Ref<Dictionary>>,
+
+    #[pdf(key = "ID", opt = true)]
+    pub id:                 Option<Vec<String>>
+}
+
+impl Trailer {
+}
+
 
 
 #[derive(Object, FromDict)]
@@ -131,6 +157,7 @@ impl FromStream for ObjectStream {
         })
     }
 }
+
 
 // TODO: This doesn't work after removing the `File`
 /*
