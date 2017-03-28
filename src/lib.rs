@@ -240,6 +240,12 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
                 })
             }
         }
+        impl ::pdf::object::FromPrimitive for #name {
+            fn from_primitive(p: &::pdf::primitive::Primitive, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
+                use ::pdf::object::FromDict;
+                #name::from_dict(p.as_dictionary(r)?, r)
+            }
+        }
     }
 }
 
@@ -293,6 +299,12 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
                 Ok(#name {
                     #( #parts )*
                 })
+            }
+        }
+        impl ::pdf::object::FromPrimitive for #name {
+            fn from_primitive(p: &::pdf::primitive::Primitive, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
+                use ::pdf::object::FromStream;
+                #name::from_stream(p.as_stream(r)?, r)
             }
         }
     }
