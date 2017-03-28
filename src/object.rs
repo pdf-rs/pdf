@@ -37,6 +37,7 @@ pub trait FromStream: Sized {
 
 
 
+
 /* PlainRef */
 #[derive(Copy, Clone, Debug)]
 pub struct PlainRef {
@@ -61,6 +62,15 @@ impl<T> Ref<T> {
             inner:      inner,
             _marker:    PhantomData::default(),
         }
+    }
+    pub fn from_id(id: ObjNr) -> Ref<T> {
+        Ref {
+            inner:      PlainRef {id: id, gen: 0},
+            _marker:    PhantomData::default(),
+        }
+    }
+    pub fn get_inner(&self) -> PlainRef {
+        self.inner
     }
 }
 impl<T: Object> Object for Ref<T> {

@@ -2,7 +2,7 @@ use err::*;
 
 use std::vec::Vec;
 use std::collections::HashMap;
-use object::{PlainRef, Resolve, FromPrimitive};
+use object::{PlainRef, Resolve, FromPrimitive, FromDict, FromStream};
 
 pub type Dictionary = HashMap<String, Primitive>;
 

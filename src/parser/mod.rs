@@ -1,12 +1,10 @@
 //! Basic functionality for parsing a PDF file.
 pub mod lexer;
-mod reader;
 //mod writer;
-mod parse_object;
-mod parse_xref;
+pub mod parse_object;
+pub mod parse_xref;
 
 use inflate::InflateStream;
-pub use self::reader::*;
 //pub use self::writer::*;
 
 use err::*;
@@ -14,11 +12,14 @@ use self::lexer::{Lexer, StringLexer};
 use primitive::{Primitive, Dictionary, Stream};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
 
+/// Can parse stream but only if its dictionary does not contain indirect references.
+/// Use `parse_stream` if this is insufficient.
 pub fn parse(data: &[u8]) -> Result<Primitive> {
     parse_with_lexer(&mut Lexer::new(data))
 }
 
-/// Recursive.
+/// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
+/// Use `parse_stream` if this is not sufficient.
 pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
@@ -39,7 +40,37 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
         }
         // It might just be the dictionary in front of a stream.
         if lexer.peek()?.equals(b"stream") {
-            bail!("parse() can't parse Stream. Use parse_stream() for that.");
+            lexer.next()?;
+
+            let length = match dict.get("Length") {
+                Some(&Primitive::Integer (n)) => n,
+                Some(&Primitive::Reference (reference)) => bail!("parse()/parse_with_lexer(): Lenght is found to be an indirect reference."),
+                _ => bail!("Length non existent or wrong type."),
+            };
+
+            
+            let stream_substr = lexer.offset_pos(length as usize);
+            // Uncompress/decode if there is a filter
+            let content = match dict.get("Filter") {
+                Some(&Primitive::Name (ref s)) => {
+                    if *s == "FlateDecode" {
+                        flat_decode(stream_substr.as_slice())
+                    } else {
+                        bail!("NOT IMPLEMENTED: Filter type {}", *s);
+                    }
+                }
+                Some(_) => {
+                    bail!("NOT IMPLEMENTED: Array of filters");
+                }
+                None => stream_substr.to_vec()
+            };
+            // Finish
+            lexer.next_expect("endstream")?;
+
+            Primitive::Stream(Stream {
+                info: dict,
+                data: content,
+            })
         } else {
             Primitive::Dictionary (dict)
         }

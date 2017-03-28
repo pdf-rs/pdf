@@ -3,7 +3,6 @@ use num_traits::PrimInt;
 use parser::lexer::Lexer;
 use xref::{XRef, XRefSection};
 use file::{XRefStream, Trailer};
-use primitive::*;
 use object::*;
 use parser::{parse_with_lexer};
 use parser::parse_object::{parse_indirect_stream};

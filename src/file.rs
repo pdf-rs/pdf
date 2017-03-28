@@ -1,14 +1,16 @@
-use xref::XRefTable;
 use std::str;
 use std::io::Read;
-use types::StreamFilter;
-use object::*;
-use primitive::{Primitive, Stream, Dictionary};
-use err::*;
-use parser::lexer::Lexer;
 use std::ops::{Range};
+
+use err::*;
+use object::*;
+use types::*;
+use xref::{XRef, XRefTable};
+use primitive::{Primitive, Stream, Dictionary};
 use backend::Backend;
-use object::Object;
+use parser::parse;
+use parser::lexer::Lexer;
+use parser::parse_xref::read_xref_and_trailer_at;
 
 
 pub struct File<B: Backend> {
@@ -18,14 +20,42 @@ pub struct File<B: Backend> {
 
 
 impl<B: Backend> File<B> {
-    fn open(path: &str) -> Result<File<B>> {
+    pub fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
         let xref_offset = locate_xref_offset(backend.read(0..)?)?;
+
+
+        // TODO: lexer may have to go before xref_offset? Investigate this.
+        {
+            let mut lexer = Lexer::new(backend.read(xref_offset..)?);
+            read_xref_and_trailer_at(&mut lexer)?;
+        }
         
         Ok(File {
             backend: backend,
             refs: XRefTable::new(0),
         })
+    }
+
+    pub fn get_root(&self) -> Result<Root> {
+        unimplemented!();
+    }
+
+    fn read_primitive(&self, r: PlainRef) -> Result<Primitive> {
+        match self.refs.get(r.id)? {
+            XRef::Raw {pos, gen_nr} => parse(self.backend.read(pos..)?),
+            XRef::Stream {stream_id, index} => {
+                unimplemented!();
+                // let obj_stream = self.read_object( Ref::<ObjectStream>::from_id(stream_id), NO_RESOLVE)?;
+                // parse(obj_stream.get_object_slice(index)?)
+            }
+            XRef::Free {..} => bail!("Object is free"),
+        }
+    }
+
+    pub fn read_object<T: FromPrimitive>(&self, r: Ref<T>, resolve: &Resolve) -> Result<T> {
+        let primitive = self.read_primitive(r.get_inner())?;
+        T::from_primitive(&primitive, resolve)
     }
 }
 
@@ -41,16 +71,8 @@ fn locate_xref_offset(data: &[u8]) -> Result<usize> {
     Ok(lexer.next()?.to::<usize>()?)
 }
 
-#[test]
-fn locate_offset() {
-    use std::fs::File;
-    let mut buf = Vec::new();
-    let mut f = File::open("example.pdf").unwrap();
-    f.read_to_end(&mut buf).unwrap();
-    locate_xref_offset(&buf);
-}
-
 #[derive(Object, FromDict)]
+#[pdf(Type=false)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,
@@ -144,15 +166,44 @@ pub struct ObjectStream {
     id:         ObjNr,
 }
 
+impl ObjectStream {
+    pub fn get_object_slice(&self, index: usize) -> Result<&[u8]> {
+        if index >= self.offsets.len() {
+            bail!("Index into ObjectStream out of bounds.");
+        }
+        let start = self.offsets[index];
+        let end = if index == self.offsets.len() - 1 {
+            self.data.len()
+        } else {
+            self.offsets[index + 1]
+        };
+
+        Ok(&self.data[start..end])
+    }
+}
+
 impl FromStream for ObjectStream {
     fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<Self> {
         let info = ObjStmInfo::from_dict(&stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
+
+        let mut offsets = Vec::new();
+        {
+            let mut lexer = Lexer::new(&data);
+            for i in 0..(info.n as ObjNr) {
+                let obj_nr = lexer.next()?.to::<ObjNr>()?;
+                if i != obj_nr {
+                    bail!("(TODO, incomplete): Assumption violated: that the Object Stream only has consequtive objects numbers starting from 0.");
+                }
+                let offset = lexer.next()?.to::<usize>()?;
+                offsets.push(offset);
+            }
+        }
         Ok(ObjectStream {
             data: data,
             info: info,
-            offsets: Vec::new(), // TODO: Parse from stream
+            offsets: offsets,
             id: 0, // TODO
         })
     }
@@ -163,6 +214,8 @@ impl FromStream for ObjectStream {
 mod tests {
     use file::File;
     use memmap::Mmap;
+
+
     #[test]
     fn new_File() {
         let _ = File::<Vec<u8>>::open("example.pdf").unwrap();

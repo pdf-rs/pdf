@@ -25,7 +25,6 @@ pub enum XRef {
         stream_id: ObjNr,
         index: usize,
     },
-    Promised
 }
 
 impl XRef {
@@ -34,7 +33,6 @@ impl XRef {
             XRef::Free {gen_nr, ..}
             | XRef::Raw {gen_nr, ..} => gen_nr,
             XRef::Stream { .. } => 0, // TODO I think these always have gen nr 0?
-            XRef::Promised => unimplemented!(), // TODO what do
         }
     }
 }
@@ -64,10 +62,10 @@ impl XRefTable {
         }
     }
 
-    pub fn get(&self, index: usize) -> Result<XRef> {
-        match self.entries[index] {
+    pub fn get(&self, id: ObjNr) -> Result<XRef> {
+        match self.entries[id as usize] {
             Some(entry) => Ok(entry),
-            None => bail!("Entry {} in xref table unspecified.", index),
+            None => bail!("Entry {} in xref table unspecified.", id),
         }
     }
 
@@ -110,7 +108,6 @@ impl Debug for XRefTable {
                 Some(XRef::Stream {stream_id, index}) => {
                     write!(f, "{:4}: in stream {}, index {}\n", i, stream_id, index)?
                 }
-                Some(XRef::Promised) => unimplemented!(), // TODO what do
                 None => {
                     write!(f, "{:4}: None!\n", i)?
                 }
