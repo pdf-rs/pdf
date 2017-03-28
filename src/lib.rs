@@ -58,7 +58,7 @@ fn pdf_type(ast: &DeriveInput) -> Option<String> {
             list.iter().filter_map(|meta| {
                 match *meta {
                     NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, ref value))
-                    if ident == "type" => match *value {
+                    if ident == "Type" => match *value {
                         Lit::Str(ref value, _) => Some(Some(value.clone())),
                         Lit::Bool(false) => Some(None),
                         _ => None
@@ -222,6 +222,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
     let type_check = match pdf_type(&ast) {
         Some(type_name) => quote! {
             // Type check
+            //println!("check for {}", stringify!(#name));
             let result_p: ::pdf::err::Result<&Primitive> = dict.get("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
@@ -282,6 +283,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     let type_check = match pdf_type(&ast) {
         Some(type_name) => quote! {
             // Type check
+            //println!("check for {}", stringify!(#name));
             let result_p: ::pdf::err::Result<&Primitive> = dict.get("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
