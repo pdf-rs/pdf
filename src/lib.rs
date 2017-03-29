@@ -107,7 +107,7 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
     
     let type_code = match pdf_type(&ast) {
         Some(type_name) => quote! {
-            writeln!(out, "/Type /{}", stringify!(#type_name))?;
+            writeln!(out, "/Type /{}", #type_name)?;
         },
         None => quote! {}
     };
@@ -226,7 +226,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
-            assert_eq!(result_p?.as_name()?, stringify!(#type_name));
+            assert_eq!(result_p?.as_name()?, #type_name);
         },
         None => quote! {}
     };
@@ -295,7 +295,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
-            assert_eq!(result_p?.as_name()?, stringify!(#type_name));
+            assert_eq!(result_p?.as_name()?, #type_name);
         },
         None => quote! {}
     };
