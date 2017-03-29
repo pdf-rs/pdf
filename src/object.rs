@@ -52,6 +52,8 @@ impl Object for PlainRef {
 
 
 /* Ref<T> */
+// NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
+#[derive(Debug)]
 pub struct Ref<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
@@ -84,9 +86,18 @@ impl<T> FromPrimitive for Ref<T> {
     }
 }
 
+impl<T> Copy for Ref<T> { }
+
+impl<T> Clone for Ref<T> {
+    fn clone(&self) -> Ref<T> {
+        *self
+    }
+}
+
 
 /* MaybeRef<T> */
 /// Either a reference or the object itself.
+#[derive(Copy, Clone, Debug)]
 pub enum MaybeRef<T> {
     Owned (T),
     Reference (Ref<T>),

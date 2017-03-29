@@ -15,6 +15,7 @@ use parser::parse_xref::read_xref_and_trailer_at;
 
 pub struct File<B: Backend> {
     backend:    B,
+    trailer:    Trailer,
     refs:       XRefTable,
 }
 
@@ -26,19 +27,28 @@ impl<B: Backend> File<B> {
 
 
         // TODO: lexer may have to go before xref_offset? Investigate this.
-        {
+        //      Reason for the doubt: reading previous xref tables/streams
+        let (refs, trailer) = {
             let mut lexer = Lexer::new(backend.read(xref_offset..)?);
-            read_xref_and_trailer_at(&mut lexer)?;
-        }
+            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer)?;
+
+            let mut refs = XRefTable::new(trailer.highest_id as ObjNr);
+            for section in xref_sections {
+                refs.add_entries_from(section);
+            }
+            
+            (refs, trailer)
+        };
         
         Ok(File {
             backend: backend,
-            refs: XRefTable::new(0),
+            trailer: trailer,
+            refs: refs,
         })
     }
 
     pub fn get_root(&self) -> Result<Root> {
-        unimplemented!();
+        self.read_object(self.trailer.root)
     }
 
     fn read_primitive(&self, r: PlainRef) -> Result<Primitive> {
@@ -53,10 +63,20 @@ impl<B: Backend> File<B> {
         }
     }
 
-    pub fn read_object<T: FromPrimitive>(&self, r: Ref<T>, resolve: &Resolve) -> Result<T> {
+    pub fn read_object<T: FromPrimitive>(&self, r: Ref<T>) -> Result<T> {
         let primitive = self.read_primitive(r.get_inner())?;
-        T::from_primitive(&primitive, resolve)
+        T::from_primitive(&primitive, &|id| self.resolve_primitive(id))
     }
+
+    fn resolve_primitive(&self, reference: PlainRef) -> Result<&Primitive> {
+        unimplemented!();
+    }
+    pub fn resolve<T: FromPrimitive>(&self, reference: Ref<T>) -> Result<T> {
+        let primitive = self.resolve_primitive(reference.get_inner())?;
+        T::from_primitive(primitive, &|id| self.resolve_primitive(id))
+    }
+    // TODO: resolve(Ref<T>) -> T???
+
 }
 
 // Returns the value of startxref
@@ -81,7 +101,7 @@ pub struct Trailer {
     pub prev_trailer_pos:   Option<i32>,
 
     #[pdf(key = "Root")]
-    pub root:               Ref<Dictionary>,
+    pub root:               Ref<Root>,
 
     #[pdf(key = "Encrypt", opt = true)]
     pub encrypt_dict:       Option<MaybeRef<Dictionary>>,
@@ -224,6 +244,7 @@ mod tests {
 
     #[test]
     fn read_pages() {
-        let _ = File::<Vec<u8>>::open("example.pdf").unwrap();
+        let file = File::<Vec<u8>>::open("example.pdf").unwrap();
+        let root = file.get_root();
     }
 }

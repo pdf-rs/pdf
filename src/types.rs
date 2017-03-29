@@ -51,7 +51,7 @@ impl FromPrimitive for Text {
 
 /* Dictionary Types */
 
-#[derive(Object)]
+#[derive(FromDict, Object)]
 pub struct Root {
     #[pdf(key="Pages")]
     pages:  Ref<Pages>,

@@ -47,9 +47,9 @@ pub struct XRefTable {
 
 
 impl XRefTable {
-    pub fn new(num_objects: usize) -> XRefTable {
+    pub fn new(num_objects: ObjNr) -> XRefTable {
         let mut entries = Vec::new();
-        entries.resize(num_objects, None);
+        entries.resize(num_objects as usize, None);
         XRefTable {
             entries: entries,
         }
