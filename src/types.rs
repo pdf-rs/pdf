@@ -19,6 +19,20 @@ impl Object for PagesNode {
     }
 }
 
+impl FromPrimitive for PagesNode {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
+        let id = p.clone().as_reference()?;
+        let dict = p.as_dictionary(r)?;
+        Ok(
+        match dict["Type"].clone().as_name()?.as_str() {
+            "Page" => PagesNode::Leaf (Ref::new(id)),
+            "Pages" => PagesNode::Tree (Ref::new(id)),
+            _ => bail!("Pages node points to a Dictionary but it's not of type Page or Pages."),
+        }
+        )
+    }
+}
+
 
 
 struct Text {
@@ -52,45 +66,34 @@ impl FromPrimitive for Text {
 /* Dictionary Types */
 
 #[derive(FromDict, Object)]
-pub struct Root {
-    #[pdf(key="Pages")]
-    pages:  Ref<Pages>,
-    
-    #[pdf(key="Count")]
-    count:  i32
-    // #[pdf(key="Labels", opt=false]
-    // labels: HashMap<usize, PageLabel>
-}
-
-
-#[derive(Object)]
 pub struct Catalog {
     #[pdf(key="Pages")]
-    pages:  Ref<Pages>,
-    
+    pub pages:  Ref<Pages>,
     // #[pdf(key="Labels", opt=false]
     // labels: HashMap<usize, PageLabel>
 }
 
 
 
-#[derive(Object)]
+
+
+#[derive(Object, FromDict)]
 pub struct Pages { // TODO would like to call it PageTree, but the macro would have to change
     #[pdf(key="Parent", opt=true)]
-    parent: Option<Ref<Pages>>,
+    pub parent: Option<Ref<Pages>>,
     #[pdf(key="Kids", opt=false)]
-    kids:   Vec<PagesNode>,
+    pub kids:   Vec<PagesNode>,
     #[pdf(key="Count", opt=false)]
-    count:  i32, // TODO implement Object 
+    pub count:  i32,
 
     // #[pdf(key="Resources", opt=false]
     // resources: Option<Ref<Resources>>,
 }
 
-#[derive(Object)]
+#[derive(Object, FromDict)]
 pub struct Page {
     #[pdf(key="Parent", opt=false)]
-    parent: Ref<Pages>
+    pub parent: Ref<Pages>
 }
 
 pub enum StreamFilter {

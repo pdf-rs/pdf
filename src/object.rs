@@ -1,6 +1,7 @@
 use primitive::{Primitive, Dictionary, Stream};
 use err::{Result, ErrorKind};
 use std::io;
+use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Deref};
 use types::write_list;
@@ -65,7 +66,6 @@ impl Object for PlainRef {
 
 /* Ref<T> */
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
-#[derive(Debug)]
 pub struct Ref<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
@@ -103,6 +103,11 @@ impl<T> Copy for Ref<T> { }
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Ref<T> {
         *self
+    }
+}
+impl<T> fmt::Debug for Ref<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Ref({})", self.inner.id)
     }
 }
 
