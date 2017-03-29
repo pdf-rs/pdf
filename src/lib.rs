@@ -185,7 +185,7 @@ fn impl_parts(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
         
         if opt {
             quote! {
-                #name: match dict.get(#key) {
+                #name: match dict.remove(#key) {
                     Some(p) => Some(#alias::from_primitive(p, r)?),
                     None => None
                 },
@@ -193,7 +193,7 @@ fn impl_parts(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
         } else {
             quote! {
                 #name: {
-                    let result_p: ::pdf::err::Result<&Primitive> = dict.get(#key).ok_or(
+                    let result_p: ::pdf::err::Result<Primitive> = dict.remove(#key).ok_or(
                         ::pdf::err::ErrorKind::EntryNotFound { key: #key }.into()
                     );
                     #alias::from_primitive(result_p?, r)?
@@ -223,7 +223,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
         Some(type_name) => quote! {
             // Type check
             //println!("check for {}", stringify!(#name));
-            let result_p: ::pdf::err::Result<&Primitive> = dict.get("Type").ok_or(
+            let result_p: ::pdf::err::Result<Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
             assert_eq!(result_p?.as_name()?, stringify!(#type_name));
@@ -232,7 +232,11 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
     };
     quote! {
         impl ::pdf::object::FromDict for #name {
-            fn from_dict(dict: &::pdf::primitive::Dictionary, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
+            fn from_dict(
+                dict: ::pdf::primitive::Dictionary,
+                r:    &::pdf::object::Resolve
+            ) -> ::pdf::err::Result<#name>
+            {
                 use ::pdf::object::FromPrimitive;
                 #( #impl_aliases )*
                 #type_check
@@ -242,7 +246,11 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             }
         }
         impl ::pdf::object::FromPrimitive for #name {
-            fn from_primitive(p: &::pdf::primitive::Primitive, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
+            fn from_primitive(
+                p:  ::pdf::primitive::Primitive,
+                r:  &::pdf::object::Resolve
+            ) -> ::pdf::err::Result<#name>
+            {
                 use ::pdf::object::FromDict;
                 #name::from_dict(p.as_dictionary(r)?, r)
             }
@@ -284,7 +292,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
         Some(type_name) => quote! {
             // Type check
             //println!("check for {}", stringify!(#name));
-            let result_p: ::pdf::err::Result<&Primitive> = dict.get("Type").ok_or(
+            let result_p: ::pdf::err::Result<Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
             assert_eq!(result_p?.as_name()?, stringify!(#type_name));
@@ -293,7 +301,11 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     };
     quote! {
         impl ::pdf::object::FromStream for #name {
-            fn from_stream(dict: &::pdf::primitive::Stream, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
+            fn from_stream(
+                dict: ::pdf::primitive::Stream,
+                r:    &::pdf::object::Resolve
+            ) -> ::pdf::err::Result<#name>
+            {
                 use ::pdf::object::FromPrimitive;
                 #( #impl_aliases )*
                 let dict = &stream.info;
@@ -304,7 +316,11 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             }
         }
         impl ::pdf::object::FromPrimitive for #name {
-            fn from_primitive(p: &::pdf::primitive::Primitive, r: &::pdf::object::Resolve) -> ::pdf::err::Result<#name> {
+            fn from_primitive(
+                p: ::pdf::primitive::Primitive,
+                r: &::pdf::object::Resolve
+            ) -> ::pdf::err::Result<#name>
+            {
                 use ::pdf::object::FromStream;
                 #name::from_stream(p.as_stream(r)?, r)
             }
