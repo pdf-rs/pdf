@@ -36,49 +36,49 @@ macro_rules! wrong_primitive {
 }
 
 impl Primitive {
-    pub fn as_integer(&self) -> Result<i32> {
-        match *self {
+    pub fn as_integer(self) -> Result<i32> {
+        match self {
             Primitive::Integer(n) => Ok(n),
-            ref p => wrong_primitive!(Integer, p)
+            p => wrong_primitive!(Integer, p)
         }
     }
-    pub fn as_reference(&self) -> Result<PlainRef> {
-        match *self {
+    pub fn as_reference(self) -> Result<PlainRef> {
+        match self {
             Primitive::Reference(id) => Ok(id),
-            ref p => wrong_primitive!(Reference, p)
+            p => wrong_primitive!(Reference, p)
         }
     }
-    pub fn as_array<'a>(&'a self, resolve: &Resolve<'a>) -> Result<&'a [Primitive]> {
-        match *self {
-            Primitive::Array(ref v) => Ok(v),
-            Primitive::Reference(id) => resolve(id)?.as_array(resolve),
-            ref p => wrong_primitive!(Array, p)
+    pub fn as_array(self, r: &Resolve) -> Result<Vec<Primitive>> {
+        match self {
+            Primitive::Array(v) => Ok(v),
+            Primitive::Reference(id) => r.resolve(id)?.as_array(r),
+            p => wrong_primitive!(Array, p)
         }
     }
-    pub fn as_dictionary<'a>(&'a self, resolve: &Resolve<'a>) -> Result<&'a Dictionary> {
-        match *self {
-            Primitive::Dictionary(ref dict) => Ok(dict),
-            Primitive::Reference(id) => resolve(id)?.as_dictionary(resolve),
-            ref p => wrong_primitive!(Dictionary, p)
+    pub fn as_dictionary(self, r: &Resolve) -> Result<Dictionary> {
+        match self {
+            Primitive::Dictionary(dict) => Ok(dict),
+            Primitive::Reference(id) => r.resolve(id)?.as_dictionary(r),
+            p => wrong_primitive!(Dictionary, p)
         }
     }
-    pub fn as_name(&self) -> Result<&str> {
-        match *self {
-            Primitive::Name(ref name) => Ok(name as &str),
-            ref p => wrong_primitive!(Name, p)
+    pub fn as_name(self) -> Result<String> {
+        match self {
+            Primitive::Name(name) => Ok(name),
+            p => wrong_primitive!(Name, p)
         }
     }
-    pub fn as_string(&self) -> Result<&[u8]> {
-        match *self {
-            Primitive::String(ref data) => Ok(data),
-            ref p => wrong_primitive!(String, p)
+    pub fn as_string(self) -> Result<Vec<u8>> {
+        match self {
+            Primitive::String(data) => Ok(data),
+            p => wrong_primitive!(String, p)
         }
     }
-    pub fn as_stream<'a>(&'a self, resolve: &Resolve<'a>) -> Result<&'a Stream> {
-        match *self {
-            Primitive::Stream (ref s) => Ok(s),
-            Primitive::Reference (id) => resolve(id)?.as_stream(resolve),
-            ref p => wrong_primitive!(Stream, p)
+    pub fn as_stream(self, r: &Resolve) -> Result<Stream> {
+        match self {
+            Primitive::Stream (s) => Ok(s),
+            Primitive::Reference (id) => r.resolve(id)?.as_stream(r),
+            p => wrong_primitive!(Stream, p)
         }
     }
 }
@@ -86,20 +86,24 @@ impl Primitive {
 
 
 impl FromPrimitive for String {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
-        Ok(p.as_name()?.to_owned())
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+        Ok(p.as_name()?)
     }
 }
 
 impl<T: FromPrimitive> FromPrimitive for Vec<T> {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
-        Ok(p.as_array(r)?.iter().map(|p| T::from_primitive(p, r)).collect::<Result<Vec<T>>>()?)
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+        Ok(p.as_array(r)?
+            .into_iter()
+            .map(|p| T::from_primitive(p, r))
+            .collect::<Result<Vec<T>>>()?
+        )
     }
 }
 
 
 impl FromPrimitive for i32 {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         p.as_integer()
     }
 }
@@ -107,9 +111,9 @@ impl FromPrimitive for i32 {
 
 // FromPrimitive for inner values of Primitive variants - target for macro rules?
 impl FromPrimitive for Dictionary {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
-        match *p {
-            Primitive::Dictionary (ref d) => Ok(d.clone()),
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+        match p {
+            Primitive::Dictionary (d) => Ok(d),
             _ => Err(ErrorKind::WrongObjectType { expected: "Dictionary", found: "something else"}.into()),
         }
     }

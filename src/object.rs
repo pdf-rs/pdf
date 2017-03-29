@@ -13,12 +13,24 @@ use types::write_list;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
-pub type Resolve<'a> = Fn(PlainRef) -> Result<&'a Primitive>;
+pub trait Resolve: {
+    fn resolve(&self, r: PlainRef) -> Result<Primitive>;
+}
+impl<F> Resolve for F where F: Fn(PlainRef) -> Result<Primitive> {
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+        self(r)
+    }
+}
+
 
 /// Resolve function that just throws an error
-pub const NO_RESOLVE: &'static Resolve =  &|_| {
-    Err(ErrorKind::FollowReference.into())
-};
+pub struct NoResolve {}
+impl Resolve for NoResolve {
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+        Err(ErrorKind::FollowReference.into())
+    }
+}
+pub const NO_RESOLVE: &'static Resolve = &NoResolve {} as &Resolve;
 
 pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
@@ -26,13 +38,13 @@ pub trait Object {
 
 
 pub trait FromPrimitive: Sized {
-    fn from_primitive(p: &Primitive, resolve: &Resolve) -> Result<Self>;
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self>;
 }
 pub trait FromDict: Sized {
-    fn from_dict(dict: &Dictionary, resolve: &Resolve) -> Result<Self>;
+    fn from_dict(dict: Dictionary, resolve: &Resolve) -> Result<Self>;
 }
 pub trait FromStream: Sized {
-    fn from_stream(dict: &Stream, resolve: &Resolve) -> Result<Self>;
+    fn from_stream(dict: Stream, resolve: &Resolve) -> Result<Self>;
 }
 
 
@@ -81,7 +93,7 @@ impl<T: Object> Object for Ref<T> {
     }
 }
 impl<T> FromPrimitive for Ref<T> {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         Ok(Ref::new(p.as_reference()?))
     }
 }
@@ -113,11 +125,11 @@ impl<T: Object> Object for MaybeRef<T> {
 impl<T> FromPrimitive for MaybeRef<T>
     where T: FromPrimitive
 {
-    fn from_primitive(p: &Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
         Ok(
-        match *p {
+        match p {
             Primitive::Reference (r) => MaybeRef::Reference (Ref::new(r)),
-            ref p => MaybeRef::Owned (T::from_primitive(p, r)?),
+            p => MaybeRef::Owned (T::from_primitive(p, r)?),
         }
         )
     }

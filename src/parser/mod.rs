@@ -159,7 +159,7 @@ pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<Stream> {
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Stream> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -183,7 +183,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, resolve: &Resolve) -> Result<Strea
 
             // Get length - look up in `resolve_fn` if necessary
             let length = match dict.get("Length") {
-                Some(&Primitive::Reference (reference)) => match *resolve(reference)? {
+                Some(&Primitive::Reference (reference)) => match r.resolve(reference)? {
                     Primitive::Integer (n) => n,
                     _ => bail!("Wrong type for stream's /Length."),
                 },
