@@ -41,7 +41,7 @@ impl Object for Text {
     }
 }
 impl FromPrimitive for Text {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         Ok(Text{ data: p.as_string()?.to_owned() })
     }
 }
@@ -113,8 +113,8 @@ impl Object for StreamFilter {
     }
 }
 impl FromPrimitive for StreamFilter {
-    fn from_primitive(p: &Primitive, _: &Resolve) -> Result<Self> {
-        match p.as_name()? {
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+        match &p.as_name()? as &str {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
             "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
             "LZWDecode"         => Ok(StreamFilter::Lzw),

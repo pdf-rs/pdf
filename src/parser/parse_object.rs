@@ -52,7 +52,7 @@ pub fn parse_indirect_stream(lexer: &mut Lexer) -> Result<(PlainRef, Stream)> {
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;
 
-    let stm = parse_stream_with_lexer(lexer, &NO_RESOLVE)?;
+    let stm = parse_stream_with_lexer(lexer, NO_RESOLVE)?;
 
     lexer.next_expect("endobj")?;
 

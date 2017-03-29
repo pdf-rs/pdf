@@ -65,15 +65,16 @@ impl<B: Backend> File<B> {
 
     pub fn read_object<T: FromPrimitive>(&self, r: Ref<T>) -> Result<T> {
         let primitive = self.read_primitive(r.get_inner())?;
-        T::from_primitive(&primitive, &|id| self.resolve_primitive(id))
+        T::from_primitive(primitive, &|id| self.resolve_primitive(id))
     }
 
-    fn resolve_primitive(&self, reference: PlainRef) -> Result<&Primitive> {
+    fn resolve_primitive(&self, reference: PlainRef) -> Result<Primitive> {
         unimplemented!();
     }
     pub fn resolve<T: FromPrimitive>(&self, reference: Ref<T>) -> Result<T> {
         let primitive = self.resolve_primitive(reference.get_inner())?;
-        T::from_primitive(primitive, &|id| self.resolve_primitive(id))
+        let resolve = |id| self.resolve_primitive(id);
+        T::from_primitive(primitive, &resolve)
     }
     // TODO: resolve(Ref<T>) -> T???
 
@@ -145,8 +146,8 @@ pub struct XRefStream {
 }
 
 impl FromStream for XRefStream {
-    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<XRefStream> {
-        let info = XRefInfo::from_dict(&stream.info, resolve)?;
+    fn from_stream(stream: Stream, resolve: &Resolve) -> Result<XRefStream> {
+        let info = XRefInfo::from_dict(stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
         Ok(XRefStream {
@@ -203,8 +204,8 @@ impl ObjectStream {
 }
 
 impl FromStream for ObjectStream {
-    fn from_stream(stream: &Stream, resolve: &Resolve) -> Result<Self> {
-        let info = ObjStmInfo::from_dict(&stream.info, resolve)?;
+    fn from_stream(stream: Stream, resolve: &Resolve) -> Result<Self> {
+        let info = ObjStmInfo::from_dict(stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
 
