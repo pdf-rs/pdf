@@ -1,5 +1,5 @@
-use object::{Object, Ref, FromPrimitive, Resolve, MaybeRef};
-use primitive::{Primitive, Dictionary};
+use object::{Object, Ref, FromPrimitive, Resolve, FromDict};
+use primitive::Primitive;
 use std::io;
 use err::*;
 use std::io::Write;
@@ -7,8 +7,8 @@ use encoding::all::UTF_16BE;
 
 /// Node in a page tree - type is either `Page` or `Pages`
 pub enum PagesNode {
-    Tree (Ref<Pages>),
-    Leaf (Ref<Page>),
+    Tree (Pages),
+    Leaf (Page),
 }
 impl Object for PagesNode {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
@@ -21,12 +21,11 @@ impl Object for PagesNode {
 
 impl FromPrimitive for PagesNode {
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
-        let id = p.clone().as_reference()?;
         let dict = p.as_dictionary(r)?;
         Ok(
         match dict["Type"].clone().as_name()?.as_str() {
-            "Page" => PagesNode::Leaf (Ref::new(id)),
-            "Pages" => PagesNode::Tree (Ref::new(id)),
+            "Page" => PagesNode::Leaf (Page::from_dict(dict, r)?),
+            "Pages" => PagesNode::Tree (Pages::from_dict(dict, r)?),
             _ => bail!("Pages node points to a Dictionary but it's not of type Page or Pages."),
         }
         )
@@ -68,7 +67,7 @@ impl FromPrimitive for Text {
 #[derive(FromDict, Object)]
 pub struct Catalog {
     #[pdf(key="Pages")]
-    pub pages:  Ref<Pages>,
+    pub pages:  Pages,
     // #[pdf(key="Labels", opt=false]
     // labels: HashMap<usize, PageLabel>
 }
@@ -93,7 +92,7 @@ pub struct Pages { // TODO would like to call it PageTree, but the macro would h
 #[derive(Object, FromDict)]
 pub struct Page {
     #[pdf(key="Parent", opt=false)]
-    pub parent: Ref<Pages>
+    pub parent: Ref<Pages>,
 }
 
 pub enum StreamFilter {

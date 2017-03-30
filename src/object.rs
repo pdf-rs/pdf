@@ -6,12 +6,6 @@ use std::marker::PhantomData;
 use std::ops::{Deref};
 use types::write_list;
 
-// use std::fmt::{Formatter, Debug};
-
-// Want to wrap file::Primitive together with Document, so that we may do dereferencing.
-// e.g.
-// my_obj.as_integer() will dereference if needed.
-
 pub type ObjNr = u64;
 pub type GenNr = u16;
 pub trait Resolve: {
@@ -108,35 +102,6 @@ impl<T> Clone for Ref<T> {
 impl<T> fmt::Debug for Ref<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Ref({})", self.inner.id)
-    }
-}
-
-
-/* MaybeRef<T> */
-/// Either a reference or the object itself.
-#[derive(Copy, Clone, Debug)]
-pub enum MaybeRef<T> {
-    Owned (T),
-    Reference (Ref<T>),
-}
-impl<T: Object> Object for MaybeRef<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
-        match *self {
-            MaybeRef::Owned (ref obj) => obj.serialize(out),
-            MaybeRef::Reference (ref r) => r.serialize(out),
-        }
-    }
-}
-impl<T> FromPrimitive for MaybeRef<T>
-    where T: FromPrimitive
-{
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        Ok(
-        match p {
-            Primitive::Reference (r) => MaybeRef::Reference (Ref::new(r)),
-            p => MaybeRef::Owned (T::from_primitive(p, r)?),
-        }
-        )
     }
 }
 

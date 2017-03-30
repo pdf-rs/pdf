@@ -26,20 +26,21 @@ impl<B: Backend> File<B> {
         let backend = B::open(path)?;
         let xref_offset = locate_xref_offset(backend.read(0..)?)?;
 
-
         // TODO: lexer may have to go before xref_offset? Investigate this.
         //      Reason for the doubt: reading previous xref tables/streams
         let (refs, trailer) = {
             let mut lexer = Lexer::new(backend.read(xref_offset..)?);
-            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer)?;
+            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
+            let highest_id = trailer.get("Size").ok_or_else(|| ErrorKind::EntryNotFound {key: "Size"})?.clone().as_integer()?;
 
-            let mut refs = XRefTable::new(trailer.highest_id as ObjNr);
+            let mut refs = XRefTable::new(highest_id as ObjNr);
             for section in xref_sections {
                 refs.add_entries_from(section);
             }
             
             (refs, trailer)
         };
+        let trailer = Trailer::from_dict(trailer, &|r| File::<B>::resolve_helper(&backend, &refs, r))?;
         
         Ok(File {
             backend: backend,
@@ -48,11 +49,11 @@ impl<B: Backend> File<B> {
         })
     }
 
-    pub fn get_root(&self) -> Result<Catalog> {
-        self.resolve(self.trailer.root)
+    pub fn get_root(&self) -> &Catalog {
+        &self.trailer.root
     }
 
-    fn read_primitive(&self, r: PlainRef) -> Result<Primitive> {
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         match self.refs.get(r.id)? {
             XRef::Raw {pos, gen_nr} => {
                 let mut lexer = Lexer::new(self.backend.read(pos..)?);
@@ -67,32 +68,46 @@ impl<B: Backend> File<B> {
         }
     }
 
-    pub fn resolve<T: FromPrimitive>(&self, r: Ref<T>) -> Result<T> {
-        let primitive = self.read_primitive(r.get_inner())?;
-        T::from_primitive(primitive, &|id| self.read_primitive(id))
+    /// Because we need a resolve function to parse the trailer before the File has been created.
+    fn resolve_helper<B2: Backend>(backend: &B2, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
+        match refs.get(r.id)? {
+            XRef::Raw {pos, gen_nr} => {
+                let mut lexer = Lexer::new(backend.read(pos..)?);
+                Ok(parse_indirect_object(&mut lexer)?.1)
+            }
+            XRef::Stream {stream_id, index} => {
+                unimplemented!();
+                // let obj_stream = self.resolve( Ref::<ObjectStream>::from_id(stream_id), NO_RESOLVE)?;
+                // parse(obj_stream.get_object_slice(index)?)
+            }
+            XRef::Free {..} => bail!("Object is free"),
+        }
+    }
+
+    pub fn deref<T: FromPrimitive>(&self, r: Ref<T>) -> Result<T> {
+        let primitive = self.resolve(r.get_inner())?;
+        T::from_primitive(primitive, &|id| self.resolve(id))
     }
     pub fn get_num_pages(&self) -> Result<i32> {
-        Ok(self.resolve(self.get_root()?.pages)?.count)
+        Ok(self.trailer.root.pages.count)
     }
-    pub fn get_page(&self, n: i32) -> Result<Page> {
+    pub fn get_page(&self, n: i32) -> Result<&Page> {
         if n >= self.get_num_pages()? {
             return Err(ErrorKind::OutOfBounds.into());
         }
-        self.find_page(n, 0, self.resolve(self.get_root()?.pages)?)
+        self.find_page(n, 0, &self.trailer.root.pages)
     }
-    fn find_page(&self, page_nr: i32, mut offset: i32, pages: Pages) -> Result<Page> {
+    fn find_page<'a>(&'a self, page_nr: i32, mut offset: i32, pages: &'a Pages) -> Result<&'a Page> {
         for kid in &pages.kids {
             match *kid {
-                PagesNode::Tree(t) => {
-                    let t = self.resolve(t)?;
+                PagesNode::Tree(ref t) => {
                     if offset + t.count < page_nr {
                         offset += t.count;
                     } else {
                         self.find_page(page_nr, offset, t);
                     }
                 },
-                PagesNode::Leaf(p) => {
-                    let p = self.resolve(p)?;
+                PagesNode::Leaf(ref p) => {
                     if offset > page_nr {
                         offset += 1;
                     } else {
@@ -128,13 +143,13 @@ pub struct Trailer {
     pub prev_trailer_pos:   Option<i32>,
 
     #[pdf(key = "Root")]
-    pub root:               Ref<Catalog>,
+    pub root:               Catalog,
 
     #[pdf(key = "Encrypt", opt = true)]
-    pub encrypt_dict:       Option<MaybeRef<Dictionary>>,
+    pub encrypt_dict:       Option<Dictionary>,
 
     #[pdf(key = "Info", opt = true)]
-    pub info_dict:          Option<Ref<Dictionary>>,
+    pub info_dict:          Option<Dictionary>,
 
     #[pdf(key = "ID", opt = true)]
     pub id:                 Option<Vec<String>>
@@ -273,9 +288,7 @@ mod tests {
     #[test]
     fn read_pages() {
         let file = File::<Vec<u8>>::open("example.pdf").unwrap();
-        let root = file.get_root().unwrap_or_else(|e| print_err(e));
-        let pages = file.resolve(root.pages).unwrap_or_else(|e| print_err(e));
-        let num_pages = pages.count;
+        let num_pages = file.trailer.root.pages.count;
         for i in 0..num_pages {
             println!("Read page {}", i);
             let page = file.get_page(i);
