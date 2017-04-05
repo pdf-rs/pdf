@@ -1,4 +1,5 @@
-#![feature(attr_literals)] 
+#![feature(attr_literals)]
+#![feature(try_from)]
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
 
@@ -14,6 +15,7 @@ extern crate itertools;
 extern crate ordermap;
 extern crate memmap;
 extern crate encoding;
+extern crate tuple;
 
 #[macro_use]
 mod macros;
@@ -28,6 +30,7 @@ pub mod backend;
 
 mod err;
 // mod content;
+mod enc;
 
 // pub use content::*;
 pub use err::*;

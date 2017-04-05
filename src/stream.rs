@@ -63,4 +63,3 @@ impl FromStream for GeneralStream {
     }
 }
 
-
