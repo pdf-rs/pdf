@@ -5,7 +5,7 @@ pub mod parse_xref;
 
 use err::*;
 use self::lexer::{Lexer, StringLexer};
-use primitive::{Primitive, Dictionary, Stream};
+use primitive::{Primitive, Dictionary, Stream, PdfString};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
 use enc::decode;
 use types::StreamFilter;
@@ -140,11 +140,11 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
         // Advance to end of string
         lexer.offset_pos(bytes_traversed as usize);
 
-        Primitive::String (string)
+        Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
         let hex_str = lexer.next()?.to_vec();
         lexer.next_expect(">")?;
-        Primitive::String (hex_str)
+        Primitive::String (PdfString::new(hex_str))
     } else {
         bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
               lexer.get_pos(),

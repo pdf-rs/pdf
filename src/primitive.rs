@@ -2,15 +2,10 @@ use err::*;
 
 use std::vec::Vec;
 use std::collections::HashMap;
+use std::str;
 use object::{PlainRef, Resolve, FromPrimitive, FromDict, FromStream};
 
-pub type Dictionary = HashMap<String, Primitive>;
 
-#[derive(Clone, Debug)]
-pub struct Stream {
-    pub info: Dictionary,
-    pub data: Vec<u8>,
-}
 
 #[derive(Clone, Debug)]
 pub enum Primitive {
@@ -18,7 +13,7 @@ pub enum Primitive {
     Integer (i32),
     Number (f32),
     Boolean (bool),
-    String (Vec<u8>),
+    String (PdfString),
     Stream (Stream),
     Dictionary (Dictionary),
     Array (Vec<Primitive>),
@@ -26,7 +21,40 @@ pub enum Primitive {
     Name (String),
 }
 
-pub enum MaybeVec {
+/// Primitive Dictionary type.
+pub type Dictionary = HashMap<String, Primitive>;
+
+/// Primitive Stream type.
+#[derive(Clone, Debug)]
+pub struct Stream {
+    pub info: Dictionary,
+    pub data: Vec<u8>,
+}
+
+/// Primitive String type.
+#[derive(Clone, Debug)]
+pub struct PdfString {
+    data: Vec<u8>,
+}
+
+impl PdfString {
+    pub fn new(data: Vec<u8>) -> PdfString {
+        PdfString {
+            data: data
+        }
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+    pub fn as_str(&self) -> Result<&str> {
+        Ok(str::from_utf8(&self.data)?)
+    }
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.data
+    }
+    pub fn into_string(self) -> Result<String> {
+        Ok(String::from_utf8(self.data)?)
+    }
 }
 
 macro_rules! wrong_primitive {
@@ -86,7 +114,7 @@ impl Primitive {
             p => wrong_primitive!(Name, p.get_debug_name())
         }
     }
-    pub fn as_string(self) -> Result<Vec<u8>> {
+    pub fn as_string(self) -> Result<PdfString> {
         match self {
             Primitive::String(data) => Ok(data),
             p => wrong_primitive!(String, p.get_debug_name())
@@ -113,23 +141,27 @@ impl<T: FromPrimitive> FromPrimitive for Vec<T> {
     /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
         Ok(
-        match T::from_primitive(p.clone(), r) {
-            Ok(t) => {
-                let mut vec = Vec::new();
-                vec.push(t);
-                vec
-            }
-            Err(_) => {
+        match p {
+            Primitive::Array(_) => {
                 p.as_array(r)?
                     .into_iter()
                     .map(|p| T::from_primitive(p, r))
                     .collect::<Result<Vec<T>>>()?
             }
+            _ => vec![T::from_primitive(p, r)?]
         }
         )
     }
 }
 
+impl FromPrimitive for PdfString {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+        match p {
+            Primitive::String (string) => Ok(string),
+            _ => wrong_primitive!(String, p.get_debug_name()),
+        }
+    }
+}
 
 impl FromPrimitive for i32 {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
@@ -140,10 +172,7 @@ impl FromPrimitive for i32 {
 
 // FromPrimitive for inner values of Primitive variants - target for macro rules?
 impl FromPrimitive for Dictionary {
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        match p {
-            Primitive::Dictionary (d) => Ok(d),
-            _ => Err(ErrorKind::WrongObjectType { expected: "Dictionary", found: "something else"}.into()),
-        }
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+        p.as_dictionary(r)
     }
 }

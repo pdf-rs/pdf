@@ -1,7 +1,8 @@
-use primitive::{Primitive, Dictionary, Stream};
+use primitive::{Primitive, Dictionary, Stream, PdfString};
 use err::{Result, ErrorKind};
 use std::io;
 use std::fmt;
+use std::str;
 use std::marker::PhantomData;
 use std::ops::{Deref};
 use types::write_list;
@@ -159,6 +160,13 @@ impl Object for String {
 impl<T: Object> Object for Vec<T> {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write_list(out, self.iter())
+    }
+}
+
+// Vec<u8> is a PDF string
+impl Object for PdfString {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "({})", str::from_utf8(self.as_bytes()).unwrap())
     }
 }
 impl<T: Object> Object for [T] {

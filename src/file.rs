@@ -6,7 +6,7 @@ use err::*;
 use object::*;
 use types::*;
 use xref::{XRef, XRefTable};
-use primitive::{Primitive, Stream, Dictionary};
+use primitive::{Primitive, Stream, Dictionary, PdfString};
 use backend::Backend;
 use parser::parse;
 use parser::parse_object::parse_indirect_object;
@@ -38,6 +38,8 @@ impl<B: Backend> File<B> {
                 refs.add_entries_from(section);
             }
             
+            println!("XRefTable: {:?}", refs);
+            println!("Trailer dict: {:?}", trailer);
             (refs, trailer)
         };
         let trailer = Trailer::from_dict(trailer, &|r| File::<B>::resolve_helper(&backend, &refs, r))?;
@@ -54,18 +56,7 @@ impl<B: Backend> File<B> {
     }
 
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
-        match self.refs.get(r.id)? {
-            XRef::Raw {pos, gen_nr} => {
-                let mut lexer = Lexer::new(self.backend.read(pos..)?);
-                Ok(parse_indirect_object(&mut lexer)?.1)
-            }
-            XRef::Stream {stream_id, index} => {
-                unimplemented!();
-                // let obj_stream = self.resolve( Ref::<ObjectStream>::from_id(stream_id), NO_RESOLVE)?;
-                // parse(obj_stream.get_object_slice(index)?)
-            }
-            XRef::Free {..} => bail!("Object is free"),
-        }
+        File::<B>::resolve_helper(&self.backend, &self.refs, r)
     }
 
     /// Because we need a resolve function to parse the trailer before the File has been created.
@@ -76,9 +67,10 @@ impl<B: Backend> File<B> {
                 Ok(parse_indirect_object(&mut lexer)?.1)
             }
             XRef::Stream {stream_id, index} => {
-                unimplemented!();
-                // let obj_stream = self.resolve( Ref::<ObjectStream>::from_id(stream_id), NO_RESOLVE)?;
-                // parse(obj_stream.get_object_slice(index)?)
+                let obj_stream = File::<B2>::resolve_helper(backend, refs, PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
+                let obj_stream = ObjectStream::from_primitive(obj_stream, &|r| File::<B>::resolve_helper(backend, refs, r))?;
+                let slice = obj_stream.get_object_slice(index)?;
+                parse(slice)
             }
             XRef::Free {..} => bail!("Object is free"),
         }
@@ -152,7 +144,8 @@ pub struct Trailer {
     pub info_dict:          Option<Dictionary>,
 
     #[pdf(key = "ID", opt = true)]
-    pub id:                 Option<Vec<String>>
+    pub id:                 Option<Vec<PdfString>>,
+    // TODO ^ Vec<u8> is a String type. Maybe make a wrapper for that
 }
 
 impl Trailer {
@@ -191,7 +184,6 @@ pub struct XRefStream {
 impl FromStream for XRefStream {
     fn from_stream(stream: Stream, resolve: &Resolve) -> Result<XRefStream> {
         let info = XRefInfo::from_dict(stream.info, resolve)?;
-        // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
         Ok(XRefStream {
             data: data,
@@ -210,12 +202,15 @@ pub struct ObjStmInfo {
 
     // ObjStm fields
     #[pdf(key = "N")]
-    pub n: i32,
+    /// Number of compressed objects in the stream.
+    pub num_objects: i32,
 
     #[pdf(key = "First")]
+    /// The byte offset in the decoded stream, of the first compressed object.
     pub first: i32,
 
     #[pdf(key = "Extends", opt=true)]
+    /// A reference to an eventual ObjectStream which this ObjectStream extends.
     pub extends: Option<i32>,
 
 }
@@ -235,11 +230,11 @@ impl ObjectStream {
         if index >= self.offsets.len() {
             bail!("Index into ObjectStream out of bounds.");
         }
-        let start = self.offsets[index];
+        let start = self.info.first as usize + self.offsets[index];
         let end = if index == self.offsets.len() - 1 {
             self.data.len()
         } else {
-            self.offsets[index + 1]
+            self.info.first as usize + self.offsets[index + 1]
         };
 
         Ok(&self.data[start..end])
@@ -249,17 +244,13 @@ impl ObjectStream {
 impl FromStream for ObjectStream {
     fn from_stream(stream: Stream, resolve: &Resolve) -> Result<Self> {
         let info = ObjStmInfo::from_dict(stream.info, resolve)?;
-        // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
 
         let mut offsets = Vec::new();
         {
             let mut lexer = Lexer::new(&data);
-            for i in 0..(info.n as ObjNr) {
+            for i in 0..(info.num_objects as ObjNr) {
                 let obj_nr = lexer.next()?.to::<ObjNr>()?;
-                if i != obj_nr {
-                    bail!("(TODO, incomplete): Assumption violated: that the Object Stream only has consequtive objects numbers starting from 0.");
-                }
                 let offset = lexer.next()?.to::<usize>()?;
                 offsets.push(offset);
             }
@@ -273,12 +264,22 @@ impl FromStream for ObjectStream {
     }
 }
 
+impl FromPrimitive for ObjectStream {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<ObjectStream> {
+        ObjectStream::from_stream(p.as_stream(r)?, r)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
-    use file::File;
+    use std::str;
+    use file::{File, ObjectStream};
+    use object::{FromPrimitive, NO_RESOLVE};
     use memmap::Mmap;
     use pdf::print_err;
+    use object::PlainRef;
+    use parser::parse;
 
 
     #[test]
@@ -294,6 +295,19 @@ mod tests {
         for i in 0..num_pages {
             println!("Read page {}", i);
             let page = file.get_page(i);
+        }
+    }
+
+    #[test]
+    fn parse_objects_from_stream() {
+        let file = File::<Vec<u8>>::open("la.pdf").unwrap();
+        let obj_stream = file.resolve(PlainRef {id: 13, gen: 0}).unwrap();
+        let obj_stream = ObjectStream::from_primitive(obj_stream, NO_RESOLVE).unwrap();
+        for i in 0..obj_stream.offsets.len() {
+            let slice = obj_stream.get_object_slice(i).unwrap();
+            println!("Object slice #{}: {}", i, str::from_utf8(slice).unwrap());
+            println!();
+            parse(slice).unwrap();
         }
     }
 

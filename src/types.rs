@@ -34,33 +34,6 @@ impl FromPrimitive for PagesNode {
 
 
 
-struct Text {
-    data:   Vec<u8>
-}
-impl Text {
-    pub fn new(s: &str) -> Text {
-        use encoding::{Encoding, EncoderTrap};
-        Text {
-            data: UTF_16BE.encode(s, EncoderTrap::Strict).expect("encoding is broken")
-        }
-    }
-}
-impl Object for Text {
-    fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {
-        out.write(b"(")?;
-        out.write(&self.data)?;
-        out.write(b")")?;
-        Ok(())
-    }
-}
-impl FromPrimitive for Text {
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        Ok(Text{ data: p.as_string()?.to_owned() })
-    }
-}
-
-
-
 
 /* Dictionary Types */
 

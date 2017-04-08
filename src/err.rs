@@ -16,6 +16,8 @@ error_chain! {
     // Optionally, some attributes can be added to a variant.
     foreign_links {
         Io(::std::io::Error);
+        Utf8(::std::str::Utf8Error);
+        StringUtf8(::std::string::FromUtf8Error);
     }
     // Define additional `ErrorKind` variants. The syntax here is
     // the same as `quick_error!`, but the `from()` and `cause()`
