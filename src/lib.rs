@@ -186,7 +186,7 @@ fn impl_parts(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
         if opt {
             quote! {
                 #name: match dict.remove(#key) {
-                    Some(p) => Some(#alias::from_primitive(p, r)?),
+                    Some(p) => Some(#alias::from_primitive(p, r).chain_err(|| #key)?),
                     None => None
                 },
             }
@@ -196,7 +196,7 @@ fn impl_parts(fields: &[Field], aliases: &[Ty]) -> Vec<quote::Tokens> {
                     let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove(#key).ok_or(
                         ::pdf::err::ErrorKind::EntryNotFound { key: #key }.into()
                     );
-                    #alias::from_primitive(result_p?, r)?
+                    #alias::from_primitive(result_p?, r).chain_err(|| stringify!(#name))?
                 },
             }
         }
@@ -226,7 +226,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
-            assert_eq!(result_p?.as_name()?, #type_name);
+            assert_eq!(result_p?.as_name().chain_err(|| "Type")?, #type_name);
         },
         None => quote! {}
     };
@@ -238,6 +238,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             ) -> ::pdf::err::Result<#name>
             {
                 use ::pdf::object::FromPrimitive;
+                use ::pdf::err::ResultExt;
                 #( #impl_aliases )*
                 #type_check
                 Ok(#name {
@@ -252,7 +253,8 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             ) -> ::pdf::err::Result<#name>
             {
                 use ::pdf::object::FromDict;
-                #name::from_dict(p.as_dictionary(r)?, r)
+                use ::pdf::err::ResultExt;
+                #name::from_dict(p.as_dictionary(r).chain_err(|| stringify!(#name))?, r)
             }
         }
     }
@@ -295,7 +297,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
-            assert_eq!(result_p?.as_name()?, #type_name);
+            assert_eq!(result_p?.as_name().chain_err(|| "Type")?, #type_name);
         },
         None => quote! {}
     };
@@ -307,6 +309,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             ) -> ::pdf::err::Result<#name>
             {
                 use ::pdf::object::FromPrimitive;
+                use ::pdf::err::ResultExt;
                 #( #impl_aliases )*
                 let dict = &stream.info;
                 #type_check
@@ -322,7 +325,8 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             ) -> ::pdf::err::Result<#name>
             {
                 use ::pdf::object::FromStream;
-                #name::from_stream(p.as_stream(r)?, r)
+                use ::pdf::err::ResultExt;
+                #name::from_stream(p.as_stream(r).chain_err(|| stringify!(#name))?, r)
             }
         }
     }
