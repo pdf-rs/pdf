@@ -2,11 +2,10 @@ use itertools::Itertools;
 use tuple::*;
 use types::StreamFilter;
 use std::convert::TryFrom;
+use inflate::InflateStream;
+use err::*;
 
-pub enum DecodeError {
-    HexDecode(usize, [u8; 2]),
-    Ascii85TailError
-}
+
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
         n @ b'0' ... b'9' => Some(n - b'0'),
@@ -16,13 +15,13 @@ fn decode_nibble(c: u8) -> Option<u8> {
     }
 }
 
-fn decode_hex(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
+fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(data.len() / 2);
     for (i, (&high, &low)) in data.iter().tuples().enumerate() {
         if let (Some(low), Some(high)) = (decode_nibble(low), decode_nibble(high)) {
             out.push(high << 4 | low);
         } else {
-            return Err(DecodeError::HexDecode(i * 2, [high, low]))
+            return Err(ErrorKind::HexDecode {pos: i * 2, bytes: [high, low]}.into())
         }
     }
     Ok(out)
@@ -55,7 +54,7 @@ fn substr(data: &[u8], needle: &[u8]) -> Option<usize> {
     data.windows(needle.len()).position(|w| w == needle)
 }
 
-fn decode_85(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
+fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     use std::iter::repeat;
     
     let mut out = Vec::with_capacity(data.len());
@@ -65,29 +64,41 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
         out.extend_from_slice(&word);
         pos += advance as usize;
     }
-    let tail_len = substr(&data[pos..], b"~>").ok_or(DecodeError::Ascii85TailError)?;
+    let tail_len = substr(&data[pos..], b"~>").ok_or(ErrorKind::Ascii85TailError)?;
     assert!(tail_len < 5);
     let tail: [u8; 5] = T5::from_iter(
         data[pos..pos+tail_len].iter()
         .cloned()
         .chain(repeat(b'u'))
     )
-    .ok_or(DecodeError::Ascii85TailError)?
+    .ok_or(ErrorKind::Ascii85TailError)?
     .into();
     
-    let (_, last) = word_85(&tail).ok_or(DecodeError::Ascii85TailError)?;
+    let (_, last) = word_85(&tail).ok_or(ErrorKind::Ascii85TailError)?;
     out.extend_from_slice(&last[.. tail_len-1]);
     Ok(out)
 }
 
+fn flate_decode(data: &[u8]) -> Result<Vec<u8>> {
+    let mut inflater = InflateStream::from_zlib();
+    let mut out = Vec::<u8>::new();
+    let mut n = 0;
+    while n < data.len() {
+        let res = inflater.update(&data[n..]);
+        let (num_bytes_read, result) = res?;
+        n += num_bytes_read;
+        out.extend(result);
+    }
+    Ok(out)
+}
 
-fn decode(data: &[u8], filter: StreamFilter) -> Result<Vec<u8>, DecodeError> {
+pub fn decode(data: &[u8], filter: StreamFilter) -> Result<Vec<u8>> {
     use self::StreamFilter::*;
     match filter {
         AsciiHex => decode_hex(data),
         Ascii85 => decode_85(data),
         Lzw => unimplemented!(),
-        Flate => unimplemented!(),
+        Flate => flate_decode(data),
         Jpeg2k => unimplemented!()
     }
 }

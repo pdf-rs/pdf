@@ -171,11 +171,13 @@ pub struct XRefInfo {
     #[pdf(key = "Size")]
     pub size: i32,
 
-    #[pdf(key = "Index")]
-    pub index: Vec<i32>,
+    #[pdf(key = "Index", opt = true)]
+    /// Array of pairs of integers for each subsection, (first object number, number of entries).
+    /// Default value (assumed when None): `(0, self.size)`.
+    pub index: Option<Vec<i32>>,
 
-    #[pdf(key = "Prev")]
-    prev: i32,
+    #[pdf(key = "Prev", opt = true)]
+    prev: Option<i32>,
 
     #[pdf(key = "W")]
     pub w: Vec<i32>
@@ -288,6 +290,16 @@ mod tests {
     #[test]
     fn read_pages() {
         let file = File::<Vec<u8>>::open("example.pdf").unwrap();
+        let num_pages = file.trailer.root.pages.count;
+        for i in 0..num_pages {
+            println!("Read page {}", i);
+            let page = file.get_page(i);
+        }
+    }
+
+    #[test]
+    fn flate_decode() {
+        let file = File::<Vec<u8>>::open("la.pdf").unwrap();
         let num_pages = file.trailer.root.pages.count;
         for i in 0..num_pages {
             println!("Read page {}", i);

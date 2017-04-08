@@ -26,6 +26,9 @@ pub enum Primitive {
     Name (String),
 }
 
+pub enum MaybeVec {
+}
+
 macro_rules! wrong_primitive {
     ($expected:ident, $found:expr) => (
         Err(ErrorKind::WrongObjectType {
@@ -107,11 +110,22 @@ impl FromPrimitive for String {
 }
 
 impl<T: FromPrimitive> FromPrimitive for Vec<T> {
+    /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        Ok(p.as_array(r)?
-            .into_iter()
-            .map(|p| T::from_primitive(p, r))
-            .collect::<Result<Vec<T>>>()?
+        Ok(
+        match T::from_primitive(p.clone(), r) {
+            Ok(t) => {
+                let mut vec = Vec::new();
+                vec.push(t);
+                vec
+            }
+            Err(_) => {
+                p.as_array(r)?
+                    .into_iter()
+                    .map(|p| T::from_primitive(p, r))
+                    .collect::<Result<Vec<T>>>()?
+            }
+        }
         )
     }
 }

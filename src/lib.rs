@@ -1,5 +1,6 @@
 #![feature(attr_literals)]
 #![feature(try_from)]
+#![recursion_limit="128"]
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
 

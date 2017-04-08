@@ -1,16 +1,15 @@
 //! Basic functionality for parsing a PDF file.
 pub mod lexer;
-//mod writer;
 pub mod parse_object;
 pub mod parse_xref;
-
-use inflate::InflateStream;
-//pub use self::writer::*;
 
 use err::*;
 use self::lexer::{Lexer, StringLexer};
 use primitive::{Primitive, Dictionary, Stream};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
+use enc::decode;
+use types::StreamFilter;
+use object::{FromPrimitive, NO_RESOLVE};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
@@ -50,17 +49,22 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 
             
             let stream_substr = lexer.offset_pos(length as usize);
+
             // Uncompress/decode if there is a filter
             let content = match dict.get("Filter") {
-                Some(&Primitive::Name (ref s)) => {
-                    if *s == "FlateDecode" {
-                        flat_decode(stream_substr.as_slice())
-                    } else {
-                        bail!("NOT IMPLEMENTED: Filter type {}", *s);
+                Some(filter) => {
+                    match *filter {
+                        // TODO a lot of clones here
+                        Primitive::Name (ref name) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
+                        Primitive::Array (ref filters) => {
+                            let mut data = decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?)?;
+                            for filter in filters.iter().skip(1) {
+                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?;
+                            }
+                            data
+                        }
+                        _ => bail!(ErrorKind::WrongObjectType {expected: "Name or Array", found: filter.get_debug_name()})
                     }
-                }
-                Some(_) => {
-                    bail!("NOT IMPLEMENTED: Array of filters");
                 }
                 None => stream_substr.to_vec()
             };
@@ -195,15 +199,19 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
             let stream_substr = lexer.offset_pos(length as usize);
             // Uncompress/decode if there is a filter
             let content = match dict.get("Filter") {
-                Some(&Primitive::Name (ref s)) => {
-                    if *s == "FlateDecode" {
-                        flat_decode(stream_substr.as_slice())
-                    } else {
-                        bail!("NOT IMPLEMENTED: Filter type {}", *s);
+                Some(filter) => {
+                    match *filter {
+                        // TODO a lot of clones here
+                        Primitive::Name (ref name) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
+                        Primitive::Array (ref filters) => {
+                            let mut data = decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?)?;
+                            for filter in filters.iter().skip(1) {
+                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?;
+                            }
+                            data
+                        }
+                        _ => bail!(ErrorKind::WrongObjectType {expected: "Name or Array", found: filter.get_debug_name()})
                     }
-                }
-                Some(_) => {
-                    bail!("NOT IMPLEMENTED: Array of filters");
                 }
                 None => stream_substr.to_vec()
             };
@@ -225,19 +233,3 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
 }
 
 
-// TODO move out to decoding/encoding module
-fn flat_decode(data: &[u8]) -> Vec<u8> {
-    let mut inflater = InflateStream::from_zlib();
-    let mut out = Vec::<u8>::new();
-    let mut n = 0;
-    while n < data.len() {
-        let res = inflater.update(&data[n..]);
-        if let Ok((num_bytes_read, result)) = res {
-            n += num_bytes_read;
-            out.extend(result);
-        } else {
-            res.unwrap();
-        }
-    }
-    out
-}

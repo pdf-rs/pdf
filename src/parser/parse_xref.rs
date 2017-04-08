@@ -53,12 +53,15 @@ pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer, resolve: &Resolve) -
 
 
     let width = &xref_stream.info.w;
-    let indices = &xref_stream.info.index;
+    let index = match xref_stream.info.index {
+        Some(index) => index,
+        None => vec![0, xref_stream.info.size],
+    };
     
     let mut data_left = &xref_stream.data[..];
 
     let mut sections = Vec::new();
-    for (first_id, num_objects) in indices.chunks(2).map(|c| (c[0], c[1])) {
+    for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {
         let section = parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
         sections.push(section);
     }

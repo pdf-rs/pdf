@@ -16,7 +16,6 @@ error_chain! {
     // Optionally, some attributes can be added to a variant.
     foreign_links {
         Io(::std::io::Error);
-        // FromUtf8(::std::string::FromUtf8Error);
     }
     // Define additional `ErrorKind` variants. The syntax here is
     // the same as `quick_error!`, but the `from()` and `cause()`
@@ -64,6 +63,13 @@ error_chain! {
         FollowReference {
             description("Cannot follow reference during parsing.")
             display("Cannot follow reference during parsing.")
+        }
+        HexDecode {pos: usize, bytes: [u8; 2]} {
+            description("Hex decode error")
+            display("Hex decode error. Position {}, bytes {}, {}", pos, bytes[0], bytes[1])
+        }
+        Ascii85TailError  {
+            description("Ascii85 tail error")
         }
     }
 }
