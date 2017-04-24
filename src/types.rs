@@ -6,6 +6,7 @@ use std::io::Write;
 use encoding::all::UTF_16BE;
 
 /// Node in a page tree - type is either `Page` or `Pages`
+#[derive(Debug)]
 pub enum PagesNode {
     Tree (Pages),
     Leaf (Page),
@@ -49,7 +50,7 @@ pub struct Catalog {
 
 
 
-#[derive(Object, FromDict)]
+#[derive(Object, FromDict, Debug)]
 pub struct Pages { // TODO would like to call it PageTree, but the macro would have to change
     #[pdf(key="Parent", opt=true)]
     pub parent: Option<Ref<Pages>>,
@@ -62,7 +63,7 @@ pub struct Pages { // TODO would like to call it PageTree, but the macro would h
     // resources: Option<Ref<Resources>>,
 }
 
-#[derive(Object, FromDict)]
+#[derive(Object, FromDict, Debug)]
 pub struct Page {
     #[pdf(key="Parent", opt=false)]
     pub parent: Ref<Pages>,

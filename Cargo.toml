@@ -17,7 +17,7 @@ documentation = "https://docs.rs/pdf/0.6.0/pdf/"
 [dependencies.pdf_derive]
 git = "https://github.com/pdf-rs/pdf_derive.git"
 #path = "../pdf_derive"
-version = "= 0.1.13"
+version = "= 0.1.14"
 
 [dependencies]
 error-chain = "0.9.0"
@@ -31,7 +31,7 @@ ordermap = "*"
 memmap = "*"
 encoding = "*"
 lzw = "*"
-tuple = ">= 0.1.7"
+tuple = "0.1.7"
 
 [lib]
 doctest = false

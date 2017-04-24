@@ -91,6 +91,7 @@ impl<B: Backend> File<B> {
     }
     fn find_page<'a>(&'a self, page_nr: i32, mut offset: i32, pages: &'a Pages) -> Result<&'a Page> {
         for kid in &pages.kids {
+            println!("{}/{} {:?}", offset, page_nr, kid);
             match *kid {
                 PagesNode::Tree(ref t) => {
                     if offset + t.count < page_nr {
