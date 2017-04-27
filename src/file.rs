@@ -101,7 +101,7 @@ impl<B: Backend> File<B> {
                     }
                 },
                 PagesNode::Leaf(ref p) => {
-                    if offset > page_nr {
+                    if offset < page_nr {
                         offset += 1;
                     } else {
                         assert_eq!(offset, page_nr);
