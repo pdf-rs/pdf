@@ -5,6 +5,5 @@
 !src/
 !shaders/
 !Cargo.toml
-!example.pdf
-!la.pdf
+!tests
 !README.md

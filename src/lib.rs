@@ -56,7 +56,3 @@ pub fn print_err<T>(err: Error) -> T {
     println!(" === \n");
     panic!("Exiting");
 }
-
-#[cfg(test)]
-mod tests {
-}

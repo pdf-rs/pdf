@@ -145,6 +145,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
         let hex_str = lexer.next()?.to_vec();
         lexer.next_expect(">")?;
         Primitive::String (PdfString::new(hex_str))
+    } else if first_lexeme.equals(b"true") {
+        Primitive::Boolean (true)
+    } else if first_lexeme.equals(b"false") {
+        Primitive::Boolean (false)
+    } else if first_lexeme.equals(b"null") {
+        Primitive::Null
     } else {
         bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
               lexer.get_pos(),

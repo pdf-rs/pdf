@@ -149,11 +149,6 @@ pub struct Trailer {
     // TODO ^ Vec<u8> is a String type. Maybe make a wrapper for that
 }
 
-impl Trailer {
-}
-
-
-
 #[derive(Object, FromDict)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
@@ -240,6 +235,10 @@ impl ObjectStream {
 
         Ok(&self.data[start..end])
     }
+    /// Returns the number of contained objects
+    pub fn n_objects(&self) -> usize {
+        self.offsets.len()
+    }
 }
 
 impl FromStream for ObjectStream {
@@ -268,57 +267,5 @@ impl FromStream for ObjectStream {
 impl FromPrimitive for ObjectStream {
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<ObjectStream> {
         ObjectStream::from_stream(p.as_stream(r)?, r)
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use std::str;
-    use file::{File, ObjectStream};
-    use object::{FromPrimitive, NO_RESOLVE};
-    use memmap::Mmap;
-    use pdf::print_err;
-    use object::PlainRef;
-    use parser::parse;
-
-
-    #[test]
-    fn new_File() {
-        let _ = File::<Vec<u8>>::open("example.pdf").unwrap();
-        let _ = File::<Mmap>::open("example.pdf").unwrap();
-    }
-
-    #[test]
-    fn read_pages() {
-        let file = File::<Vec<u8>>::open("example.pdf").unwrap();
-        let num_pages = file.trailer.root.pages.count;
-        for i in 0..num_pages {
-            println!("Read page {}", i);
-            let page = file.get_page(i);
-        }
-    }
-
-    #[test]
-    fn parse_objects_from_stream() {
-        let file = File::<Vec<u8>>::open("la.pdf").unwrap();
-        let obj_stream = file.resolve(PlainRef {id: 13, gen: 0}).unwrap();
-        let obj_stream = ObjectStream::from_primitive(obj_stream, NO_RESOLVE).unwrap();
-        for i in 0..obj_stream.offsets.len() {
-            let slice = obj_stream.get_object_slice(i).unwrap();
-            println!("Object slice #{}: {}", i, str::from_utf8(slice).unwrap());
-            println!();
-            parse(slice).unwrap();
-        }
-    }
-
-    #[test]
-    fn flate_decode() {
-        let file = File::<Vec<u8>>::open("la.pdf").unwrap();
-        let num_pages = file.trailer.root.pages.count;
-        for i in 0..num_pages {
-            println!("Read page {}", i);
-            let page = file.get_page(i);
-        }
     }
 }
