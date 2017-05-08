@@ -11,9 +11,10 @@ use parser::parse_object::{parse_indirect_stream};
 
 // Just the part of Parser which reads xref sections from xref stream.
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XRefSection> {
+fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XRefSection> {
     let mut entries = Vec::new();
     for _ in 0..num_entries {
+         // TODO Check if width[i] are 0. Use default values from the PDF references.
         let _type = read_u64_from_stream(width[0], data);
         let field1 = read_u64_from_stream(width[1], data);
         let field2 = read_u64_from_stream(width[2], data);
@@ -23,7 +24,7 @@ pub fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[
             0 => XRef::Free {next_obj_nr: field1 as ObjNr, gen_nr: field2 as GenNr},
             1 => XRef::Raw {pos: field1 as usize, gen_nr: field2 as GenNr},
             2 => XRef::Stream {stream_id: field1 as ObjNr, index: field2 as usize},
-            _ => bail!("Reading xref stream, The first field 'type' is {} - must be 0, 1 or 2", _type),
+            _ => bail!("Reading xref stream, The first field 'type' is {} - must be 0, 1 or 2", _type), // TODO: Should actually just be seen as a reference to the null object
         };
         entries.push(entry);
     }
