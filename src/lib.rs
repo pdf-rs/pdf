@@ -142,7 +142,7 @@ pub fn from_dict(input: TokenStream) -> TokenStream {
 
 fn make_aliases(fields: &[Field]) -> Vec<Ty> {
     fields.iter().enumerate().map(|(i, _field)| {
-        let alias = format!("Ty_{}", i);
+        let alias = format!("Ty{}", i);
         Ty::Path(None, Path {
             global: false,
             segments: vec![Ident::from(alias).into()]
