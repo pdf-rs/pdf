@@ -1,21 +1,18 @@
 extern crate pdf;
 extern crate memmap;
+extern crate glob;
 
 use std::str;
 use memmap::Mmap;
 use pdf::file::{File, ObjectStream};
 use pdf::object::*;
 use pdf::parser::parse;
+use glob::glob;
 
 macro_rules! file_path {
     ( $subdir:expr ) => { concat!("tests/files/", $subdir) }
 }
 
-const FILES: [&'static str; 3] = [
-    "example.pdf",
-    "xelatex.pdf",
-    "libreoffice.pdf"
-];
 
 #[test]
 fn open_file() {
@@ -25,15 +22,19 @@ fn open_file() {
 
 #[test]
 fn read_pages() {
-    for path in FILES.iter() {
-        let path = format!("tests/files/{}", path);
-        println!("\n\n == Now testing `{}` ==\n", path);
+    for entry in glob("tests/files/*.pdf").expect("Failed to read glob pattern") {
+        match entry {
+            Ok(path) => {
+                println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
-        let file = File::<Vec<u8>>::open(path.as_str()).unwrap();
-        let num_pages = file.get_root().pages.count;
-        for i in 0..num_pages {
-            println!("\nRead page {}", i);
-            let _ = file.get_page(i);
+                let file = File::<Vec<u8>>::open(path.to_str().unwrap()).unwrap();
+                let num_pages = file.get_root().pages.count;
+                for i in 0..num_pages {
+                    println!("\nRead page {}", i);
+                    let _ = file.get_page(i);
+                }
+            }
+            Err(e) => println!("{:?}", e)
         }
     }
 }
@@ -41,6 +42,7 @@ fn read_pages() {
 #[test]
 fn parse_objects_from_stream() {
     let file = File::<Vec<u8>>::open(file_path!("xelatex.pdf")).unwrap();
+    // .. we know that object 13 of that file is an ObjectStream
     let obj_stream = file.deref(Ref::<ObjectStream>::new(PlainRef {id: 13, gen: 0})).unwrap();
     for i in 0..obj_stream.n_objects() {
         let slice = obj_stream.get_object_slice(i).unwrap();

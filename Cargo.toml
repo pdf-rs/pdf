@@ -32,6 +32,7 @@ memmap = "*"
 encoding = "*"
 lzw = "*"
 tuple = "0.1.7"
+glob = "0.2.11"
 
 [lib]
 doctest = false
