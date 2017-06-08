@@ -1,4 +1,8 @@
 # pdf-rs
-Read, alter and write PDF files. Not quite stable yet, hoping to make it as complete as possible.
+Read, alter and write PDF files.
 
-At the moment, we are doing a major rewrite in the `dev` branch. `master` isn't ready for use, and the interface will go through a lot of changes in the rewrite.
+At the moment, you can only read PDF files. We are working on also writing/altering PDF files. On the reading side, some work is to be done with encoding. Currently working on FlateDecode / PNG filters.
+
+Development is mainly happening in the `dev` branch.
+
+Feel free to contribute with ideas or code!
