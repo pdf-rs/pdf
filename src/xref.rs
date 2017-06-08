@@ -65,7 +65,7 @@ impl XRefTable {
     pub fn get(&self, id: ObjNr) -> Result<XRef> {
         match self.entries[id as usize] {
             Some(entry) => Ok(entry),
-            None => bail!("Entry {} in xref table unspecified.", id),
+            None => bail!(ErrorKind::UnspecifiedXRefEntry {id: id}),
         }
     }
 

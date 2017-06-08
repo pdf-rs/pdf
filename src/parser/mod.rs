@@ -43,8 +43,8 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 
             let length = match dict.get("Length") {
                 Some(&Primitive::Integer (n)) => n,
-                Some(&Primitive::Reference (reference)) => bail!("parse()/parse_with_lexer(): Lenght is found to be an indirect reference."),
-                _ => bail!("Length non existent or wrong type."),
+                Some(&Primitive::Reference (_)) => bail!(ErrorKind::FollowReference),
+                _ => bail!(ErrorKind::EntryNotFound {key: "Length"}),
             };
 
             
@@ -55,7 +55,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
                 Some(filter) => {
                     match *filter {
                         // TODO a lot of clones here
-                        Primitive::Name (ref name) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
+                        Primitive::Name (_) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
                         Primitive::Array (ref filters) => {
                             let mut data = decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?)?;
                             for filter in filters.iter().skip(1) {
@@ -63,7 +63,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
                             }
                             data
                         }
-                        _ => bail!(ErrorKind::WrongObjectType {expected: "Name or Array", found: filter.get_debug_name()})
+                        _ => bail!(ErrorKind::UnexpectedPrimitive {expected: "Name or Array", found: filter.get_debug_name()})
                     }
                 }
                 None => stream_substr.to_vec()
@@ -152,10 +152,8 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
     } else if first_lexeme.equals(b"null") {
         Primitive::Null
     } else {
-        bail!("Can't recognize type. Pos: {}\n\tFirst lexeme: {}\n\tRest:\n{}\n\n\tEnd rest\n",
-              lexer.get_pos(),
-              first_lexeme.to_string(),
-              lexer.read_n(50).to_string());
+        
+        bail!(ErrorKind::UnknownType {pos: lexer.get_pos(), first_lexeme: first_lexeme.to_string(), rest: lexer.read_n(50).to_string()});
     };
 
     // trace!("Read object"; "Obj" => format!("{}", obj));
@@ -193,12 +191,14 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
 
             // Get length - look up in `resolve_fn` if necessary
             let length = match dict.get("Length") {
-                Some(&Primitive::Reference (reference)) => match r.resolve(reference)? {
-                    Primitive::Integer (n) => n,
-                    _ => bail!("Wrong type for stream's /Length."),
-                },
+                Some(&Primitive::Reference (reference)) =>
+                    match r.resolve(reference)? {
+                        Primitive::Integer (n) => n,
+                        other => bail!(ErrorKind::UnexpectedPrimitive {expected: "Integer", found: other.get_debug_name()}),
+                    },
                 Some(&Primitive::Integer (n)) => n,
-                _ => bail!("Length non existent or wrong type."),
+                Some(other) => bail!(ErrorKind::UnexpectedPrimitive {expected: "Integer or Reference", found: other.get_debug_name()}),
+                None => bail!(ErrorKind::EntryNotFound {key: "Length"}),
             };
 
             
@@ -208,7 +208,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
                 Some(filter) => {
                     match *filter {
                         // TODO a lot of clones here
-                        Primitive::Name (ref name) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
+                        Primitive::Name (_) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
                         Primitive::Array (ref filters) => {
                             let mut data = decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?)?;
                             for filter in filters.iter().skip(1) {
@@ -216,7 +216,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
                             }
                             data
                         }
-                        _ => bail!(ErrorKind::WrongObjectType {expected: "Name or Array", found: filter.get_debug_name()})
+                        _ => bail!(ErrorKind::UnexpectedPrimitive {expected: "Name or Array", found: filter.get_debug_name()})
                     }
                 }
                 None => stream_substr.to_vec()
@@ -229,10 +229,10 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
                 data: content,
             }
         } else {
-            bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "Dictionary" });
+            bail!(ErrorKind::UnexpectedPrimitive { expected: "Stream", found: "Dictionary" });
         }
     } else {
-        bail!(ErrorKind::WrongObjectType { expected: "Stream", found: "something else" });
+        bail!(ErrorKind::UnexpectedPrimitive { expected: "Stream", found: "something else" });
     };
 
     Ok(obj)

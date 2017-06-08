@@ -57,7 +57,7 @@ impl Content {
                 }
             }
             if lexer.get_pos() > data.len() {
-                bail!("Read past boundary of given contents.");
+                bail!(ErrorKind::ContentReadPastBoundary);
             } else if lexer.get_pos() == data.len() {
                 break;
             }

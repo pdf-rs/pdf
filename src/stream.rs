@@ -1,7 +1,7 @@
 use std::io;
 
 use object::{Object, FromStream, FromDict, Resolve};
-use primitive::{Primitive, Stream};
+use primitive::Stream;
 use types::StreamFilter;
 use err::Result;
 

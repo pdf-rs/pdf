@@ -2,8 +2,6 @@ use object::{Object, Ref, FromPrimitive, Resolve, FromDict};
 use primitive::Primitive;
 use std::io;
 use err::*;
-use std::io::Write;
-use encoding::all::UTF_16BE;
 
 /// Node in a page tree - type is either `Page` or `Pages`
 #[derive(Debug)]
@@ -27,7 +25,7 @@ impl FromPrimitive for PagesNode {
         match dict["Type"].clone().as_name()?.as_str() {
             "Page" => PagesNode::Leaf (Page::from_dict(dict, r)?),
             "Pages" => PagesNode::Tree (Pages::from_dict(dict, r)?),
-            _ => bail!("Pages node points to a Dictionary but it's not of type Page or Pages."),
+            other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
         )
     }

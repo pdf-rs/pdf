@@ -5,8 +5,7 @@ use parser::lexer::*;
 use err::*;
 use primitive::{Primitive, Stream};
 use object::PlainRef;
-use file::ObjectStream;
-use parser::{parse_with_lexer, parse_stream_with_lexer, parse};
+use parser::{parse_with_lexer, parse_stream_with_lexer};
 use object::{GenNr, ObjNr, NO_RESOLVE};
 
 

@@ -24,7 +24,7 @@ fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32]
             0 => XRef::Free {next_obj_nr: field1 as ObjNr, gen_nr: field2 as GenNr},
             1 => XRef::Raw {pos: field1 as usize, gen_nr: field2 as GenNr},
             2 => XRef::Stream {stream_id: field1 as ObjNr, index: field2 as usize},
-            _ => bail!("Reading xref stream, The first field 'type' is {} - must be 0, 1 or 2", _type), // TODO: Should actually just be seen as a reference to the null object
+            _ => bail!(ErrorKind::XRefStreamType {found: _type}), // TODO: Should actually just be seen as a reference to the null object
         };
         entries.push(entry);
     }
