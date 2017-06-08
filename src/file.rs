@@ -20,7 +20,58 @@ pub struct File<B: Backend> {
     refs:       XRefTable,
 }
 
-
+// tail call
+fn find_page<'a>(pages: &'a Pages, mut offset: i32, page_nr: i32) -> Result<&'a Page> {
+    for kid in &pages.kids {
+        println!("{}/{} {:?}", offset, page_nr, kid);
+        match *kid {
+            PagesNode::Tree(ref t) => {
+                if offset + t.count < page_nr {
+                    offset += t.count;
+                } else {
+                    return find_page(t, offset, page_nr);
+                }
+            },
+            PagesNode::Leaf(ref p) => {
+                if offset < page_nr {
+                    offset += 1;
+                } else {
+                    assert_eq!(offset, page_nr);
+                    return Ok(p);
+                }
+            }
+        }
+    }
+    bail!("not found!");
+}
+    
+// tail call to trick borrowck
+fn update_pages(pages: &mut Pages, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
+    for (i, kid) in &mut pages.kids.enumerate() {
+        println!("{}/{} {:?}", offset, page_nr, kid);
+        match *kid {
+            PagesNode::Tree(ref mut t) => {
+                if offset + t.count < page_nr {
+                    offset += t.count;
+                } else {
+                    return update_pages(t, offset, page_nr, page);
+                }
+            },
+            PagesNode::Leaf(ref mut p) => {
+                if offset < page_nr {
+                    offset += 1;
+                } else {
+                    assert_eq!(offset, page_nr);
+                    *p = page;
+                    return Ok(());
+                }
+            }
+        }
+        
+    }
+    bail!("not found!");
+}
+    
 impl<B: Backend> File<B> {
     pub fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
@@ -87,30 +138,11 @@ impl<B: Backend> File<B> {
         if n >= self.get_num_pages()? {
             return Err(ErrorKind::OutOfBounds.into());
         }
-        self.find_page(n, 0, &self.trailer.root.pages)
+        find_page(&self.trailer.root.pages, 0, n)
     }
-    fn find_page<'a>(&'a self, page_nr: i32, mut offset: i32, pages: &'a Pages) -> Result<&'a Page> {
-        for kid in &pages.kids {
-            println!("{}/{} {:?}", offset, page_nr, kid);
-            match *kid {
-                PagesNode::Tree(ref t) => {
-                    if offset + t.count < page_nr {
-                        offset += t.count;
-                    } else {
-                        self.find_page(page_nr, offset, t);
-                    }
-                },
-                PagesNode::Leaf(ref p) => {
-                    if offset < page_nr {
-                        offset += 1;
-                    } else {
-                        assert_eq!(offset, page_nr);
-                        return Ok(p);
-                    }
-                }
-            }
-        }
-        bail!("not found!");
+    
+    pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
+        update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
     }
 }
 
