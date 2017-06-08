@@ -63,7 +63,7 @@ impl<'a> Lexer<'a> {
         if word.equals(expected.as_bytes()) {
             Ok(())
         } else {
-            Err(ErrorKind::UnexpectedLexeme {pos: self.pos, lexeme: word.as_string(), expected: expected}.into())
+            Err(ErrorKind::UnexpectedLexeme {pos: self.pos, lexeme: word.to_string(), expected: expected}.into())
         }
     }
 
@@ -307,18 +307,19 @@ pub struct Substr<'a> {
     slice: &'a [u8],
 }
 impl<'a> Substr<'a> {
-    pub fn as_str(&self) -> &str {
-        // TODO use from_utf8_lossy - it's safe
-        unsafe {
-            std::str::from_utf8_unchecked(self.slice)
-        }
-    }
-    pub fn as_string(&self) -> String {
+    // to: &S -> U. Possibly expensive conversion.
+    // as: &S -> &U. Cheap borrow conversion
+    // into: S -> U. Cheap ownership transfer conversion.
+
+    pub fn to_string(&self) -> String {
         String::from(self.as_str())
     }
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.slice.to_vec()
+    }
     pub fn to<T: FromStr>(&self) -> Result<T> {
-        std::str::from_utf8(self.slice).unwrap().parse::<T>()
-            .map_err(|_| ErrorKind::ParseError {
+        std::str::from_utf8(self.slice)?.parse::<T>()
+            .map_err(|_| ErrorKind::FromStrError {
                     word: String::from(self.as_str())
                 }.into())
     }
@@ -335,8 +336,15 @@ impl<'a> Substr<'a> {
         }
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
-        self.slice.to_vec()
+    
+    pub fn as_str(&self) -> &str {
+        // TODO use from_utf8_lossy - it's safe
+        unsafe {
+            std::str::from_utf8_unchecked(self.slice)
+        }
+    }
+    pub fn as_slice(&self) -> &'a [u8] {
+        self.slice
     }
 
     pub fn equals(&self, other: &[u8]) -> bool {

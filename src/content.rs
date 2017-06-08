@@ -1,6 +1,6 @@
 /// PDF content streams.
 use file::Reader;
-use file::Object;
+use file::Primitive;
 
 use std;
 use std::fmt::{Display, Formatter};
@@ -12,11 +12,11 @@ use file::lexer::Lexer;
 #[derive(Debug, Clone)]
 pub struct Operation {
 	pub operator: String,
-	pub operands: Vec<Object>,
+	pub operands: Vec<Primitive>,
 }
 
 impl Operation {
-	pub fn new(operator: String, operands: Vec<Object>) -> Operation {
+	pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
 		Operation{
 			operator: operator,
 			operands: operands,
@@ -49,7 +49,7 @@ impl Content {
                 Err(_) => {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
-                    let operator = lexer.next()?.as_string(); // TODO will this work as expected?
+                    let operator = lexer.next()?.as_string();
                     let mut operation = Operation::new(operator, Vec::new());
                     // Give operands to operation and empty buffer.
                     swap(&mut buffer, &mut operation.operands);
@@ -57,7 +57,7 @@ impl Content {
                 }
             }
             if lexer.get_pos() > data.len() {
-                bail!("Read past boundary of given contents.");
+                bail!(ErrorKind::ContentReadPastBoundary);
             } else if lexer.get_pos() == data.len() {
                 break;
             }
