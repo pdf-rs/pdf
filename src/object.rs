@@ -4,7 +4,6 @@ use std::io;
 use std::fmt;
 use std::str;
 use std::marker::PhantomData;
-use std::ops::{Deref};
 use types::write_list;
 
 pub type ObjNr = u64;
@@ -22,7 +21,7 @@ impl<F> Resolve for F where F: Fn(PlainRef) -> Result<Primitive> {
 /// Resolve function that just throws an error
 pub struct NoResolve {}
 impl Resolve for NoResolve {
-    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+    fn resolve(&self, _: PlainRef) -> Result<Primitive> {
         Err(ErrorKind::FollowReference.into())
     }
 }
@@ -132,7 +131,7 @@ impl Object for Dictionary {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write!(out, "<<")?;
         for (key, val) in self.iter() {
-            write!(out, "/{} ", key);
+            write!(out, "/{} ", key)?;
             val.serialize(out)?;
         }
         write!(out, ">>")
@@ -193,7 +192,7 @@ impl Object for Primitive {
 }
 
 impl<'a, T> Object for &'a T where T: Object {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {
         unimplemented!();
     }
 }

@@ -1,6 +1,4 @@
 use std::str;
-use std::io::Read;
-use std::ops::{Range};
 
 use err::*;
 use object::*;
@@ -20,7 +18,58 @@ pub struct File<B: Backend> {
     refs:       XRefTable,
 }
 
-
+// tail call
+fn find_page<'a>(pages: &'a Pages, mut offset: i32, page_nr: i32) -> Result<&'a Page> {
+    for kid in &pages.kids {
+        println!("{}/{} {:?}", offset, page_nr, kid);
+        match *kid {
+            PagesNode::Tree(ref t) => {
+                if offset + t.count < page_nr {
+                    offset += t.count;
+                } else {
+                    return find_page(t, offset, page_nr);
+                }
+            },
+            PagesNode::Leaf(ref p) => {
+                if offset < page_nr {
+                    offset += 1;
+                } else {
+                    assert_eq!(offset, page_nr);
+                    return Ok(p);
+                }
+            }
+        }
+    }
+    bail!(ErrorKind::PageNotFound {page_nr: page_nr});
+}
+    
+// tail call to trick borrowck
+fn update_pages(pages: &mut Pages, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
+    for (i, mut kid) in &mut pages.kids.iter_mut().enumerate() {
+        println!("{}/{} {:?}", offset, page_nr, kid);
+        match *kid {
+            PagesNode::Tree(ref mut t) => {
+                if offset + t.count < page_nr {
+                    offset += t.count;
+                } else {
+                    return update_pages(t, offset, page_nr, page);
+                }
+            },
+            PagesNode::Leaf(ref mut p) => {
+                if offset < page_nr {
+                    offset += 1;
+                } else {
+                    assert_eq!(offset, page_nr);
+                    *p = page;
+                    return Ok(());
+                }
+            }
+        }
+        
+    }
+    bail!("not found!");
+}
+    
 impl<B: Backend> File<B> {
     pub fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
@@ -62,7 +111,7 @@ impl<B: Backend> File<B> {
     /// Because we need a resolve function to parse the trailer before the File has been created.
     fn resolve_helper<B2: Backend>(backend: &B2, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
         match refs.get(r.id)? {
-            XRef::Raw {pos, gen_nr} => {
+            XRef::Raw {pos, ..} => {
                 let mut lexer = Lexer::new(backend.read(pos..)?);
                 Ok(parse_indirect_object(&mut lexer)?.1)
             }
@@ -72,7 +121,7 @@ impl<B: Backend> File<B> {
                 let slice = obj_stream.get_object_slice(index)?;
                 parse(slice)
             }
-            XRef::Free {..} => bail!("Object is free"),
+            XRef::Free {..} => bail!(ErrorKind::FreeObject {obj_nr: r.id}),
         }
     }
 
@@ -85,32 +134,13 @@ impl<B: Backend> File<B> {
     }
     pub fn get_page(&self, n: i32) -> Result<&Page> {
         if n >= self.get_num_pages()? {
-            return Err(ErrorKind::OutOfBounds.into());
+            return Err(ErrorKind::PageOutOfBounds {page_nr: n, max: self.get_num_pages()?}.into());
         }
-        self.find_page(n, 0, &self.trailer.root.pages)
+        find_page(&self.trailer.root.pages, 0, n)
     }
-    fn find_page<'a>(&'a self, page_nr: i32, mut offset: i32, pages: &'a Pages) -> Result<&'a Page> {
-        for kid in &pages.kids {
-            println!("{}/{} {:?}", offset, page_nr, kid);
-            match *kid {
-                PagesNode::Tree(ref t) => {
-                    if offset + t.count < page_nr {
-                        offset += t.count;
-                    } else {
-                        self.find_page(page_nr, offset, t);
-                    }
-                },
-                PagesNode::Leaf(ref p) => {
-                    if offset < page_nr {
-                        offset += 1;
-                    } else {
-                        assert_eq!(offset, page_nr);
-                        return Ok(p);
-                    }
-                }
-            }
-        }
-        bail!("not found!");
+    
+    pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
+        update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
     }
 }
 
@@ -224,7 +254,7 @@ pub struct ObjectStream {
 impl ObjectStream {
     pub fn get_object_slice(&self, index: usize) -> Result<&[u8]> {
         if index >= self.offsets.len() {
-            bail!("Index into ObjectStream out of bounds.");
+            bail!(ErrorKind::ObjStmOutOfBounds {index: index, max: self.offsets.len()});
         }
         let start = self.info.first as usize + self.offsets[index];
         let end = if index == self.offsets.len() - 1 {
@@ -249,7 +279,7 @@ impl FromStream for ObjectStream {
         let mut offsets = Vec::new();
         {
             let mut lexer = Lexer::new(&data);
-            for i in 0..(info.num_objects as ObjNr) {
+            for _ in 0..(info.num_objects as ObjNr) {
                 let obj_nr = lexer.next()?.to::<ObjNr>()?;
                 let offset = lexer.next()?.to::<usize>()?;
                 offsets.push(offset);

@@ -3,7 +3,7 @@ use err::*;
 use std::vec::Vec;
 use std::collections::HashMap;
 use std::str;
-use object::{PlainRef, Resolve, FromPrimitive, FromDict, FromStream};
+use object::{PlainRef, Resolve, FromPrimitive, };
 
 
 
@@ -57,9 +57,9 @@ impl PdfString {
     }
 }
 
-macro_rules! wrong_primitive {
+macro_rules! unexpected_primitive {
     ($expected:ident, $found:expr) => (
-        Err(ErrorKind::WrongObjectType {
+        Err(ErrorKind::UnexpectedPrimitive {
             expected: stringify!($expected),
             found: $found
         }.into())
@@ -85,46 +85,46 @@ impl Primitive {
     pub fn as_integer(self) -> Result<i32> {
         match self {
             Primitive::Integer(n) => Ok(n),
-            p => wrong_primitive!(Integer, p.get_debug_name())
+            p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
     pub fn as_reference(self) -> Result<PlainRef> {
         match self {
             Primitive::Reference(id) => Ok(id),
-            p => wrong_primitive!(Reference, p.get_debug_name())
+            p => unexpected_primitive!(Reference, p.get_debug_name())
         }
     }
     pub fn as_array(self, r: &Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
             Primitive::Reference(id) => r.resolve(id)?.as_array(r),
-            p => wrong_primitive!(Array, p.get_debug_name())
+            p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
     pub fn as_dictionary(self, r: &Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
             Primitive::Reference(id) => r.resolve(id)?.as_dictionary(r),
-            p => wrong_primitive!(Dictionary, p.get_debug_name())
+            p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
     pub fn as_name(self) -> Result<String> {
         match self {
             Primitive::Name(name) => Ok(name),
-            p => wrong_primitive!(Name, p.get_debug_name())
+            p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
     pub fn as_string(self) -> Result<PdfString> {
         match self {
             Primitive::String(data) => Ok(data),
-            p => wrong_primitive!(String, p.get_debug_name())
+            p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
     pub fn as_stream(self, r: &Resolve) -> Result<Stream> {
         match self {
             Primitive::Stream (s) => Ok(s),
             Primitive::Reference (id) => r.resolve(id)?.as_stream(r),
-            p => wrong_primitive!(Stream, p.get_debug_name())
+            p => unexpected_primitive!(Stream, p.get_debug_name())
         }
     }
 }
@@ -155,10 +155,10 @@ impl<T: FromPrimitive> FromPrimitive for Vec<T> {
 }
 
 impl FromPrimitive for PdfString {
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         match p {
             Primitive::String (string) => Ok(string),
-            _ => wrong_primitive!(String, p.get_debug_name()),
+            _ => unexpected_primitive!(String, p.get_debug_name()),
         }
     }
 }

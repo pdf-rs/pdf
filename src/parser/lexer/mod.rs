@@ -318,8 +318,8 @@ impl<'a> Substr<'a> {
         self.slice.to_vec()
     }
     pub fn to<T: FromStr>(&self) -> Result<T> {
-        std::str::from_utf8(self.slice).unwrap().parse::<T>()
-            .map_err(|_| ErrorKind::ParseError {
+        std::str::from_utf8(self.slice)?.parse::<T>()
+            .map_err(|_| ErrorKind::FromStrError {
                     word: String::from(self.as_str())
                 }.into())
     }

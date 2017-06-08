@@ -56,8 +56,8 @@ impl<'a> StringLexer<'a> {
                     b'n' => Some(b'\n'),
                     b'r' => Some(b'\r'),
                     b't' => Some(b'\t'),
-                    b'b' => bail!("\\b encountered - don't know what to do"),
-                    b'f' => bail!("\\f encountered - don't know what to do"),
+                    b'b' => unimplemented!(),
+                    b'f' => unimplemented!(),
                     b'(' => Some(b'('),
                     b')' => Some(b')'),
                     b'\n' => self.next_lexeme()?, // ignore \\\n
