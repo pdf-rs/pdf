@@ -94,8 +94,12 @@ impl XRefTable {
                 XRef::Invalid => true,
                 x => panic!("found {:?}", x)
             };
+            let dst = &mut self.entries[section.first_id as usize + i];
             if should_be_updated {
-                self.entries[section.first_id as usize + i] = *entry;
+                println!("{}: updating {:?} with {:?}", i, dst, entry);
+                *dst = *entry;
+            } else {
+                println!("{}: not updating {:?} with {:?}", i, dst, entry);
             }
         }
     }
