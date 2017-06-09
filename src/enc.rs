@@ -127,7 +127,8 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
         while i < input.len() {
             // +1 because the first byte on each row is predictor
             let predictor_nr = input[i];
-            let current_range = (i+1)..(i+1+columns);
+            i += 1;
+            let current_range = i ..i+columns;
             let row = &mut out[current_range.clone()];
             unfilter(PredictorType::from_u8(predictor_nr)?, n_components, prev_row, row);
             prev_row = & input[current_range];
