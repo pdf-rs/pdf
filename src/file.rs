@@ -43,7 +43,7 @@ fn find_page<'a>(pages: &'a Pages, mut offset: i32, page_nr: i32) -> Result<&'a 
     
 // tail call to trick borrowck
 fn update_pages(pages: &mut Pages, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
-    for (i, mut kid) in &mut pages.kids.iter_mut().enumerate() {
+    for mut kid in &mut pages.kids.iter_mut() {
         println!("{}/{} {:?}", offset, page_nr, kid);
         match *kid {
             PagesNode::Tree(ref mut t) => {

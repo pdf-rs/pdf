@@ -60,6 +60,9 @@ pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer, resolve: &Resolve) -
     };
     
     let mut data_left = &xref_stream.data[..];
+    println!("TEST - Widths: {:?}", width);
+    println!("TEST - Data: {:?}", data_left);
+    println!("TEST - the whole dict anyway {:?}", trailer);
 
     let mut sections = Vec::new();
     for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {

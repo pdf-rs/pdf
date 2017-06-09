@@ -1,10 +1,12 @@
 use itertools::Itertools;
 use tuple::*;
 use types::StreamFilter;
-use std::convert::TryFrom;
 use inflate::InflateStream;
 use err::*;
+use std::mem;
+use std::str;
 
+use primitive::Dictionary;
 
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
@@ -79,7 +81,30 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn flate_decode(data: &[u8]) -> Result<Vec<u8>> {
+
+fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
+    println!("DEBUG PARAMS {:?}", params.as_ref().unwrap());
+    println!("DEBUG DATA(len: {}): {:?}", data.len(), data);
+    // TODO: write macro
+    let predictor = match *params {
+        Some(ref params) => params.get("Predictor").map_or(Ok(1), |x| x.as_integer())?,
+        None => 1,
+    };
+    let n_components = match *params {
+        Some(ref params) => params.get("Colors").map_or(Ok(1), |x| x.as_integer())?,
+        None => 1,
+    } as usize;
+    let bits_per_component = match *params {
+        Some(ref params) => params.get("BitsPerComponentt").map_or(Ok(8), |x| x.as_integer())?,
+        None => 8,
+    };
+    let columns = match *params {
+        Some(ref params) => params.get("Columns").map_or(Ok(1), |x| x.as_integer())?,
+        None => 1,
+    } as usize;
+    //
+
+    // First flate decode
     let mut inflater = InflateStream::from_zlib();
     let mut out = Vec::<u8>::new();
     let mut n = 0;
@@ -89,17 +114,170 @@ fn flate_decode(data: &[u8]) -> Result<Vec<u8>> {
         n += num_bytes_read;
         out.extend(result);
     }
+
+    // Then unfilter (PNG)
+    // For this, take the old out as input, and write output to out
+    let input = out.clone();
+
+    if predictor > 10 {
+        // Apply inverse predictor
+        let null_vec = vec![0; columns];
+        let mut prev_row: &[u8] = &null_vec;
+        let mut i = 0;
+        while i < input.len() {
+            // +1 because the first byte on each row is predictor
+            let predictor_nr = input[i];
+            i += 1;
+            let current_range = i ..i+columns;
+            let row = &mut out[current_range.clone()];
+            unfilter(PredictorType::from_u8(predictor_nr)?, n_components, prev_row, row);
+            prev_row = & input[current_range];
+            i += columns;
+        }
+    }
     Ok(out)
 }
 
-pub fn decode(data: &[u8], filter: StreamFilter) -> Result<Vec<u8>> {
+
+pub fn decode(data: &[u8], filter: StreamFilter, params: &Option<Dictionary>) -> Result<Vec<u8>> {
     use self::StreamFilter::*;
     match filter {
         AsciiHex => decode_hex(data),
         Ascii85 => decode_85(data),
         Lzw => unimplemented!(),
-        Flate => flate_decode(data),
+        Flate => flate_decode(data, params),
         Jpeg2k => unimplemented!()
     }
 }
 
+
+/*
+ * Predictor - copied and adapted from PNG crate..
+ */
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+#[allow(dead_code)]
+pub enum PredictorType {
+    NoFilter = 0,
+    Sub = 1,
+    Up = 2,
+    Avg = 3,
+    Paeth = 4
+}
+
+impl PredictorType {  
+    /// u8 -> Self. Temporary solution until Rust provides a canonical one.
+    pub fn from_u8(n: u8) -> Result<PredictorType> {
+        match n {
+            n if n <= 4 => Ok(unsafe { mem::transmute(n) }),
+            n => Err(ErrorKind::IncorrectPredictorType {n}.into())
+        }
+    }
+}
+
+fn filter_paeth(a: u8, b: u8, c: u8) -> u8 {
+    let ia = a as i16;
+    let ib = b as i16;
+    let ic = c as i16;
+
+    let p = ia + ib - ic;
+
+    let pa = (p - ia).abs();
+    let pb = (p - ib).abs();
+    let pc = (p - ic).abs();
+
+    if pa <= pb && pa <= pc {
+        a
+    } else if pb <= pc {
+        b
+    } else {
+        c
+    }
+}
+
+pub fn unfilter(filter: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
+    use self::PredictorType::*;
+    let len = current.len();
+
+    match filter {
+        NoFilter => (),
+        Sub => {
+            for i in bpp..len {
+                current[i] = current[i].wrapping_add(
+                    current[i - bpp]
+                );
+            }
+        }
+        Up => {
+            for i in 0..len {
+                current[i] = current[i].wrapping_add(
+                    previous[i]
+                );
+            }
+        }
+        Avg => {
+            for i in 0..bpp {
+                current[i] = current[i].wrapping_add(
+                    previous[i] / 2
+                );
+            }
+
+            for i in bpp..len {
+                current[i] = current[i].wrapping_add(
+                    ((current[i - bpp] as i16 + previous[i] as i16) / 2) as u8
+                );
+            }
+        }
+        Paeth => {
+            for i in 0..bpp {
+                current[i] = current[i].wrapping_add(
+                    filter_paeth(0, previous[i], 0)
+                );
+            }
+
+            for i in bpp..len {
+                current[i] = current[i].wrapping_add(
+                    filter_paeth(current[i - bpp], previous[i], previous[i - bpp])
+                );
+            }
+        }
+    }
+}
+
+pub fn filter(method: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
+    use self::PredictorType::*;
+    let len  = current.len();
+
+    match method {
+        NoFilter => (),
+        Sub => {
+            for i in (bpp..len).rev() {
+                current[i] = current[i].wrapping_sub(current[i - bpp]);
+            }
+        }
+        Up => {
+            for i in 0..len {
+                current[i] = current[i].wrapping_sub(previous[i]);
+            }
+        }
+        Avg => {
+            for i in (bpp..len).rev() {
+                current[i] = current[i].wrapping_sub((current[i - bpp].wrapping_add(previous[i]) / 2));
+            }
+
+            for i in 0..bpp {
+                current[i] = current[i].wrapping_sub(previous[i] / 2);
+            }
+        }
+        Paeth => {
+            for i in (bpp..len).rev() {
+                current[i] = current[i].wrapping_sub(filter_paeth(current[i - bpp], previous[i], previous[i - bpp]));
+            }
+
+            for i in 0..bpp {
+                current[i] = current[i].wrapping_sub(filter_paeth(0, previous[i], 0));
+            }
+        }
+    }
+}

@@ -1,7 +1,7 @@
 use std::io;
 
 use object::{Object, FromStream, FromDict, Resolve};
-use primitive::Stream;
+use primitive::{Stream};
 use types::StreamFilter;
 use err::Result;
 
@@ -9,6 +9,9 @@ use err::Result;
 pub struct StreamInfo {
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
+
+    // #[pdf(key = "DecodeParms", opt=true)]
+    // pub decode_parms: Option<Vec<Option<DecodeParams>>>,
     
     #[pdf(key = "Type")]
     ty:     String
@@ -20,20 +23,12 @@ pub struct GeneralStream {
     pub info:       StreamInfo
 }
 impl GeneralStream {
-    /*
-    pub fn from_file(p: &Primitive, data: &[u8]) -> Self {
-        Stream {
-            info:   StreamInfo::from_primitive(p),
-            data:   data.to_owned()
-        }
-    }
-    */
     pub fn empty(ty: &str) -> GeneralStream {
         GeneralStream {
             data:   Vec::new(),
             info:   StreamInfo {
-                filter: vec![],
-                ty:     ty.to_string()
+                filter:         vec![],
+                ty:             ty.to_string()
             }
         }
     }
@@ -50,9 +45,7 @@ impl Object for GeneralStream {
 }
 
 impl FromStream for GeneralStream {
-    fn from_stream(stream: Stream, resolve: &Resolve)
-     -> Result<GeneralStream>
-    {
+    fn from_stream(stream: Stream, resolve: &Resolve) -> Result<GeneralStream> {
         let info = StreamInfo::from_dict(stream.info, resolve)?;
         // TODO: Look at filters of `info` and decode the stream.
         let data = stream.data.to_vec();
@@ -63,3 +56,14 @@ impl FromStream for GeneralStream {
     }
 }
 
+/*
+pub struct DecodeParams {
+    dict: Dictionary
+}
+
+impl DecodeParams {
+    fn get(&self, key: String) -> Option<Primitive> {
+        self.dict.get(key)
+    }
+}
+*/
