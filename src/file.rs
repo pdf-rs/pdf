@@ -1,5 +1,5 @@
 use std::str;
-
+use std::marker::PhantomData;
 use err::*;
 use object::*;
 use types::*;
@@ -11,11 +11,9 @@ use parser::parse_object::parse_indirect_object;
 use parser::lexer::Lexer;
 use parser::parse_xref::read_xref_and_trailer_at;
 
-
-pub struct File<B: Backend> {
-    backend:    B,
-    trailer:    Trailer,
-    refs:       XRefTable,
+pub struct PromisedRef<T> {
+    id:         u64,
+    _marker:    PhantomData<T>
 }
 
 // tail call
@@ -40,7 +38,7 @@ fn find_page<'a>(pages: &'a Pages, mut offset: i32, page_nr: i32) -> Result<&'a 
             }
         }
     }
-    bail!(ErrorKind::PageNotFound {page_nr: page_nr});
+    Err(ErrorKind::PageNotFound {page_nr: page_nr}.into())
 }
     
 // tail call to trick borrowck
@@ -67,9 +65,15 @@ fn update_pages(pages: &mut Pages, mut offset: i32, page_nr: i32, page: Page) ->
         }
         
     }
-    bail!("not found!");
+    Err(ErrorKind::PageNotFound {page_nr: page_nr}.into())
 }
     
+pub struct File<B: Backend> {
+    backend:    B,
+    trailer:    Trailer,
+    refs:       XRefTable,
+}
+
 impl<B: Backend> File<B> {
     pub fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
@@ -94,9 +98,9 @@ impl<B: Backend> File<B> {
         let trailer = Trailer::from_dict(trailer, &|r| File::<B>::resolve_helper(&backend, &refs, r))?;
         
         Ok(File {
-            backend: backend,
-            trailer: trailer,
-            refs: refs,
+            backend:    backend,
+            trailer:    trailer,
+            refs:       refs
         })
     }
 
@@ -122,6 +126,7 @@ impl<B: Backend> File<B> {
                 parse(slice)
             }
             XRef::Free {..} => bail!(ErrorKind::FreeObject {obj_nr: r.id}),
+            _ => panic!()
         }
     }
 
@@ -141,6 +146,17 @@ impl<B: Backend> File<B> {
     
     pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
         update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
+    }
+    
+    pub fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        let id = self.refs.len() as u64;
+        
+        self.refs.push(XRef::Promised);
+        
+        PromisedRef {
+            id:         id,
+            _marker:    PhantomData
+        }
     }
 }
 
