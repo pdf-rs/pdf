@@ -88,10 +88,10 @@ impl XRefTable {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
             let should_be_updated = match *self.entries.get(i).unwrap() {
-                XRef::Raw { gen_nr: gen, .. } => entry.get_gen_nr() > gen,
+                XRef::Raw { gen_nr: gen, .. } |
+                XRef::Free { gen_nr: gen, .. } => entry.get_gen_nr() > gen,
                 XRef::Stream { .. } => true,
                 XRef::Invalid => true,
-                XRef::Free { .. } => true,
                 x => panic!("found {:?}", x)
             };
             if should_be_updated {

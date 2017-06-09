@@ -83,8 +83,12 @@ impl<B: Backend> File<B> {
         //      Reason for the doubt: reading previous xref tables/streams
         let (refs, trailer) = {
             let mut lexer = Lexer::new(backend.read(xref_offset..)?);
+            
             let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
-            let highest_id = trailer.get("Size").ok_or_else(|| ErrorKind::EntryNotFound {key: "Size"})?.clone().as_integer()?;
+            
+            let highest_id = trailer.get("Size")
+            .ok_or_else(|| ErrorKind::EntryNotFound {key: "Size"})?
+            .clone().as_integer()?;
 
             let mut refs = XRefTable::new(highest_id as ObjNr);
             for section in xref_sections {
@@ -93,9 +97,33 @@ impl<B: Backend> File<B> {
             
             println!("XRefTable: {:?}", refs);
             println!("Trailer dict: {:?}", trailer);
+            let mut prev_trailer = {
+                match trailer.get("Prev") {
+                    Some(p) => Some(p.as_integer()?),
+                    None => None
+                }
+            };
+            while let Some(prev_xref_offset) = prev_trailer {
+                println!("adding previous trailer at {}", prev_xref_offset);
+                
+                let mut lexer = Lexer::new(backend.read(prev_xref_offset as usize..)?);
+                let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
+                
+                for section in xref_sections {
+                    refs.add_entries_from(section);
+                }
+                
+                prev_trailer = {
+                    match trailer.get("Prev") {
+                        Some(p) => Some(p.as_integer()?),
+                        None => None
+                    }
+                };
+            }
             (refs, trailer)
         };
         let trailer = Trailer::from_dict(trailer, &|r| File::<B>::resolve_helper(&backend, &refs, r))?;
+        
         
         Ok(File {
             backend:    backend,
@@ -114,6 +142,7 @@ impl<B: Backend> File<B> {
 
     /// Because we need a resolve function to parse the trailer before the File has been created.
     fn resolve_helper<B2: Backend>(backend: &B2, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
+        println!("deref({:?})", r); 
         match refs.get(r.id)? {
             XRef::Raw {pos, ..} => {
                 let mut lexer = Lexer::new(backend.read(pos..)?);
@@ -195,7 +224,7 @@ pub struct Trailer {
     // TODO ^ Vec<u8> is a String type. Maybe make a wrapper for that
 }
 
-#[derive(Object, FromDict)]
+#[derive(Object, FromDict, Debug)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
     // Normal Stream fields
@@ -226,6 +255,7 @@ pub struct XRefStream {
 impl FromStream for XRefStream {
     fn from_stream(stream: Stream, resolve: &Resolve) -> Result<XRefStream> {
         let info = XRefInfo::from_dict(stream.info, resolve)?;
+        println!("XRefInfo: {:?}", info);
         let data = stream.data.to_vec();
         Ok(XRefStream {
             data: data,

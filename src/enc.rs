@@ -145,9 +145,9 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
                 let (prev, curr) = out.split_at_mut(out_off);
                 (&prev[last_out_off ..], &mut curr[.. columns])
             };
-            println!("{:?} {:?}", predictor, row_in);
+            // println!("{:?} {:?}", predictor, row_in);
             unfilter(predictor, n_components, prev_row, row_in, row_out);
-            println!("-> {:?}", row_out);
+            // println!("-> {:?}", row_out);
             
             last_out_off = out_off;
             
