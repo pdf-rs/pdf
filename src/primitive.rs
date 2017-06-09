@@ -82,9 +82,9 @@ impl Primitive {
             Primitive::Name (..) => "Name",
         }
     }
-    pub fn as_integer(self) -> Result<i32> {
+    pub fn as_integer(&self) -> Result<i32> {
         match self {
-            Primitive::Integer(n) => Ok(n),
+            &Primitive::Integer(n) => Ok(n),
             p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
@@ -149,6 +149,17 @@ impl<T: FromPrimitive> FromPrimitive for Vec<T> {
                     .collect::<Result<Vec<T>>>()?
             }
             _ => vec![T::from_primitive(p, r)?]
+        }
+        )
+    }
+}
+
+impl<T: FromPrimitive> FromPrimitive for Option<T> {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+        Ok(
+        match p {
+            Primitive::Null => None,
+            p => Some(T::from_primitive(p, r)?)
         }
         )
     }

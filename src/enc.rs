@@ -1,11 +1,12 @@
 use itertools::Itertools;
 use tuple::*;
 use types::StreamFilter;
-use std::convert::TryFrom;
 use inflate::InflateStream;
 use err::*;
-use stream::DecodeParams;
+use std::mem;
+use std::str;
 
+use primitive::Dictionary;
 
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
@@ -80,7 +81,30 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn flate_decode(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> {
+
+fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
+    println!("DEBUG PARAMS {:?}", params.as_ref().unwrap());
+    println!("DEBUG DATA(len: {}): {:?}", data.len(), data);
+    // TODO: write macro
+    let predictor = match *params {
+        Some(ref params) => params.get("Predictor").map_or(Ok(1), |x| x.as_integer())?,
+        None => 1,
+    };
+    let n_components = match *params {
+        Some(ref params) => params.get("Colors").map_or(Ok(1), |x| x.as_integer())?,
+        None => 1,
+    } as usize;
+    let bits_per_component = match *params {
+        Some(ref params) => params.get("BitsPerComponentt").map_or(Ok(8), |x| x.as_integer())?,
+        None => 8,
+    };
+    let columns = match *params {
+        Some(ref params) => params.get("Columns").map_or(Ok(1), |x| x.as_integer())?,
+        None => 1,
+    } as usize;
+    //
+
+    // First flate decode
     let mut inflater = InflateStream::from_zlib();
     let mut out = Vec::<u8>::new();
     let mut n = 0;
@@ -91,27 +115,30 @@ fn flate_decode(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> {
         out.extend(result);
     }
 
-    // TODO NOW
-    // Next up: provide default params? for when calling decode()
-    if params.predictor > 10 {
+    // Then unfilter (PNG)
+    // For this, take the old out as input, and write output to out
+    let input = out.clone();
+
+    if predictor > 10 {
         // Apply inverse predictor
-        let i = 0;
-        let null_vec = vec![0; params.columns];
-        let prev_row = &null_vec;
-        while i < out.len() {
+        let null_vec = vec![0; columns];
+        let mut prev_row: &[u8] = &null_vec;
+        let mut i = 0;
+        while i < input.len() {
             // +1 because the first byte on each row is predictor
-            let predictor_nr = out[i];
-            let row = &mut out[(i+1)..(i+params.columns)];
-            unfilter(PredictorType::from_u8(predictor_nr), params.n_components, &previous, row);
-            i += params.columns;
-            prev_row = &row;
+            let predictor_nr = input[i];
+            let current_range = (i+1)..(i+1+columns);
+            let row = &mut out[current_range.clone()];
+            unfilter(PredictorType::from_u8(predictor_nr)?, n_components, prev_row, row);
+            prev_row = & input[current_range];
+            i += columns;
         }
     }
     Ok(out)
 }
 
 
-pub fn decode(data: &[u8], filter: StreamFilter, params: &DecodeParams) -> Result<Vec<u8>> {
+pub fn decode(data: &[u8], filter: StreamFilter, params: &Option<Dictionary>) -> Result<Vec<u8>> {
     use self::StreamFilter::*;
     match filter {
         AsciiHex => decode_hex(data),
@@ -129,6 +156,7 @@ pub fn decode(data: &[u8], filter: StreamFilter, params: &DecodeParams) -> Resul
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub enum PredictorType {
     NoFilter = 0,
     Sub = 1,
@@ -137,12 +165,12 @@ pub enum PredictorType {
     Paeth = 4
 }
 
- impl PredictorType {  
+impl PredictorType {  
     /// u8 -> Self. Temporary solution until Rust provides a canonical one.
-    pub fn from_u8(n: u8) -> Option<PredictorType> {
+    pub fn from_u8(n: u8) -> Result<PredictorType> {
         match n {
-            n if n <= 4 => Some(unsafe { mem::transmute(n) }),
-            _ => None
+            n if n <= 4 => Ok(unsafe { mem::transmute(n) }),
+            n => Err(ErrorKind::IncorrectPredictorType {n}.into())
         }
     }
 }
@@ -168,6 +196,7 @@ fn filter_paeth(a: u8, b: u8, c: u8) -> u8 {
 }
 
 pub fn unfilter(filter: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
+    use self::PredictorType::*;
     let len = current.len();
 
     match filter {
@@ -216,21 +245,22 @@ pub fn unfilter(filter: PredictorType, bpp: usize, previous: &[u8], current: &mu
 }
 
 pub fn filter(method: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
+    use self::PredictorType::*;
     let len  = current.len();
 
     match method {
         NoFilter => (),
-        Sub      => {
+        Sub => {
             for i in (bpp..len).rev() {
                 current[i] = current[i].wrapping_sub(current[i - bpp]);
             }
         }
-        Up       => {
+        Up => {
             for i in 0..len {
                 current[i] = current[i].wrapping_sub(previous[i]);
             }
         }
-        Avg  => {
+        Avg => {
             for i in (bpp..len).rev() {
                 current[i] = current[i].wrapping_sub((current[i - bpp].wrapping_add(previous[i]) / 2));
             }
@@ -239,7 +269,7 @@ pub fn filter(method: PredictorType, bpp: usize, previous: &[u8], current: &mut 
                 current[i] = current[i].wrapping_sub(previous[i] / 2);
             }
         }
-        Paeth    => {
+        Paeth => {
             for i in (bpp..len).rev() {
                 current[i] = current[i].wrapping_sub(filter_paeth(current[i - bpp], previous[i], previous[i - bpp]));
             }

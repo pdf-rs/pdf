@@ -8,6 +8,7 @@ use pdf::file::{File, ObjectStream};
 use pdf::object::*;
 use pdf::parser::parse;
 use glob::glob;
+use pdf::print_err;
 
 macro_rules! file_path {
     ( $subdir:expr ) => { concat!("tests/files/", $subdir) }
@@ -27,7 +28,7 @@ fn read_pages() {
             Ok(path) => {
                 println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
-                let file = File::<Vec<u8>>::open(path.to_str().unwrap()).unwrap();
+                let file = File::<Vec<u8>>::open(path.to_str().unwrap()).unwrap_or_else(|e| print_err(e));
                 let num_pages = file.get_root().pages.count;
                 for i in 0..num_pages {
                     println!("\nRead page {}", i);

@@ -1,9 +1,8 @@
 #![feature(attr_literals)]
-#![feature(try_from)]
 #![recursion_limit="128"]
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
-
+#![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
 #[macro_use]
 extern crate pdf_derive;
 #[macro_use]
