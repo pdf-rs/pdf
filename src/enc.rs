@@ -117,25 +117,47 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
 
     // Then unfilter (PNG)
     // For this, take the old out as input, and write output to out
-    let input = out.clone();
 
     if predictor > 10 {
+        let inp = out; // input buffer
+        let rows = inp.len() / (columns+1);
+        
+        // output buffer
+        let mut out = vec![0; rows * columns];
+    
         // Apply inverse predictor
         let null_vec = vec![0; columns];
-        let mut prev_row: &[u8] = &null_vec;
-        let mut i = 0;
-        while i < input.len() {
-            // +1 because the first byte on each row is predictor
-            let predictor_nr = input[i];
-            i += 1;
-            let current_range = i ..i+columns;
-            let row = &mut out[current_range.clone()];
-            unfilter(PredictorType::from_u8(predictor_nr)?, n_components, prev_row, row);
-            prev_row = & input[current_range];
-            i += columns;
+        
+        let mut in_off = 0; // offset into input buffer
+        
+        let mut out_off = 0; // offset into output buffer
+        let mut last_out_off = 0; // last offset to output buffer
+        
+        while in_off < inp.len() {
+            
+            let predictor = PredictorType::from_u8(inp[in_off])?;
+            in_off += 1; // +1 because the first byte on each row is predictor
+            
+            let row_in = &inp[in_off .. in_off + columns];
+            let (prev_row, row_out) = if last_out_off == 0 {
+                (&null_vec[..], &mut out[out_off .. out_off+columns])
+            } else {
+                let (prev, curr) = out.split_at_mut(out_off);
+                (&prev[last_out_off ..], &mut curr[.. columns])
+            };
+            println!("{:?} {:?}", predictor, row_in);
+            unfilter(predictor, n_components, prev_row, row_in, row_out);
+            println!("-> {:?}", row_out);
+            
+            last_out_off = out_off;
+            
+            in_off += columns;
+            out_off += columns;
         }
+        Ok(out)
+    } else {
+        Ok(out)
     }
-    Ok(out)
 }
 
 
@@ -196,49 +218,55 @@ fn filter_paeth(a: u8, b: u8, c: u8) -> u8 {
     }
 }
 
-pub fn unfilter(filter: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
+pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out: &mut [u8]) {
     use self::PredictorType::*;
-    let len = current.len();
+    let len = inp.len();
+    assert_eq!(len, out.len());
+    assert_eq!(len, prev.len());
 
     match filter {
-        NoFilter => (),
+        NoFilter => {
+            for i in 0..len {
+                out[i] = inp[i];
+            }
+        }
         Sub => {
             for i in bpp..len {
-                current[i] = current[i].wrapping_add(
-                    current[i - bpp]
+                out[i] = inp[i].wrapping_add(
+                    out[i - bpp]
                 );
             }
         }
         Up => {
             for i in 0..len {
-                current[i] = current[i].wrapping_add(
-                    previous[i]
+                out[i] = inp[i].wrapping_add(
+                    prev[i]
                 );
             }
         }
         Avg => {
             for i in 0..bpp {
-                current[i] = current[i].wrapping_add(
-                    previous[i] / 2
+                out[i] = inp[i].wrapping_add(
+                    prev[i] / 2
                 );
             }
 
             for i in bpp..len {
-                current[i] = current[i].wrapping_add(
-                    ((current[i - bpp] as i16 + previous[i] as i16) / 2) as u8
+                out[i] = inp[i].wrapping_add(
+                    ((out[i - bpp] as i16 + prev[i] as i16) / 2) as u8
                 );
             }
         }
         Paeth => {
             for i in 0..bpp {
-                current[i] = current[i].wrapping_add(
-                    filter_paeth(0, previous[i], 0)
+                out[i] = inp[i].wrapping_add(
+                    filter_paeth(0, prev[i], 0)
                 );
             }
 
             for i in bpp..len {
-                current[i] = current[i].wrapping_add(
-                    filter_paeth(current[i - bpp], previous[i], previous[i - bpp])
+                out[i] = inp[i].wrapping_add(
+                    filter_paeth(out[i - bpp], prev[i], prev[i - bpp])
                 );
             }
         }

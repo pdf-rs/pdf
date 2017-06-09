@@ -14,6 +14,7 @@ use parser::parse_object::{parse_indirect_stream};
 fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XRefSection> {
     let mut entries = Vec::new();
     for _ in 0..num_entries {
+        println!("{:?}", &data[.. width.iter().map(|&i| i as usize).sum()]);
          // TODO Check if width[i] are 0. Use default values from the PDF references.
         let _type = read_u64_from_stream(width[0], data);
         let field1 = read_u64_from_stream(width[1], data);

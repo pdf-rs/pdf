@@ -25,6 +25,10 @@ pub enum XRef {
         stream_id: ObjNr,
         index: usize,
     },
+    
+    Promised,
+    
+    Invalid
 }
 
 impl XRef {
@@ -33,6 +37,7 @@ impl XRef {
             XRef::Free {gen_nr, ..}
             | XRef::Raw {gen_nr, ..} => gen_nr,
             XRef::Stream { .. } => 0, // TODO I think these always have gen nr 0?
+            _ => panic!()
         }
     }
 }
@@ -42,14 +47,14 @@ impl XRef {
 pub struct XRefTable {
     // None means that it's not specified, and should result in an error if used
     // Thought: None could also mean Free?
-    entries: Vec<Option<XRef>>
+    entries: Vec<XRef>
 }
 
 
 impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
         let mut entries = Vec::new();
-        entries.resize(num_objects as usize, None);
+        entries.resize(num_objects as usize, XRef::Invalid);
         XRefTable {
             entries: entries,
         }
@@ -63,8 +68,8 @@ impl XRefTable {
     }
 
     pub fn get(&self, id: ObjNr) -> Result<XRef> {
-        match self.entries[id as usize] {
-            Some(entry) => Ok(entry),
+        match self.entries.get(id as usize) {
+            Some(&entry) => Ok(entry),
             None => bail!(ErrorKind::UnspecifiedXRefEntry {id: id}),
         }
     }
@@ -73,7 +78,7 @@ impl XRefTable {
         self.entries.len()
     }
     pub fn push(&mut self, new_entry: XRef) {
-        self.entries.push(Some(new_entry));
+        self.entries.push(new_entry);
     }
     pub fn num_entries(&self) -> usize {
         self.entries.len()
@@ -82,14 +87,15 @@ impl XRefTable {
     pub fn add_entries_from(&mut self, section: XRefSection) {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
-            let should_be_updated = match self.entries[i] {
-                Some(existing_entry) => {
-                    !(entry.get_gen_nr() <= existing_entry.get_gen_nr())
-                },
-                None => true,
+            let should_be_updated = match *self.entries.get(i).unwrap() {
+                XRef::Raw { gen_nr: gen, .. } => entry.get_gen_nr() > gen,
+                XRef::Stream { .. } => true,
+                XRef::Invalid => true,
+                XRef::Free { .. } => true,
+                x => panic!("found {:?}", x)
             };
             if should_be_updated {
-                self.entries[section.first_id as usize + i] = Some(*entry);
+                self.entries[section.first_id as usize + i] = *entry;
             }
         }
     }
@@ -99,17 +105,20 @@ impl Debug for XRefTable {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         for (i, entry) in self.entries.iter().enumerate() {
             match *entry {
-                Some(XRef::Free {next_obj_nr, gen_nr}) => {
-                    write!(f, "{:4}: {:010} {:05} f \n", i, next_obj_nr, gen_nr)?
+                XRef::Free {next_obj_nr, gen_nr} => {
+                    writeln!(f, "{:4}: {:010} {:05} f", i, next_obj_nr, gen_nr)?
                 },
-                Some(XRef::Raw {pos, gen_nr}) => {
-                    write!(f, "{:4}: {:010} {:05} n \n", i, pos, gen_nr)?
+                XRef::Raw {pos, gen_nr} => {
+                    writeln!(f, "{:4}: {:010} {:05} n", i, pos, gen_nr)?
                 },
-                Some(XRef::Stream {stream_id, index}) => {
-                    write!(f, "{:4}: in stream {}, index {}\n", i, stream_id, index)?
-                }
-                None => {
-                    write!(f, "{:4}: None!\n", i)?
+                XRef::Stream {stream_id, index} => {
+                    writeln!(f, "{:4}: in stream {}, index {}", i, stream_id, index)?
+                },
+                XRef::Promised => {
+                    writeln!(f, "{:4}: Promised?", i)?
+                },
+                XRef::Invalid => {
+                    writeln!(f, "{:4}: Invalid!", i)?
                 }
             }
         }
@@ -151,15 +160,15 @@ impl<'a> Iterator for ObjectNrIter<'a> {
     type Item = u32;
     /// Item = (object number, xref entry)
     fn next(&mut self) -> Option<u32> {
-        self.obj_nr += 1;
-        if self.obj_nr >= self.xref_table.num_entries() as i64 {
-            None
-        } else {
-            match self.xref_table.entries[self.obj_nr as usize] {
-                Some(XRef::Free {..}) | None => self.next(),
-                Some(_) => Some(self.obj_nr as u32),
+        for (n, entry) in self.xref_table.entries.iter().enumerate().skip(self.obj_nr as usize) {
+            self.obj_nr += 1;
+            match *entry {
+                XRef::Raw { .. } | XRef::Stream { .. } => return Some(n as u32),
+                _ => {}
             }
         }
+        
+        None
     }
 }
 
