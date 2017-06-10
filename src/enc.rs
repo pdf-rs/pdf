@@ -83,7 +83,7 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 
 
 fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
-    println!("DEBUG PARAMS {:?}", params.as_ref().unwrap());
+    println!("DEBUG PARAMS {:?}", params);
     println!("DEBUG DATA(len: {}): {:?}", data.len(), data);
     // TODO: write macro
     let predictor = match *params {
