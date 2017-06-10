@@ -82,27 +82,30 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 
+macro_rules! parameter {
+    ($params:expr, $key:expr, $default:expr) => {
+        match *$params {
+            Some(ref params) => params.get($key).map_or(Ok($default), |x| x.as_integer())?,
+            None => $default
+        };
+    };
+}
+
 fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
-    println!("DEBUG PARAMS {:?}", params);
-    println!("DEBUG DATA(len: {}): {:?}", data.len(), data);
-    // TODO: write macro
-    let predictor = match *params {
-        Some(ref params) => params.get("Predictor").map_or(Ok(1), |x| x.as_integer())?,
-        None => 1,
+    let predictor = parameter!(params, "Predictor", 1);
+    let n_components = parameter!(params, "Colors", 1) as usize;
+    let bits_per_component = parameter!(params, "BitsPerComponent", 1);
+    let columns = parameter!(params, "Columns", 1) as usize;
+
+    /* TODO.. the macro should ideally just make a single match
+    let (predictor, n_components) = match *params {
+        Some(ref params) => {
+            (params.get("Predictor").map_or(Ok(1), |x| x.as_integer())?,
+             params.get("Colors").map_or(Ok(1), |x| x.as_integer())?)
+        },
+        None => ..
     };
-    let n_components = match *params {
-        Some(ref params) => params.get("Colors").map_or(Ok(1), |x| x.as_integer())?,
-        None => 1,
-    } as usize;
-    let bits_per_component = match *params {
-        Some(ref params) => params.get("BitsPerComponentt").map_or(Ok(8), |x| x.as_integer())?,
-        None => 8,
-    };
-    let columns = match *params {
-        Some(ref params) => params.get("Columns").map_or(Ok(1), |x| x.as_integer())?,
-        None => 1,
-    } as usize;
-    //
+    */
 
     // First flate decode
     let mut inflater = InflateStream::from_zlib();
@@ -145,9 +148,7 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
                 let (prev, curr) = out.split_at_mut(out_off);
                 (&prev[last_out_off ..], &mut curr[.. columns])
             };
-            //println!("{:?} {:?} prev: {:?}", predictor, row_in, prev_row);
             unfilter(predictor, n_components, prev_row, row_in, row_out);
-            //println!("-> {:?}", row_out);
             
             last_out_off = out_off;
             
