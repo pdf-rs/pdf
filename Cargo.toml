@@ -4,6 +4,7 @@ version = "0.1.15"
 authors = ["Sebastian Köln <sebk@rynx.org>"]
 homepage = "https://github.com/pdf-rs"
 repository = "https://github.com/pdf-rs/pdf_derive"
+description = "helper for pdf-rs."
 license = "MIT"
 
 [dependencies]
