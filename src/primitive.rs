@@ -1,8 +1,10 @@
 use err::*;
 
 use std::vec::Vec;
-use std::collections::HashMap;
+use std::collections::hash_map;
 use std::str;
+use std::fmt;
+use std::ops::{Index};
 use object::{PlainRef, Resolve, FromPrimitive, };
 
 
@@ -22,8 +24,46 @@ pub enum Primitive {
 }
 
 /// Primitive Dictionary type.
-pub type Dictionary = HashMap<String, Primitive>;
-
+#[derive(Default, Clone)]
+pub struct Dictionary {
+    dict: hash_map::HashMap<String, Primitive>
+}
+impl Dictionary {
+    pub fn get(&self, key: &str) -> Option<&Primitive> {
+        self.dict.get(key)
+    }
+    pub fn insert(&mut self, key: String, val: Primitive) -> Option<Primitive> {
+        self.dict.insert(key, val)
+    }
+    pub fn iter(&self) -> hash_map::Iter<String, Primitive> {
+        self.dict.iter()
+    }
+    pub fn remove(&mut self, key: &str) -> Option<Primitive> {
+        self.dict.remove(key)
+    }
+}
+impl fmt::Debug for Dictionary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{{")?;
+        for (ref k, ref v) in self {
+            writeln!(f, "{:>15}: {:?}", k, v)?;
+        }
+        write!(f, "}}")
+    }
+}
+impl<'a> Index<&'a str> for Dictionary {
+    type Output = Primitive;
+    fn index(&self, idx: &'a str) -> &Primitive {
+        &self.dict[idx]
+    }
+}
+impl<'a> IntoIterator for &'a Dictionary {
+    type Item = (&'a String, &'a Primitive);
+    type IntoIter = hash_map::Iter<'a, String, Primitive>;
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.dict).into_iter()
+    }
+}
 /// Primitive Stream type.
 #[derive(Clone, Debug)]
 pub struct Stream {
@@ -32,9 +72,23 @@ pub struct Stream {
 }
 
 /// Primitive String type.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PdfString {
     data: Vec<u8>,
+}
+impl fmt::Debug for PdfString {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "b\"")?;
+        for &b in &self.data {
+            match b {
+                b'"' => write!(f, "\\\"")?,
+                b' ' ... b'~' => write!(f, "{}", b as char)?,
+                o @ 0 ... 7  => write!(f, "\\{}", o)?,
+                x => write!(f, "\\x{:02x}", x)?
+            }
+        }
+        Ok(())
+    }
 }
 
 impl PdfString {
@@ -82,9 +136,9 @@ impl Primitive {
             Primitive::Name (..) => "Name",
         }
     }
-    pub fn as_integer(self) -> Result<i32> {
+    pub fn as_integer(&self) -> Result<i32> {
         match self {
-            Primitive::Integer(n) => Ok(n),
+            &Primitive::Integer(n) => Ok(n),
             p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
@@ -149,6 +203,17 @@ impl<T: FromPrimitive> FromPrimitive for Vec<T> {
                     .collect::<Result<Vec<T>>>()?
             }
             _ => vec![T::from_primitive(p, r)?]
+        }
+        )
+    }
+}
+
+impl<T: FromPrimitive> FromPrimitive for Option<T> {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+        Ok(
+        match p {
+            Primitive::Null => None,
+            p => Some(T::from_primitive(p, r)?)
         }
         )
     }

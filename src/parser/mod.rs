@@ -53,13 +53,19 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
             // Uncompress/decode if there is a filter
             let content = match dict.get("Filter") {
                 Some(filter) => {
+                    let params = match dict.get("DecodeParms") {
+                        Some(params) => Some(params.clone().as_dictionary(NO_RESOLVE)?),
+                        None => None,
+                    };
                     match *filter {
                         // TODO a lot of clones here
-                        Primitive::Name (_) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
+                        Primitive::Name (_) =>
+                            decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?,
                         Primitive::Array (ref filters) => {
-                            let mut data = decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?)?;
+                            let mut data =
+                                decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?, &params)?;
                             for filter in filters.iter().skip(1) {
-                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?;
+                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?;
                             }
                             data
                         }
@@ -206,13 +212,20 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
             // Uncompress/decode if there is a filter
             let content = match dict.get("Filter") {
                 Some(filter) => {
+                    let params = dict.get("DecodeParms").map(|x| x.clone().as_dictionary(NO_RESOLVE));
+                    let params = match params {
+                        Some(result) => Some(result?),
+                        None => None,
+                    };
                     match *filter {
                         // TODO a lot of clones here
-                        Primitive::Name (_) => decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?,
+                        Primitive::Name (_) =>
+                            decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?,
                         Primitive::Array (ref filters) => {
-                            let mut data = decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?)?;
+                            let mut data =
+                                decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?, &params)?;
                             for filter in filters.iter().skip(1) {
-                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?)?;
+                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?;
                             }
                             data
                         }

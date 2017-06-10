@@ -67,6 +67,7 @@ pub struct Page {
     pub parent: Ref<Pages>,
 }
 
+#[derive(Debug)]
 pub enum StreamFilter {
     AsciiHex,
     Ascii85,

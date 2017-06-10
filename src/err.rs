@@ -68,6 +68,10 @@ error_chain! {
         Ascii85TailError  {
             description("Ascii85 tail error")
         }
+        IncorrectPredictorType {n: u8} {
+            description("Failed to convert u8 into PredictorType")
+            display("Failed to convert '{}' into PredictorType", n)
+        }
         //////////////////
         // Dictionary
         EntryNotFound{key: &'static str} {
