@@ -11,6 +11,7 @@ use parser::parse_object::parse_indirect_object;
 use parser::lexer::Lexer;
 use parser::parse_xref::read_xref_and_trailer_at;
 
+#[allow(dead_code)]
 pub struct PromisedRef<T> {
     id:         u64,
     _marker:    PhantomData<T>
@@ -287,6 +288,7 @@ pub struct ObjStmInfo {
 
 }
 
+#[allow(dead_code)]
 pub struct ObjectStream {
     pub data:       Vec<u8>,
     /// Fields in the stream dictionary.
@@ -326,7 +328,7 @@ impl FromStream for ObjectStream {
         {
             let mut lexer = Lexer::new(&data);
             for _ in 0..(info.num_objects as ObjNr) {
-                let obj_nr = lexer.next()?.to::<ObjNr>()?;
+                let _obj_nr = lexer.next()?.to::<ObjNr>()?;
                 let offset = lexer.next()?.to::<usize>()?;
                 offsets.push(offset);
             }
