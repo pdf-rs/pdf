@@ -139,15 +139,15 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
             in_off += 1; // +1 because the first byte on each row is predictor
             
             let row_in = &inp[in_off .. in_off + columns];
-            let (prev_row, row_out) = if last_out_off == 0 {
+            let (prev_row, row_out) = if out_off == 0 {
                 (&null_vec[..], &mut out[out_off .. out_off+columns])
             } else {
                 let (prev, curr) = out.split_at_mut(out_off);
                 (&prev[last_out_off ..], &mut curr[.. columns])
             };
-            // println!("{:?} {:?}", predictor, row_in);
+            //println!("{:?} {:?} prev: {:?}", predictor, row_in, prev_row);
             unfilter(predictor, n_components, prev_row, row_in, row_out);
-            // println!("-> {:?}", row_out);
+            //println!("-> {:?}", row_out);
             
             last_out_off = out_off;
             
@@ -232,23 +232,17 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
         }
         Sub => {
             for i in bpp..len {
-                out[i] = inp[i].wrapping_add(
-                    out[i - bpp]
-                );
+                out[i] = inp[i].wrapping_add(out[i - bpp]);
             }
         }
         Up => {
             for i in 0..len {
-                out[i] = inp[i].wrapping_add(
-                    prev[i]
-                );
+                out[i] = inp[i].wrapping_add(prev[i]);
             }
         }
         Avg => {
             for i in 0..bpp {
-                out[i] = inp[i].wrapping_add(
-                    prev[i] / 2
-                );
+                out[i] = inp[i].wrapping_add(prev[i] / 2);
             }
 
             for i in bpp..len {
