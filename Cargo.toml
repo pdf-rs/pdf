@@ -15,7 +15,7 @@ license = "MIT"
 documentation = "https://docs.rs/pdf/0.6.0/pdf/"
 
 [dependencies.pdf_derive]
-git = "https://github.com/pdf-rs/pdf_derive.git
+git = "https://github.com/pdf-rs/pdf_derive.git"
 version = "0.1.15"
 
 [dependencies]
