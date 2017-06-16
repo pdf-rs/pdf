@@ -117,6 +117,11 @@ impl Object for i32 {
         write!(out, "{}", self)
     }
 }
+impl Object for usize {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "{}", self)
+    }
+}
 impl Object for f32 {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write!(out, "{}", self)
@@ -162,12 +167,6 @@ impl<T: Object> Object for Vec<T> {
     }
 }
 
-// Vec<u8> is a PDF string
-impl Object for PdfString {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "({})", str::from_utf8(self.as_bytes()).unwrap())
-    }
-}
 impl<T: Object> Object for [T] {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write_list(out, self.iter())
@@ -181,8 +180,8 @@ impl Object for Primitive {
             Primitive::Integer (ref x) => x.serialize(out),
             Primitive::Number (ref x) => x.serialize(out),
             Primitive::Boolean (ref x) => x.serialize(out),
-            Primitive::String (_) => unimplemented!(),
-            Primitive::Stream (_) => unimplemented!(),
+            Primitive::String (ref x) => x.serialize(out),
+            Primitive::Stream (ref x) => x.serialize(out),
             Primitive::Dictionary (ref x) => x.serialize(out),
             Primitive::Array (ref x) => x.serialize(out),
             Primitive::Reference (ref x) => x.serialize(out),

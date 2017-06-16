@@ -1,12 +1,12 @@
-use object::{Object, Ref, FromPrimitive, Resolve, FromDict};
-use primitive::Primitive;
+use object::{Object, Ref, FromPrimitive, Resolve, FromDict, PlainRef};
+use primitive::{Primitive, PdfString};
 use std::io;
 use err::*;
 
-/// Node in a page tree - type is either `Page` or `Pages`
+/// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
 pub enum PagesNode {
-    Tree (Pages),
+    Tree (PageTree),
     Leaf (Page),
 }
 impl Object for PagesNode {
@@ -24,7 +24,7 @@ impl FromPrimitive for PagesNode {
         Ok(
         match dict["Type"].clone().as_name()?.as_str() {
             "Page" => PagesNode::Leaf (Page::from_dict(dict, r)?),
-            "Pages" => PagesNode::Tree (Pages::from_dict(dict, r)?),
+            "Pages" => PagesNode::Tree (PageTree::from_dict(dict, r)?),
             other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
         )
@@ -36,22 +36,23 @@ impl FromPrimitive for PagesNode {
 
 /* Dictionary Types */
 
-#[derive(FromDict, Object)]
+#[derive(FromDict, Object, Default)]
 pub struct Catalog {
     #[pdf(key="Pages")]
-    pub pages:  Pages,
-    // #[pdf(key="Labels", opt=false]
-    // labels: HashMap<usize, PageLabel>
+    pub pages:  PageTree,
+    
+    //#[pdf(key="Labels")]
+    //labels: HashMap<usize, PageLabel>
 }
 
 
 
 
-
-#[derive(Object, FromDict, Debug)]
-pub struct Pages { // TODO would like to call it PageTree, but the macro would have to change
+#[derive(Object, FromDict, Debug, Default)]
+#[pdf(Type = "Pages")]
+pub struct PageTree {
     #[pdf(key="Parent", opt=true)]
-    pub parent: Option<Ref<Pages>>,
+    pub parent: Option<Ref<PageTree>>,
     #[pdf(key="Kids", opt=false)]
     pub kids:   Vec<PagesNode>,
     #[pdf(key="Count", opt=false)]
@@ -60,13 +61,79 @@ pub struct Pages { // TODO would like to call it PageTree, but the macro would h
     // #[pdf(key="Resources", opt=false]
     // resources: Option<Ref<Resources>>,
 }
+impl PageTree {
+    pub fn root() -> PageTree {
+        PageTree {
+            parent: None,
+            kids:   Vec::new(),
+            count:  0
+        }
+    }
+}
 
 #[derive(Object, FromDict, Debug)]
 pub struct Page {
     #[pdf(key="Parent", opt=false)]
-    pub parent: Ref<Pages>,
+    pub parent: Ref<PageTree>,
+    
+    //#[pdf(key="Parent", opt=true)]
+    //pub ressources: Option<Ressources>,
+    
+    #[pdf(key="MediaBox", opt=true)]
+    pub media_box:  Option<Rect>,
+    
+    #[pdf(key="CropBox", opt=true)]
+    pub crop_box:   Option<Rect>,
+    
+    #[pdf(key="TrimBox", opt=true)]
+    pub trim_box:   Option<Rect>,
+    
+    //#[pdf(key="Contents", opt=true)]
+    //pub contents:   Option<PlainRef>
+}
+impl Page {
+    pub fn new(parent: Ref<PageTree>) -> Page {
+        Page {
+            parent:     parent,
+            media_box:  None,
+            crop_box:   None,
+            trim_box:   None
+        }
+    }
 }
 
+#[derive(Object)]
+pub struct PageLabel {
+    #[pdf(key="S", opt=true)]
+    style:  Option<Counter>,
+    
+    #[pdf(key="P", opt=true)]
+    prefix: Option<PdfString>,
+    
+    #[pdf(key="St", opt=true)]
+    start:  Option<usize>
+}
+
+pub enum Counter {
+    Arabic,
+    RomanUpper,
+    RomanLower,
+    AlphaUpper,
+    AlphaLower
+}
+impl Object for Counter {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        let style_code = match *self {
+            Counter::Arabic     => "D",
+            Counter::RomanLower => "r",
+            Counter::RomanUpper => "R",
+            Counter::AlphaLower => "a",
+            Counter::AlphaUpper => "A"
+        };
+        out.write(style_code.as_bytes())?;
+        Ok(())
+    }
+}
 #[derive(Debug)]
 pub enum StreamFilter {
     AsciiHex,
@@ -116,4 +183,37 @@ pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
     }
     
     write!(out, "]")
+}
+
+#[derive(Object)]
+pub struct Outlines {
+    #[pdf(key="Count")]
+    pub count:  usize
+}
+
+#[derive(Debug)]
+pub struct Rect {
+    pub left:   f32,
+    pub right:  f32,
+    pub top:    f32,
+    pub bottom: f32
+}
+impl FromPrimitive for Rect {
+    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+        let arr = p.as_array(r)?;
+        if arr.len() != 4 {
+            bail!("len != 4");
+        }
+        Ok(Rect {
+            left:   arr[0].as_number()?,
+            right:  arr[1].as_number()?,
+            top:    arr[2].as_number()?,
+            bottom: arr[3].as_number()?
+        })
+    }
+}
+impl Object for Rect {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
+    }
 }

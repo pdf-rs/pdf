@@ -1,11 +1,9 @@
 use err::*;
 
-use std::vec::Vec;
 use std::collections::hash_map;
-use std::str;
-use std::fmt;
-use std::ops::{Index};
-use object::{PlainRef, Resolve, FromPrimitive, };
+use std::{str, fmt, io};
+use std::ops::{Index, IndexMut};
+use object::{PlainRef, Resolve, FromPrimitive, Object};
 
 
 
@@ -29,6 +27,9 @@ pub struct Dictionary {
     dict: hash_map::HashMap<String, Primitive>
 }
 impl Dictionary {
+    pub fn new() -> Dictionary {
+        Dictionary { dict: hash_map::HashMap::new() }
+    }
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }
@@ -54,7 +55,7 @@ impl fmt::Debug for Dictionary {
 impl<'a> Index<&'a str> for Dictionary {
     type Output = Primitive;
     fn index(&self, idx: &'a str) -> &Primitive {
-        &self.dict[idx]
+        self.dict.index(idx)
     }
 }
 impl<'a> IntoIterator for &'a Dictionary {
@@ -69,6 +70,21 @@ impl<'a> IntoIterator for &'a Dictionary {
 pub struct Stream {
     pub info: Dictionary,
     pub data: Vec<u8>,
+}
+impl Object for Stream {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+        writeln!(out, "<<")?;
+        for (k, v) in &self.info {
+            write!(out, "  {} ", k)?;
+            v.serialize(out)?;
+            writeln!(out, "")?;
+        }
+        writeln!(out, ">>")?;
+        
+        writeln!(out, "stream")?;
+        out.write(&self.data)?;
+        writeln!(out, "\nendstream")
+    }
 }
 
 /// Primitive String type.
@@ -86,6 +102,20 @@ impl fmt::Debug for PdfString {
                 o @ 0 ... 7  => write!(f, "\\{}", o)?,
                 x => write!(f, "\\x{:02x}", x)?
             }
+        }
+        Ok(())
+    }
+}
+impl Object for PdfString {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, r"\")?;
+        for &b in &self.data {
+            match b {
+                b'\\' | b'(' | b')' => write!(out, r"\")?,
+                c if c > b'~' => panic!("only ASCII"),
+                _ => ()
+            }
+            write!(out, "{}", b)?;
         }
         Ok(())
     }
@@ -140,6 +170,13 @@ impl Primitive {
         match self {
             &Primitive::Integer(n) => Ok(n),
             p => unexpected_primitive!(Integer, p.get_debug_name())
+        }
+    }
+    pub fn as_number(&self) -> Result<f32> {
+        match self {
+            &Primitive::Integer(n) => Ok(n as f32),
+            &Primitive::Number(f) => Ok(f),
+            p => unexpected_primitive!(Number, p.get_debug_name())
         }
     }
     pub fn as_reference(self) -> Result<PlainRef> {

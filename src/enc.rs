@@ -94,7 +94,7 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
         Some(ref params) => params.get("Colors").map_or(Ok(1), |x| x.as_integer())?,
         None => 1,
     } as usize;
-    let bits_per_component = match *params {
+    let _bits_per_component = match *params {
         Some(ref params) => params.get("BitsPerComponentt").map_or(Ok(8), |x| x.as_integer())?,
         None => 8,
     };
@@ -267,6 +267,7 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
     }
 }
 
+#[allow(unused)]
 pub fn filter(method: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
     use self::PredictorType::*;
     let len  = current.len();

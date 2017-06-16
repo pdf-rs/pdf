@@ -17,8 +17,8 @@ extern crate memmap;
 extern crate encoding;
 extern crate tuple;
 
-#[macro_use]
-mod macros;
+//#[macro_use]
+//mod macros;
 pub mod parser;
 pub mod object;
 pub mod types;
