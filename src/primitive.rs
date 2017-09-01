@@ -2,8 +2,9 @@ use err::*;
 
 use std::collections::hash_map;
 use std::{str, fmt, io};
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, Range};
 use object::{PlainRef, Resolve, FromPrimitive, Object};
+use chrono::{DateTime, FixedOffset};
 
 
 
@@ -253,6 +254,51 @@ impl<T: FromPrimitive> FromPrimitive for Option<T> {
             p => Some(T::from_primitive(p, r)?)
         }
         )
+    }
+}
+
+fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default: T) -> T {
+    buffer.get(range)
+        .map(|s| str::parse::<T>(s).unwrap_or(default.clone()))
+        .unwrap_or(default)
+}
+
+impl FromPrimitive for DateTime<FixedOffset> {
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+        use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
+        match p {
+            Primitive::String (PdfString {data}) => {
+                let s = str::from_utf8(&data)?;
+                let len = s.len();
+                if len > 2 && &s[0..2] == "D:" {
+
+                    let year = match s.get(2..6) {
+                        Some(year) => {
+                            str::parse::<i32>(year)?
+                        }
+                        None => bail!("Missing obligatory year in date")
+                    };
+                    let month = parse_or(s, 6..8, 1);
+                    let day = parse_or(s, 8..10, 1);
+                    let hour = parse_or(s, 10..12, 0);
+                    let minute = parse_or(s, 12..14, 0);
+                    let second = parse_or(s, 14..16, 0);
+                    let tz_hour = parse_or(s, 16..18, 0);
+                    let tz_minute = parse_or(s, 19..21, 0);
+                    let tz = FixedOffset::east(tz_hour * 60 + tz_minute);
+
+                    Ok(DateTime::from_utc(
+                            NaiveDateTime::new(NaiveDate::from_ymd(year, month, day),
+                                               NaiveTime::from_hms(hour, minute, second)),
+                          tz
+                      ))
+
+                } else {
+                    bail!("Failed parsing date");
+                }
+            }
+            _ => unexpected_primitive!(String, p.get_debug_name()),
+        }
     }
 }
 

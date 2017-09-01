@@ -15,8 +15,8 @@ license = "MIT"
 documentation = "https://docs.rs/pdf/0.6.0/pdf/"
 
 [dependencies.pdf_derive]
-git = "https://github.com/pdf-rs/pdf_derive.git"
-#path = "../pdf_derive"
+# git = "https://github.com/pdf-rs/pdf_derive.git"
+path = "../pdf_derive"
 version = "= 0.1.15"
 
 [dependencies]
@@ -33,6 +33,8 @@ encoding = "*"
 lzw = "*"
 tuple = "0.1.7"
 glob = "0.2.11"
+chrono = "0.4.0"
 
 [lib]
 doctest = false
+

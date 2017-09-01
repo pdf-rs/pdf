@@ -9,13 +9,10 @@ extern crate pdf_derive;
 extern crate error_chain;
 extern crate num_traits;
 extern crate inflate;
-extern crate ansi_term;
-extern crate byteorder;
 extern crate itertools;
-extern crate ordermap;
 extern crate memmap;
-extern crate encoding;
 extern crate tuple;
+extern crate chrono;
 
 //#[macro_use]
 //mod macros;

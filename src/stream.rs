@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::collections::HashMap;
 use object::{Object, FromStream, FromDict, Resolve, FromPrimitive, ObjNr, PlainRef};
 use primitive::{Stream, Primitive, Dictionary};
 use types::StreamFilter;
@@ -145,6 +144,8 @@ impl ObjectStream {
         self.offsets.len()
     }
 }
+
+#[allow(unused_must_use)] // TODO: how to handle Errors from write! ?
 impl Into<Primitive> for ObjectStream {
     fn into(self) -> Primitive {
         let mut data: Vec<u8> = vec![];

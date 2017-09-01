@@ -55,7 +55,7 @@ fn find_page<'a>(pages: &'a PageTree, mut offset: i32, page_nr: i32) -> Result<&
     
 // tail call to trick borrowck
 fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
-    for mut kid in &mut pages.kids.iter_mut() {
+    for kid in &mut pages.kids.iter_mut() {
         println!("{}/{} {:?}", offset, page_nr, kid);
         match *kid {
             PagesNode::Tree(ref mut t) => {
@@ -120,8 +120,6 @@ impl<B: Backend> File<B> {
         let backend = B::open(path)?;
         let xref_offset = locate_xref_offset(backend.read(0..)?)?;
 
-        // TODO: lexer may have to go before xref_offset? Investigate this.
-        //      Reason for the doubt: reading previous xref tables/streams
         let (refs, trailer) = {
             let mut lexer = Lexer::new(backend.read(xref_offset..)?);
             

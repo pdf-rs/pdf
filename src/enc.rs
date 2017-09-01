@@ -94,7 +94,7 @@ macro_rules! parameter {
 fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
     let predictor = parameter!(params, "Predictor", 1);
     let n_components = parameter!(params, "Colors", 1) as usize;
-    let bits_per_component = parameter!(params, "BitsPerComponent", 1);
+    let _bits_per_component = parameter!(params, "BitsPerComponent", 1);
     let columns = parameter!(params, "Columns", 1) as usize;
 
     /* TODO.. the macro should ideally just make a single match

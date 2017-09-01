@@ -1,7 +1,9 @@
-use object::{Object, Ref, FromPrimitive, Resolve, FromDict, PlainRef};
-use primitive::{Primitive, PdfString};
+use object::{Object, Ref, FromPrimitive, Resolve, FromDict};
+use primitive::{Primitive, PdfString, Dictionary};
 use std::io;
 use err::*;
+
+// Pages:
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
@@ -32,9 +34,6 @@ impl FromPrimitive for PagesNode {
 }
 
 
-
-
-/* Dictionary Types */
 
 #[derive(FromDict, Object, Default)]
 pub struct Catalog {
@@ -134,6 +133,135 @@ impl Object for Counter {
         Ok(())
     }
 }
+
+
+
+pub enum NameTreeNode<T> {
+    ///
+    Intermediate (Vec<Ref<NameTree<T>>>),
+    ///
+    Leaf (Vec<(String, T)>)
+
+}
+/// Note: The PDF concept of 'root' node is an intermediate or leaf node which has no 'Limits'
+/// entry. Hence, `limits`
+pub struct NameTree<T> {
+    limits: (PdfString, PdfString),
+    node: NameTreeNode<T>,
+}
+
+impl<T> FromDict for NameTree<T> {
+    fn from_dict(dict: Dictionary, resolve: &Resolve) -> Result<Self> {
+        unimplemented!(); // TODO
+    }
+}
+impl<T> FromPrimitive for NameTree<T> {
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        unimplemented!(); // TODO
+    }
+}
+impl<T> Object for NameTree<T> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        unimplemented!(); // TODO
+    }
+}
+
+
+
+
+/// There is one NameDictionary associated with each PDF file.
+#[derive(Object, FromDict)]
+pub struct NameDictionary {
+    /*
+    #[pdf(key="Dests", opt=true)]
+    ap: NameTree<T>,
+    #[pdf(key="AP", opt=true)]
+    ap: NameTree<T>,
+    #[pdf(key="JavaScript", opt=true)]
+    javascript: NameTree<T>,
+    #[pdf(key="Pages", opt=true)]
+    pages: NameTree<T>,
+    #[pdf(key="Templates", opt=true)]
+    templates: NameTree<T>,
+    #[pdf(key="IDS", opt=true)]
+    ids: NameTree<T>,
+    #[pdf(key="URLS", opt=true)]
+    urls: NameTree<T>,
+    */
+    #[pdf(key="EmbeddedFiles", opt=true)]
+    embedded_files: Option<NameTree<FileSpecification>>,
+    /*
+    #[pdf(key="AlternativePresentations", opt=true)]
+    alternative_presentations: NameTree<T>,
+    #[pdf(key="Renditions", opt=true)]
+    renditions: NameTree<T>,
+    */
+}
+
+/* Embedded file streams can be associated with the document as a whole through
+ * the EmbeddedFiles entry (PDF 1.4) in the PDF document’s name dictionary
+ * (see Section 3.6.3, “Name Dictionary”).
+ * The associated name tree maps name strings to file specifications that refer
+ * to embedded file streams through their EF entries.
+*/
+
+#[derive(Object, FromDict)]
+pub struct FileSpecification {
+    #[pdf(key="EF", opt=true)]
+    ef: Option<Files<EmbeddedFile>>,
+    /*
+    #[pdf(key="RF", opt=true)]
+    rf: Option<Files<RelatedFilesArray>>,
+    */
+}
+
+/// Used only as elements in FileSpecification
+#[derive(Object, FromDict)]
+pub struct Files<T: Object + FromPrimitive> {
+    #[pdf(key="F", opt=true)]
+    f: Option<T>,
+    #[pdf(key="UF", opt=true)]
+    uf: Option<T>,
+    #[pdf(key="DOS", opt=true)]
+    dos: Option<T>,
+    #[pdf(key="Mac", opt=true)]
+    mac: Option<T>,
+    #[pdf(key="Unix", opt=true)]
+    unix: Option<T>,
+}
+
+/// PDF Embedded File Stream.
+#[derive(Object, FromDict)]
+pub struct EmbeddedFile {
+    /*
+    #[pdf(key="Subtype", opt=true)]
+    subtype: Option<String>,
+    */
+    #[pdf(key="Params", opt=true)]
+    params: Option<EmbeddedFileParamDict>,
+}
+
+#[derive(Object, FromDict)]
+pub struct EmbeddedFileParamDict {
+    #[pdf(key="Size", opt=true)]
+    size: Option<i32>,
+    /*
+    // TODO need Date type
+    #[pdf(key="CreationDate", opt=true)]
+    creationdate: T,
+    #[pdf(key="ModDate", opt=true)]
+    moddate: T,
+    #[pdf(key="Mac", opt=true)]
+    mac: T,
+    #[pdf(key="CheckSum", opt=true)]
+    checksum: T,
+    */
+}
+
+
+
+
+
 #[derive(Debug)]
 pub enum StreamFilter {
     AsciiHex,

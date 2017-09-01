@@ -1,10 +1,12 @@
-use primitive::{Primitive, Dictionary, Stream, PdfString};
+//! Traits for Object conversions and serialization with some implementations. References.
+use primitive::{Primitive, Dictionary, Stream};
 use err::{Result, ErrorKind};
 use std::io;
 use std::fmt;
 use std::str;
 use std::marker::PhantomData;
 use types::write_list;
+
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -27,17 +29,22 @@ impl Resolve for NoResolve {
 }
 pub const NO_RESOLVE: &'static Resolve = &NoResolve {} as &Resolve;
 
+/// Can be written as a string representing a PDF Object
 pub trait Object {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
 }
 
-
+/// Can be converted from a Primitive.
 pub trait FromPrimitive: Sized {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self>;
 }
+
+/// Can be converted from a Dictionary.
 pub trait FromDict: Sized {
     fn from_dict(dict: Dictionary, resolve: &Resolve) -> Result<Self>;
 }
+
+/// Can be converted from a Stream.
 pub trait FromStream: Sized {
     fn from_stream(dict: Stream, resolve: &Resolve) -> Result<Self>;
 }
