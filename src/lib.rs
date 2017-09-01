@@ -329,7 +329,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             {
                 use ::pdf::object::FromStream;
                 use ::pdf::err::ResultExt;
-                <#name #ty_generics as FromDict>::from_stream(p.as_stream(r).chain_err(|| stringify!(#name))?, r)
+                <#name #ty_generics as FromStream>::from_stream(p.as_stream(r).chain_err(|| stringify!(#name))?, r)
             }
         }
     }
