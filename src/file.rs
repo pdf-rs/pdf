@@ -31,7 +31,7 @@ impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
 // tail call
 fn find_page<'a>(pages: &'a PageTree, mut offset: i32, page_nr: i32) -> Result<&'a Page> {
     for kid in &pages.kids {
-        println!("{}/{} {:?}", offset, page_nr, kid);
+        // println!("{}/{} {:?}", offset, page_nr, kid);
         match *kid {
             PagesNode::Tree(ref t) => {
                 if offset + t.count < page_nr {
@@ -56,7 +56,7 @@ fn find_page<'a>(pages: &'a PageTree, mut offset: i32, page_nr: i32) -> Result<&
 // tail call to trick borrowck
 fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
     for kid in &mut pages.kids.iter_mut() {
-        println!("{}/{} {:?}", offset, page_nr, kid);
+        // println!("{}/{} {:?}", offset, page_nr, kid);
         match *kid {
             PagesNode::Tree(ref mut t) => {
                 if offset + t.count < page_nr {
@@ -82,7 +82,6 @@ fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page)
 
 /// Because we need a resolve function to parse the trailer before the File has been created.
 fn resolve_helper<B2: Backend>(backend: &B2, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
-    println!("deref({:?})", r); 
     match refs.get(r.id)? {
         XRef::Raw {pos, ..} => {
             let mut lexer = Lexer::new(backend.read(pos..)?);
@@ -134,8 +133,6 @@ impl<B: Backend> File<B> {
                 refs.add_entries_from(section);
             }
             
-            println!("XRefTable: {:?}", refs);
-            println!("Trailer dict: {:?}", trailer);
             let mut prev_trailer = {
                 match trailer.get("Prev") {
                     Some(p) => Some(p.as_integer()?),
@@ -143,8 +140,6 @@ impl<B: Backend> File<B> {
                 }
             };
             while let Some(prev_xref_offset) = prev_trailer {
-                println!("adding previous trailer at {}", prev_xref_offset);
-                
                 let mut lexer = Lexer::new(backend.read(prev_xref_offset as usize..)?);
                 let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
                 
@@ -301,7 +296,6 @@ pub struct XRefStream {
 impl FromStream for XRefStream {
     fn from_stream(stream: Stream, resolve: &Resolve) -> Result<XRefStream> {
         let info = XRefInfo::from_dict(stream.info, resolve)?;
-        println!("XRefInfo: {:?}", info);
         let data = stream.data.to_vec();
         Ok(XRefStream {
             data: data,

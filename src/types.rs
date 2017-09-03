@@ -1,4 +1,4 @@
-use object::{Object, Ref, FromPrimitive, Resolve, FromDict};
+use object::{Object, Ref, FromPrimitive, Resolve, FromDict, FromStream};
 use primitive::{Primitive, PdfString, Dictionary};
 use std::io;
 use err::*;
@@ -38,7 +38,10 @@ impl FromPrimitive for PagesNode {
 #[derive(FromDict, Object, Default)]
 pub struct Catalog {
     #[pdf(key="Pages")]
-    pub pages:  PageTree,
+    pub pages: PageTree,
+
+    #[pdf(key="Names", opt=true)]
+    pub names: Option<NameDictionary>,
     
     //#[pdf(key="Labels")]
     //labels: HashMap<usize, PageLabel>
@@ -140,29 +143,77 @@ pub enum NameTreeNode<T> {
     ///
     Intermediate (Vec<Ref<NameTree<T>>>),
     ///
-    Leaf (Vec<(String, T)>)
+    Leaf (Vec<(PdfString, T)>)
 
 }
 /// Note: The PDF concept of 'root' node is an intermediate or leaf node which has no 'Limits'
 /// entry. Hence, `limits`
 pub struct NameTree<T> {
-    limits: (PdfString, PdfString),
+    limits: Option<(PdfString, PdfString)>,
     node: NameTreeNode<T>,
 }
 
-impl<T> FromDict for NameTree<T> {
-    fn from_dict(dict: Dictionary, resolve: &Resolve) -> Result<Self> {
-        unimplemented!(); // TODO
+impl<T: FromPrimitive> FromDict for NameTree<T> {
+    fn from_dict(mut dict: Dictionary, resolve: &Resolve) -> Result<Self> {
+        // Quite long function...
+        let limits = match dict.remove("Limits") {
+            Some(limits) => {
+                let limits = limits.as_array(resolve)?;
+                if limits.len() != 2 {
+                    bail!("Error reading NameTree: 'Limits' is not of length 2");
+                }
+                let min = limits[0].clone().as_string()?;
+                let max = limits[1].clone().as_string()?;
+
+                Some((min, max))
+            }
+            None => None
+
+        };
+
+        let kids = dict.remove("Kids");
+        let names = dict.remove("Names");
+        // If no `kids`, try `names`. Else there is an error.
+        Ok(match kids {
+            Some(kids) => {
+                let kids = kids.as_array(resolve)?.iter().map(|kid|
+                    Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
+                ).collect::<Result<Vec<_>>>()?;
+                NameTree {
+                    limits: limits,
+                    node: NameTreeNode::Intermediate (kids)
+                }
+            }
+
+            None =>
+                match names {
+                    Some(names) => {
+                        let names = names.as_array(resolve)?;
+                        let mut new_names = Vec::new();
+                        for pair in names.chunks(2) {
+                            let name = pair[0].clone().as_string()?;
+                            let value = T::from_primitive(pair[1].clone(), resolve)?;
+                            new_names.push((name, value));
+                        }
+                        NameTree {
+                            limits: limits,
+                            node: NameTreeNode::Leaf (new_names),
+                        }
+                    }
+                    None => bail!("Neither Kids nor Names present in NameTree node.")
+                }
+        })
+
     }
 }
-impl<T> FromPrimitive for NameTree<T> {
+impl<T: FromPrimitive> FromPrimitive for NameTree<T> {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        unimplemented!(); // TODO
+        NameTree::<T>::from_dict(p.as_dictionary(resolve).chain_err(|| "NameTree<T>")?, resolve)
     }
 }
 impl<T> Object for NameTree<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        unimplemented!(); // TODO
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        unimplemented!();
     }
 }
 
@@ -192,9 +243,9 @@ pub struct NameDictionary {
     embedded_files: Option<NameTree<FileSpecification>>,
     /*
     #[pdf(key="AlternativePresentations", opt=true)]
-    alternative_presentations: NameTree<T>,
+    alternate_presentations: NameTree<AlternatePresentation>,
     #[pdf(key="Renditions", opt=true)]
-    renditions: NameTree<T>,
+    renditions: NameTree<Rendition>,
     */
 }
 
@@ -231,7 +282,7 @@ pub struct Files<T: Object + FromPrimitive> {
 }
 
 /// PDF Embedded File Stream.
-#[derive(Object, FromDict)]
+#[derive(Object, FromStream)]
 pub struct EmbeddedFile {
     /*
     #[pdf(key="Subtype", opt=true)]

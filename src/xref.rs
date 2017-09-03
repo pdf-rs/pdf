@@ -96,10 +96,7 @@ impl XRefTable {
             };
             let dst = &mut self.entries[section.first_id as usize + i];
             if should_be_updated {
-                println!("{}: updating {:?} with {:?}", i, dst, entry);
                 *dst = *entry;
-            } else {
-                println!("{}: not updating {:?} with {:?}", i, dst, entry);
             }
         }
     }

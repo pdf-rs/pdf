@@ -16,7 +16,7 @@ documentation = "https://docs.rs/pdf/0.6.0/pdf/"
 
 [dependencies.pdf_derive]
 # git = "https://github.com/pdf-rs/pdf_derive.git"
-path = "../pdf_derive"
+path = "../derive"
 version = "= 0.1.15"
 
 [dependencies]
