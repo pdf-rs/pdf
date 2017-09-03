@@ -9,11 +9,10 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // for debugging:
-/*
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 
-    /*
+/*
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
@@ -21,7 +20,7 @@ use std::io::Write;
         .unwrap();
     write!(file, "{}", gen);
     */
-*/
+
 
 #[proc_macro_derive(Object, attributes(pdf))]
 pub fn object(input: TokenStream) -> TokenStream {
@@ -308,13 +307,13 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     quote! {
         impl #impl_generics ::pdf::object::FromStream for #name #ty_generics #where_clause {
             fn from_stream(
-                mut dict: ::pdf::primitive::Stream,
+                mut stream: ::pdf::primitive::Stream,
                 r:        &::pdf::object::Resolve
             ) -> ::pdf::err::Result<#name #ty_generics>
             {
                 use ::pdf::object::FromPrimitive;
                 use ::pdf::err::ResultExt;
-                let dict = &stream.info;
+                let mut dict = &mut stream.info;
                 #type_check
                 Ok(#name {
                     #( #parts )*
@@ -333,4 +332,5 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             }
         }
     }
+
 }
