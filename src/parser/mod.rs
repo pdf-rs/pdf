@@ -9,7 +9,7 @@ use primitive::{Primitive, Dictionary, Stream, PdfString};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
 use enc::decode;
 use types::StreamFilter;
-use object::{FromPrimitive, NO_RESOLVE};
+use object::{Object,NO_RESOLVE};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.

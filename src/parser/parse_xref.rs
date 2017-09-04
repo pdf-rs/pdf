@@ -3,7 +3,7 @@ use num_traits::PrimInt;
 use parser::lexer::Lexer;
 use xref::{XRef, XRefSection};
 use file::XRefStream;
-use primitive::Dictionary;
+use primitive::{Primitive, Dictionary};
 use object::*;
 use parser::{parse_with_lexer};
 use parser::parse_object::{parse_indirect_stream};
@@ -51,7 +51,7 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
     let trailer = xref_stream.info.clone();
-    let xref_stream = XRefStream::from_stream(xref_stream, resolve)?;
+    let xref_stream = XRefStream::from_primitive(Primitive::Stream(xref_stream), resolve)?;
 
 
     let width = &xref_stream.info.w;

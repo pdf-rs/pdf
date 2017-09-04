@@ -3,7 +3,7 @@ use err::*;
 use std::collections::hash_map;
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
-use object::{PlainRef, Resolve, FromPrimitive, Object};
+use object::{PlainRef, Resolve, Object};
 use chrono::{DateTime, FixedOffset};
 
 
@@ -86,6 +86,20 @@ impl Object for Stream {
         out.write(&self.data)?;
         writeln!(out, "\nendstream")
     }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        p.as_stream(resolve)
+    }
+}
+
+
+
+macro_rules! unexpected_primitive {
+    ($expected:ident, $found:expr) => (
+        Err(ErrorKind::UnexpectedPrimitive {
+            expected: stringify!($expected),
+            found: $found
+        }.into())
+    )
 }
 
 /// Primitive String type.
@@ -120,6 +134,12 @@ impl Object for PdfString {
         }
         Ok(())
     }
+    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+        match p {
+            Primitive::String (string) => Ok(string),
+            _ => unexpected_primitive!(String, p.get_debug_name()),
+        }
+    }
 }
 
 impl PdfString {
@@ -142,14 +162,6 @@ impl PdfString {
     }
 }
 
-macro_rules! unexpected_primitive {
-    ($expected:ident, $found:expr) => (
-        Err(ErrorKind::UnexpectedPrimitive {
-            expected: stringify!($expected),
-            found: $found
-        }.into())
-    )
-}
 
 impl Primitive {
     /// For debugging / error messages: get the name of the variant
@@ -168,16 +180,22 @@ impl Primitive {
         }
     }
     pub fn as_integer(&self) -> Result<i32> {
-        match self {
-            &Primitive::Integer(n) => Ok(n),
-            p => unexpected_primitive!(Integer, p.get_debug_name())
+        match *self {
+            Primitive::Integer(n) => Ok(n),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
     pub fn as_number(&self) -> Result<f32> {
-        match self {
-            &Primitive::Integer(n) => Ok(n as f32),
-            &Primitive::Number(f) => Ok(f),
-            p => unexpected_primitive!(Number, p.get_debug_name())
+        match *self {
+            Primitive::Integer(n) => Ok(n as f32),
+            Primitive::Number(f) => Ok(f),
+            ref p => unexpected_primitive!(Number, p.get_debug_name())
+        }
+    }
+    pub fn as_bool(&self) -> Result<bool> {
+        match *self {
+            Primitive::Boolean (b) => Ok(b),
+            ref p => unexpected_primitive!(Number, p.get_debug_name())
         }
     }
     pub fn as_reference(self) -> Result<PlainRef> {
@@ -222,31 +240,13 @@ impl Primitive {
 }
 
 
-
-impl FromPrimitive for String {
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        Ok(p.as_name()?)
+impl<T: Object> Object for Option<T> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        // TODO: the Option here is most often or always about whether the entry exists in a
+        // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
+        // handle Options. 
+        unimplemented!();
     }
-}
-
-impl<T: FromPrimitive> FromPrimitive for Vec<T> {
-    /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        Ok(
-        match p {
-            Primitive::Array(_) => {
-                p.as_array(r)?
-                    .into_iter()
-                    .map(|p| T::from_primitive(p, r))
-                    .collect::<Result<Vec<T>>>()?
-            }
-            _ => vec![T::from_primitive(p, r)?]
-        }
-        )
-    }
-}
-
-impl<T: FromPrimitive> FromPrimitive for Option<T> {
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
         Ok(
         match p {
@@ -263,7 +263,11 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-impl FromPrimitive for DateTime<FixedOffset> {
+impl Object for DateTime<FixedOffset> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        // TODO: smal/avg amount of work.
+        unimplemented!();
+    }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
@@ -302,25 +306,3 @@ impl FromPrimitive for DateTime<FixedOffset> {
     }
 }
 
-impl FromPrimitive for PdfString {
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        match p {
-            Primitive::String (string) => Ok(string),
-            _ => unexpected_primitive!(String, p.get_debug_name()),
-        }
-    }
-}
-
-impl FromPrimitive for i32 {
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        p.as_integer()
-    }
-}
-
-
-// FromPrimitive for inner values of Primitive variants - target for macro rules?
-impl FromPrimitive for Dictionary {
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        p.as_dictionary(r)
-    }
-}

@@ -1,5 +1,5 @@
-use object::{Object, Ref, FromPrimitive, Resolve, FromDict, FromStream};
-use primitive::{Primitive, PdfString, Dictionary};
+use object::{Object, Ref, Resolve};
+use primitive::{Primitive, PdfString};
 use std::io;
 use err::*;
 
@@ -18,15 +18,12 @@ impl Object for PagesNode {
             PagesNode::Leaf (ref l) => l.serialize(out),
         }
     }
-}
-
-impl FromPrimitive for PagesNode {
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
         let dict = p.as_dictionary(r)?;
         Ok(
         match dict["Type"].clone().as_name()?.as_str() {
-            "Page" => PagesNode::Leaf (Page::from_dict(dict, r)?),
-            "Pages" => PagesNode::Tree (PageTree::from_dict(dict, r)?),
+            "Page" => PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?), // TODO: maybe a bit silly from_primitive(Primitive::Dictionary) - provide more direct function?
+            "Pages" => PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?),
             other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
         )
@@ -34,8 +31,7 @@ impl FromPrimitive for PagesNode {
 }
 
 
-
-#[derive(FromDict, Object, Default)]
+#[derive(Object, Default)]
 pub struct Catalog {
     #[pdf(key="Pages")]
     pub pages: PageTree,
@@ -50,7 +46,7 @@ pub struct Catalog {
 
 
 
-#[derive(Object, FromDict, Debug, Default)]
+#[derive(Object, Debug, Default)]
 #[pdf(Type = "Pages")]
 pub struct PageTree {
     #[pdf(key="Parent", opt=true)]
@@ -73,7 +69,7 @@ impl PageTree {
     }
 }
 
-#[derive(Object, FromDict, Debug)]
+#[derive(Object, Debug)]
 pub struct Page {
     #[pdf(key="Parent", opt=false)]
     pub parent: Ref<PageTree>,
@@ -135,6 +131,9 @@ impl Object for Counter {
         out.write(style_code.as_bytes())?;
         Ok(())
     }
+    fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
+        unimplemented!();
+    }
 }
 
 
@@ -153,8 +152,12 @@ pub struct NameTree<T> {
     node: NameTreeNode<T>,
 }
 
-impl<T: FromPrimitive> FromDict for NameTree<T> {
-    fn from_dict(mut dict: Dictionary, resolve: &Resolve) -> Result<Self> {
+impl<T: Object> Object for NameTree<T> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        let mut dict = p.as_dictionary(resolve).chain_err(|| "NameTree<T>")?;
         // Quite long function...
         let limits = match dict.remove("Limits") {
             Some(limits) => {
@@ -203,17 +206,6 @@ impl<T: FromPrimitive> FromDict for NameTree<T> {
                     None => bail!("Neither Kids nor Names present in NameTree node.")
                 }
         })
-
-    }
-}
-impl<T: FromPrimitive> FromPrimitive for NameTree<T> {
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        NameTree::<T>::from_dict(p.as_dictionary(resolve).chain_err(|| "NameTree<T>")?, resolve)
-    }
-}
-impl<T> Object for NameTree<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
-        unimplemented!();
     }
 }
 
@@ -221,7 +213,7 @@ impl<T> Object for NameTree<T> {
 
 
 /// There is one NameDictionary associated with each PDF file.
-#[derive(Object, FromDict)]
+#[derive(Object)]
 pub struct NameDictionary {
     /*
     #[pdf(key="Dests", opt=true)]
@@ -256,7 +248,7 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object, FromDict)]
+#[derive(Object)]
 pub struct FileSpecification {
     #[pdf(key="EF", opt=true)]
     ef: Option<Files<EmbeddedFile>>,
@@ -267,8 +259,8 @@ pub struct FileSpecification {
 }
 
 /// Used only as elements in FileSpecification
-#[derive(Object, FromDict)]
-pub struct Files<T: Object + FromPrimitive> {
+#[derive(Object)]
+pub struct Files<T: Object> {
     #[pdf(key="F", opt=true)]
     f: Option<T>,
     #[pdf(key="UF", opt=true)]
@@ -282,7 +274,7 @@ pub struct Files<T: Object + FromPrimitive> {
 }
 
 /// PDF Embedded File Stream.
-#[derive(Object, FromStream)]
+#[derive(Object)]
 pub struct EmbeddedFile {
     /*
     #[pdf(key="Subtype", opt=true)]
@@ -292,7 +284,7 @@ pub struct EmbeddedFile {
     params: Option<EmbeddedFileParamDict>,
 }
 
-#[derive(Object, FromDict)]
+#[derive(Object)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size", opt=true)]
     size: Option<i32>,
@@ -332,8 +324,6 @@ impl Object for StreamFilter {
         };
         write!(out, "{}", s)
     }
-}
-impl FromPrimitive for StreamFilter {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         match &p.as_name()? as &str {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
@@ -346,9 +336,8 @@ impl FromPrimitive for StreamFilter {
     }
 }
 
-
-pub fn write_list<W, T, I>(out: &mut W, mut iter: I) -> io::Result<()>
-    where W: io::Write, T: Object, I: Iterator<Item=T>
+pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
+    where W: io::Write, T: Object, I: Iterator<Item=&'a T>
 {
     write!(out, "[")?;
     
@@ -377,7 +366,10 @@ pub struct Rect {
     pub top:    f32,
     pub bottom: f32
 }
-impl FromPrimitive for Rect {
+impl Object for Rect {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
+    }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
         let arr = p.as_array(r)?;
         if arr.len() != 4 {
@@ -389,10 +381,5 @@ impl FromPrimitive for Rect {
             top:    arr[2].as_number()?,
             bottom: arr[3].as_number()?
         })
-    }
-}
-impl Object for Rect {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
     }
 }

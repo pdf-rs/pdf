@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use object::{Object, FromStream, FromDict, Resolve, FromPrimitive, ObjNr, PlainRef};
+use object::{Object, Resolve, ObjNr, PlainRef};
 use primitive::{Stream, Primitive, Dictionary};
 use types::StreamFilter;
 use err::*;
@@ -7,7 +7,7 @@ use parser::lexer::Lexer;
 use backend::Backend;
 use file::File;
 
-#[derive(Object, FromDict)]
+#[derive(Object)]
 pub struct StreamInfo {
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
@@ -20,9 +20,10 @@ pub struct StreamInfo {
 }
 
 
+/// The type-safe version of `Stream`.
 pub struct GeneralStream {
-    pub data:       Vec<u8>,
-    pub info:       StreamInfo
+    pub info:       StreamInfo,
+    pub data:       Vec<u8>
 }
 impl GeneralStream {
     pub fn empty(ty: &str) -> GeneralStream {
@@ -44,8 +45,17 @@ impl Object for GeneralStream {
         out.write(b"\nendstream\n")?;
         Ok(())
     }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        let stream = p.as_stream(resolve)?;
+        Ok(GeneralStream {
+            info: StreamInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?,
+            data: stream.data,
+        })
+    }
 }
 
+// TODO (small task) use from_primitive from Object instead
+/*
 impl FromStream for GeneralStream {
     fn from_stream(stream: Stream, resolve: &Resolve) -> Result<GeneralStream> {
         let info = StreamInfo::from_dict(stream.info, resolve)?;
@@ -57,6 +67,7 @@ impl FromStream for GeneralStream {
         })
     }
 }
+*/
 
 /*
 pub struct DecodeParams {
@@ -70,7 +81,7 @@ impl DecodeParams {
 }
 */
 
-#[derive(Object, FromDict, Default)]
+#[derive(Object, Default)]
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
     // Normal Stream fields - added as fields are added to Stream
@@ -110,6 +121,27 @@ impl Object for ObjectStream {
         out.write(&self.data)?;
         out.write(b"\nendstream\n")?;
         Ok(())
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<ObjectStream> {
+        let stream = p.as_stream(resolve)?;
+        let info = ObjStmInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?;
+        let data = stream.data.to_vec();
+
+        let mut offsets = Vec::new();
+        {
+            let mut lexer = Lexer::new(&data);
+            for _ in 0..(info.num_objects as ObjNr) {
+                let _obj_nr = lexer.next()?.to::<ObjNr>()?;
+                let offset = lexer.next()?.to::<usize>()?;
+                offsets.push(offset);
+            }
+        }
+        Ok(ObjectStream {
+            data: data,
+            info: info,
+            offsets: offsets,
+            id: 0, // TODO
+        })
     }
 }
 
@@ -173,34 +205,5 @@ impl Into<Primitive> for ObjectStream {
             info: info,
             data: data
         })
-    }
-}
-
-impl FromStream for ObjectStream {
-    fn from_stream(stream: Stream, resolve: &Resolve) -> Result<Self> {
-        let info = ObjStmInfo::from_dict(stream.info, resolve)?;
-        let data = stream.data.to_vec();
-
-        let mut offsets = Vec::new();
-        {
-            let mut lexer = Lexer::new(&data);
-            for _ in 0..(info.num_objects as ObjNr) {
-                let _obj_nr = lexer.next()?.to::<ObjNr>()?;
-                let offset = lexer.next()?.to::<usize>()?;
-                offsets.push(offset);
-            }
-        }
-        Ok(ObjectStream {
-            data: data,
-            info: info,
-            offsets: offsets,
-            id: 0, // TODO
-        })
-    }
-}
-
-impl FromPrimitive for ObjectStream {
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<ObjectStream> {
-        ObjectStream::from_stream(p.as_stream(r)?, r)
     }
 }

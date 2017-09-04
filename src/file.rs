@@ -1,11 +1,11 @@
-use std::str;
+use std::{str, io};
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use err::*;
 use object::*;
 use types::*;
 use xref::{XRef, XRefTable};
-use primitive::{Primitive, Stream, Dictionary, PdfString};
+use primitive::{Primitive, Dictionary, PdfString};
 use backend::Backend;
 use parser::parse;
 use parser::parse_object::parse_indirect_object;
@@ -156,7 +156,7 @@ impl<B: Backend> File<B> {
             }
             (refs, trailer)
         };
-        let trailer = Trailer::from_dict(trailer, &|r| resolve_helper(&backend, &refs, r))?;
+        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| resolve_helper(&backend, &refs, r))?;
         
         Ok(File {
             backend:    backend,
@@ -177,7 +177,7 @@ impl<B: Backend> File<B> {
         }
     }
 
-    pub fn deref<T: FromPrimitive>(&self, r: Ref<T>) -> Result<T> {
+    pub fn deref<T: Object>(&self, r: Ref<T>) -> Result<T> {
         let primitive = self.resolve(r.get_inner())?;
         T::from_primitive(primitive, &|id| self.resolve(id))
     }
@@ -242,7 +242,7 @@ fn locate_xref_offset(data: &[u8]) -> Result<usize> {
     Ok(lexer.next()?.to::<usize>()?)
 }
 
-#[derive(Object, FromDict, Default)]
+#[derive(Object, Default)]
 #[pdf(Type=false)]
 pub struct Trailer {
     #[pdf(key = "Size")]
@@ -265,7 +265,7 @@ pub struct Trailer {
     // TODO ^ Vec<u8> is a String type. Maybe make a wrapper for that
 }
 
-#[derive(Object, FromDict, Debug)]
+#[derive(Object, Debug)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
     // Normal Stream fields
@@ -293,9 +293,13 @@ pub struct XRefStream {
     pub info: XRefInfo,
 }
 
-impl FromStream for XRefStream {
-    fn from_stream(stream: Stream, resolve: &Resolve) -> Result<XRefStream> {
-        let info = XRefInfo::from_dict(stream.info, resolve)?;
+impl Object for XRefStream {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        let stream = p.as_stream(resolve)?;
+        let info = XRefInfo::from_primitive(Primitive::Dictionary (stream.info), resolve)?;
         let data = stream.data.to_vec();
         Ok(XRefStream {
             data: data,
@@ -303,4 +307,3 @@ impl FromStream for XRefStream {
         })
     }
 }
-

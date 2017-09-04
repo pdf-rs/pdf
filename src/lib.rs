@@ -3,6 +3,7 @@
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
+#![allow(unused_doc_comment)]
 #[macro_use]
 extern crate pdf_derive;
 #[macro_use]
