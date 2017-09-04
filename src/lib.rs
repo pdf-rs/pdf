@@ -9,8 +9,10 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // for debugging:
+/*
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+*/
 
 /*
     let mut file = OpenOptions::new()
@@ -19,7 +21,7 @@ use std::io::Write;
         .open("/tmp/proj/src/main.rs")
         .unwrap();
     write!(file, "{}", gen);
-    */
+*/
 
 
 #[proc_macro_derive(Object, attributes(pdf))]
@@ -233,7 +235,6 @@ fn impl_parts(fields: &[Field]) -> Vec<quote::Tokens> {
 
 fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
     let name = &ast.ident;
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
     
     let fields = match ast.body {
@@ -251,13 +252,13 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
-            assert_eq!(result_p?.as_name().chain_err(|| "Type")?, #type_name);
+            assert_eq!(result_p?.to_name().chain_err(|| "Type")?, #type_name);
         },
         None => quote! {}
     };
     quote! {
         use ::pdf::err::ResultExt;
-        let mut dict = p.as_dictionary(resolve).chain_err(|| stringify!(#name))?;
+        let mut dict = p.to_dictionary(resolve).chain_err(|| stringify!(#name))?;
         #type_check
         Ok(#name {
             #( #parts )*
@@ -268,7 +269,6 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
 
 fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
     let name = &ast.ident;
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
     
     let fields = match ast.body {
@@ -285,13 +285,13 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
             let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
                 ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
             );
-            assert_eq!(result_p?.as_name().chain_err(|| "Type")?, #type_name);
+            assert_eq!(result_p?.to_name().chain_err(|| "Type")?, #type_name);
         },
         None => quote! {}
     };
     quote! {
         use ::pdf::err::ResultExt;
-        let mut dict = p.as_stream(resolve).chain_err(|| stringify!(#name))?.info;
+        let mut dict = p.to_stream(resolve).chain_err(|| stringify!(#name))?.info;
         #type_check
         Ok(#name {
             #( #parts )*
