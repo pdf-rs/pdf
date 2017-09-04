@@ -50,13 +50,14 @@ impl Object for PlainRef {
         write!(out, "{} {} R", self.id, self.gen)
     }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        p.as_reference()
+        p.to_reference()
     }
 }
 
 
 /* Ref<T> */
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
+#[derive(Copy,Clone)]
 pub struct Ref<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
@@ -83,17 +84,10 @@ impl<T: Object> Object for Ref<T> {
         self.inner.serialize(out)
     }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        Ok(Ref::new(p.as_reference()?))
+        Ok(Ref::new(p.to_reference()?))
     }
 }
 
-impl<T> Copy for Ref<T> { }
-
-impl<T> Clone for Ref<T> {
-    fn clone(&self) -> Ref<T> {
-        *self
-    }
-}
 impl<T> fmt::Debug for Ref<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Ref({})", self.inner.id)
@@ -149,7 +143,7 @@ impl Object for Dictionary {
         write!(out, ">>")
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        p.as_dictionary(r)
+        p.to_dictionary(r)
     }
 }
 /*
@@ -172,7 +166,7 @@ impl Object for String {
         Ok(())
     }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        Ok(p.as_name()?)
+        Ok(p.to_name()?)
     }
 }
 
@@ -185,7 +179,7 @@ impl<T: Object> Object for Vec<T> {
         Ok(
         match p {
             Primitive::Array(_) => {
-                p.as_array(r)?
+                p.to_array(r)?
                     .into_iter()
                     .map(|p| T::from_primitive(p, r))
                     .collect::<Result<Vec<T>>>()?

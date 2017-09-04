@@ -41,14 +41,14 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
         let i = width - 1 - i; // (width, 0]
         let c: u8 = data[0];
         *data = &data[1..]; // Consume byte
-        result += c as u64 * 256.pow(i as u32);
+        result += u64::from(c) * 256.pow(i as u32);
     }
     result
 }
 
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
     let trailer = xref_stream.info.clone();
     let xref_stream = XRefStream::from_primitive(Primitive::Stream(xref_stream), resolve)?;
@@ -64,7 +64,7 @@ pub fn parse_xref_stream_and_trailer<'a>(lexer: &mut Lexer, resolve: &Resolve) -
 
     let mut sections = Vec::new();
     for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {
-        let section = parse_xref_section_from_stream(first_id, num_objects, &width, &mut data_left)?;
+        let section = parse_xref_section_from_stream(first_id, num_objects, width, &mut data_left)?;
         sections.push(section);
     }
 
@@ -100,7 +100,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Res
     // Read trailer
     lexer.next_expect("trailer")?;
     let trailer = parse_with_lexer(lexer)?;
-    let trailer = trailer.as_dictionary(resolve)?;
+    let trailer = trailer.to_dictionary(resolve)?;
  
     Ok((sections, trailer))
 }

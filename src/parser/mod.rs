@@ -54,7 +54,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
             let content = match dict.get("Filter") {
                 Some(filter) => {
                     let params = match dict.get("DecodeParms") {
-                        Some(params) => Some(params.clone().as_dictionary(NO_RESOLVE)?),
+                        Some(params) => Some(params.clone().to_dictionary(NO_RESOLVE)?),
                         None => None,
                     };
                     match *filter {
@@ -212,7 +212,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
             // Uncompress/decode if there is a filter
             let content = match dict.get("Filter") {
                 Some(filter) => {
-                    let params = dict.get("DecodeParms").map(|x| x.clone().as_dictionary(NO_RESOLVE));
+                    let params = dict.get("DecodeParms").map(|x| x.clone().to_dictionary(NO_RESOLVE));
                     let params = match params {
                         Some(result) => Some(result?),
                         None => None,

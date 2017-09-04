@@ -298,7 +298,7 @@ impl Object for XRefStream {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let stream = p.as_stream(resolve)?;
+        let stream = p.to_stream(resolve)?;
         let info = XRefInfo::from_primitive(Primitive::Dictionary (stream.info), resolve)?;
         let data = stream.data.to_vec();
         Ok(XRefStream {

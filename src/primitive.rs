@@ -47,7 +47,7 @@ impl Dictionary {
 impl fmt::Debug for Dictionary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{{")?;
-        for (ref k, ref v) in self {
+        for (k, v) in self {
             writeln!(f, "{:>15}: {:?}", k, v)?;
         }
         write!(f, "}}")
@@ -83,11 +83,11 @@ impl Object for Stream {
         writeln!(out, ">>")?;
         
         writeln!(out, "stream")?;
-        out.write(&self.data)?;
+        out.write_all(&self.data)?;
         writeln!(out, "\nendstream")
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        p.as_stream(resolve)
+        p.to_stream(resolve)
     }
 }
 
@@ -198,42 +198,42 @@ impl Primitive {
             ref p => unexpected_primitive!(Number, p.get_debug_name())
         }
     }
-    pub fn as_reference(self) -> Result<PlainRef> {
+    pub fn to_reference(self) -> Result<PlainRef> {
         match self {
             Primitive::Reference(id) => Ok(id),
             p => unexpected_primitive!(Reference, p.get_debug_name())
         }
     }
-    pub fn as_array(self, r: &Resolve) -> Result<Vec<Primitive>> {
+    pub fn to_array(self, r: &Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
-            Primitive::Reference(id) => r.resolve(id)?.as_array(r),
+            Primitive::Reference(id) => r.resolve(id)?.to_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    pub fn as_dictionary(self, r: &Resolve) -> Result<Dictionary> {
+    pub fn to_dictionary(self, r: &Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
-            Primitive::Reference(id) => r.resolve(id)?.as_dictionary(r),
+            Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
-    pub fn as_name(self) -> Result<String> {
+    pub fn to_name(self) -> Result<String> {
         match self {
             Primitive::Name(name) => Ok(name),
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
-    pub fn as_string(self) -> Result<PdfString> {
+    pub fn to_string(self) -> Result<PdfString> {
         match self {
             Primitive::String(data) => Ok(data),
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
-    pub fn as_stream(self, r: &Resolve) -> Result<Stream> {
+    pub fn to_stream(self, r: &Resolve) -> Result<Stream> {
         match self {
             Primitive::Stream (s) => Ok(s),
-            Primitive::Reference (id) => r.resolve(id)?.as_stream(r),
+            Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
             p => unexpected_primitive!(Stream, p.get_debug_name())
         }
     }

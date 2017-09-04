@@ -19,9 +19,9 @@ impl Object for PagesNode {
         }
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
-        let dict = p.as_dictionary(r)?;
+        let dict = p.to_dictionary(r)?;
         Ok(
-        match dict["Type"].clone().as_name()?.as_str() {
+        match dict["Type"].clone().to_name()?.as_str() {
             "Page" => PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?), // TODO: maybe a bit silly from_primitive(Primitive::Dictionary) - provide more direct function?
             "Pages" => PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?),
             other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
@@ -128,7 +128,7 @@ impl Object for Counter {
             Counter::AlphaLower => "a",
             Counter::AlphaUpper => "A"
         };
-        out.write(style_code.as_bytes())?;
+        out.write_all(style_code.as_bytes())?;
         Ok(())
     }
     fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
@@ -157,16 +157,16 @@ impl<T: Object> Object for NameTree<T> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let mut dict = p.as_dictionary(resolve).chain_err(|| "NameTree<T>")?;
+        let mut dict = p.to_dictionary(resolve).chain_err(|| "NameTree<T>")?;
         // Quite long function...
         let limits = match dict.remove("Limits") {
             Some(limits) => {
-                let limits = limits.as_array(resolve)?;
+                let limits = limits.to_array(resolve)?;
                 if limits.len() != 2 {
                     bail!("Error reading NameTree: 'Limits' is not of length 2");
                 }
-                let min = limits[0].clone().as_string()?;
-                let max = limits[1].clone().as_string()?;
+                let min = limits[0].clone().to_string()?;
+                let max = limits[1].clone().to_string()?;
 
                 Some((min, max))
             }
@@ -179,7 +179,7 @@ impl<T: Object> Object for NameTree<T> {
         // If no `kids`, try `names`. Else there is an error.
         Ok(match kids {
             Some(kids) => {
-                let kids = kids.as_array(resolve)?.iter().map(|kid|
+                let kids = kids.to_array(resolve)?.iter().map(|kid|
                     Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
                 ).collect::<Result<Vec<_>>>()?;
                 NameTree {
@@ -191,10 +191,10 @@ impl<T: Object> Object for NameTree<T> {
             None =>
                 match names {
                     Some(names) => {
-                        let names = names.as_array(resolve)?;
+                        let names = names.to_array(resolve)?;
                         let mut new_names = Vec::new();
                         for pair in names.chunks(2) {
-                            let name = pair[0].clone().as_string()?;
+                            let name = pair[0].clone().to_string()?;
                             let value = T::from_primitive(pair[1].clone(), resolve)?;
                             new_names.push((name, value));
                         }
@@ -212,7 +212,7 @@ impl<T: Object> Object for NameTree<T> {
 
 
 
-/// There is one NameDictionary associated with each PDF file.
+/// There is one `NameDictionary` associated with each PDF file.
 #[derive(Object)]
 pub struct NameDictionary {
     /*
@@ -258,7 +258,7 @@ pub struct FileSpecification {
     */
 }
 
-/// Used only as elements in FileSpecification
+/// Used only as elements in `FileSpecification`
 #[derive(Object)]
 pub struct Files<T: Object> {
     #[pdf(key="F", opt=true)]
@@ -315,17 +315,17 @@ pub enum StreamFilter {
 }
 impl Object for StreamFilter {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        let s = match self {
-            &StreamFilter::AsciiHex => "/ASCIIHexDecode",
-            &StreamFilter::Ascii85 => "/ASCII85Decode",
-            &StreamFilter::Lzw => "/LZWDecode",
-            &StreamFilter::Flate => "/FlateDecode",
-            &StreamFilter::Jpeg2k => "/JPXDecode"
+        let s = match *self {
+            StreamFilter::AsciiHex => "/ASCIIHexDecode",
+            StreamFilter::Ascii85 => "/ASCII85Decode",
+            StreamFilter::Lzw => "/LZWDecode",
+            StreamFilter::Flate => "/FlateDecode",
+            StreamFilter::Jpeg2k => "/JPXDecode"
         };
         write!(out, "{}", s)
     }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        match &p.as_name()? as &str {
+        match &p.to_name()? as &str {
             "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
             "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
             "LZWDecode"         => Ok(StreamFilter::Lzw),
@@ -345,7 +345,7 @@ pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
         first.serialize(out)?;
         
         for other in iter {
-            out.write(b", ")?;
+            out.write_all(b", ")?;
             other.serialize(out)?;
         }
     }
@@ -371,7 +371,7 @@ impl Object for Rect {
         write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        let arr = p.as_array(r)?;
+        let arr = p.to_array(r)?;
         if arr.len() != 4 {
             bail!("len != 4");
         }

@@ -40,13 +40,13 @@ impl Object for GeneralStream {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         self.info.serialize(out)?;
         
-        out.write(b"stream\n")?;
-        out.write(&self.data)?;
-        out.write(b"\nendstream\n")?;
+        out.write_all(b"stream\n")?;
+        out.write_all(&self.data)?;
+        out.write_all(b"\nendstream\n")?;
         Ok(())
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let stream = p.as_stream(resolve)?;
+        let stream = p.to_stream(resolve)?;
         Ok(GeneralStream {
             info: StreamInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?,
             data: stream.data,
@@ -117,13 +117,13 @@ impl Object for ObjectStream {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         self.info.serialize(out)?;
         
-        out.write(b"stream\n")?;
-        out.write(&self.data)?;
-        out.write(b"\nendstream\n")?;
+        out.write_all(b"stream\n")?;
+        out.write_all(&self.data)?;
+        out.write_all(b"\nendstream\n")?;
         Ok(())
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<ObjectStream> {
-        let stream = p.as_stream(resolve)?;
+        let stream = p.to_stream(resolve)?;
         let info = ObjStmInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?;
         let data = stream.data.to_vec();
 

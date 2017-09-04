@@ -77,6 +77,9 @@ impl XRefTable {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
     pub fn push(&mut self, new_entry: XRef) {
         self.entries.push(new_entry);
     }
@@ -87,11 +90,11 @@ impl XRefTable {
     pub fn add_entries_from(&mut self, section: XRefSection) {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
-            let should_be_updated = match *self.entries.get(i).unwrap() {
+            let should_be_updated = match self.entries[i] {
                 XRef::Raw { gen_nr: gen, .. } |
                 XRef::Free { gen_nr: gen, .. } => entry.get_gen_nr() > gen,
-                XRef::Stream { .. } => true,
-                XRef::Invalid => true,
+                XRef::Stream { .. }
+                | XRef::Invalid => true,
                 x => panic!("found {:?}", x)
             };
             let dst = &mut self.entries[section.first_id as usize + i];
