@@ -129,7 +129,7 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
         (field.ident.clone(), key, opt)
     }).collect();
     
-    // serialize()
+    // Implement serialize()
     let fields_ser = parts.iter()
     .map( |&(ref field, ref key, opt)|
          if opt {
@@ -156,11 +156,19 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
         None => quote! {}
     };
 
-    // from_primitive()
+    // Implement from_primitive()
     let from_primitive_code = match attrs.is_stream {
         false => impl_from_dict(&ast),
         true => impl_from_stream(&ast),
     };
+
+    // Implement view()
+    let fields_view = parts.iter()
+    .map( |&(ref field, ref key, opt)| {
+        quote! {
+            viewer.attr(#key, |viewer| self.#field.view(viewer));
+        }
+    });
 
     quote! {
         impl #impl_generics ::pdf::object::Object for #name #ty_generics #where_clause {
@@ -173,6 +181,9 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
             }
             fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
                 #from_primitive_code
+            }
+            fn view<V: Viewer>(&self, viewer: &mut V) {
+                #(#fields_view)*
             }
 
         }
