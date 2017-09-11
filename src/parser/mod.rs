@@ -1,7 +1,11 @@
 //! Basic functionality for parsing a PDF file.
-pub mod lexer;
-pub mod parse_object;
-pub mod parse_xref;
+mod lexer;
+mod parse_object;
+mod parse_xref;
+
+pub use self::lexer::*;
+pub use self::parse_object::*;
+pub use self::parse_xref::*;
 
 use err::*;
 use self::lexer::{Lexer, StringLexer};

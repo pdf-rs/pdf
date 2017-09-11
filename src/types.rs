@@ -1,7 +1,8 @@
-use object::{Object, Ref, Resolve};
+use object::{Object, Ref, Resolve, Viewer};
 use primitive::{Primitive, PdfString};
 use std::io;
 use err::*;
+
 
 // Pages:
 
@@ -22,11 +23,21 @@ impl Object for PagesNode {
         let dict = p.to_dictionary(r)?;
         Ok(
         match dict["Type"].clone().to_name()?.as_str() {
-            "Page" => PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?), // TODO: maybe a bit silly from_primitive(Primitive::Dictionary) - provide more direct function?
+            "Page" => PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?),
             "Pages" => PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?),
             other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
         )
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        match *self {
+            PagesNode::Tree (ref tree) => {
+                tree.view(viewer)
+            }
+            PagesNode::Leaf (ref page) => {
+                page.view(viewer)
+            }
+        }
     }
 }
 
@@ -134,6 +145,9 @@ impl Object for Counter {
     fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
         unimplemented!();
     }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        // unimplemented!();
+    }
 }
 
 
@@ -206,6 +220,9 @@ impl<T: Object> Object for NameTree<T> {
                     None => bail!("Neither Kids nor Names present in NameTree node.")
                 }
         })
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        // unimplemented!();
     }
 }
 
@@ -334,6 +351,9 @@ impl Object for StreamFilter {
             _                   => Err("Filter not recognized".into()),
         }
     }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        // unimplemented!();
+    }
 }
 
 pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
@@ -381,5 +401,8 @@ impl Object for Rect {
             top:    arr[2].as_number()?,
             bottom: arr[3].as_number()?
         })
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("Rect{{{},{} to {},{}}}", self.left, self.bottom, self.right, self.top).as_str());
     }
 }

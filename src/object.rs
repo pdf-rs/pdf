@@ -35,6 +35,24 @@ pub trait Object: Sized {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self>;
+    /// Give viewing information to external viewer
+    fn view<V: Viewer>(&self, viewer: &mut V);
+}
+
+/// Used for external viewers
+pub trait Viewer {
+    /// Used for leaf nodes primarily
+    fn text(&mut self, &str);
+    fn attr<F: Fn(&mut Self)>(&mut self, name: &str, view: F);
+
+    fn object<F: Fn(&mut Self)>(&mut self, view: F) {
+        view(self);
+        // TODO..
+        // what is the point when instead of
+        // viewer.object(|viewer| myobj.view(viewer))
+        // we can do
+        // myobj.view(viewer)
+    }
 }
 
 
@@ -51,6 +69,9 @@ impl Object for PlainRef {
     }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         p.to_reference()
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("Ref {{id: {}, gen: {}}}", self.id, self.gen).as_str());
     }
 }
 
@@ -86,6 +107,9 @@ impl<T: Object> Object for Ref<T> {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         Ok(Ref::new(p.to_reference()?))
     }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("Ref {{id: {}, gen: {}}}", self.inner.id, self.inner.gen).as_str());
+    }
 }
 
 impl<T> fmt::Debug for Ref<T> {
@@ -108,6 +132,9 @@ impl Object for i32 {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         p.as_integer()
     }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("{}", self).as_str());
+    }
 }
 impl Object for usize {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
@@ -115,6 +142,9 @@ impl Object for usize {
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
         Ok(i32::from_primitive(p, r)? as usize)
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("{}", self).as_str());
     }
 }
 impl Object for f32 {
@@ -124,6 +154,9 @@ impl Object for f32 {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         p.as_number()
     }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("{}", self).as_str());
+    }
 }
 impl Object for bool {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
@@ -131,6 +164,9 @@ impl Object for bool {
     }
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         p.as_bool()
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(format!("{}", self).as_str());
     }
 }
 impl Object for Dictionary {
@@ -144,6 +180,11 @@ impl Object for Dictionary {
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
         p.to_dictionary(r)
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        for (key, prim) in self.iter() {
+            viewer.attr(key.as_str(), |viewer| prim.view(viewer));
+        }
     }
 }
 /*
@@ -168,6 +209,9 @@ impl Object for String {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         Ok(p.to_name()?)
     }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        viewer.text(self);
+    }
 }
 
 impl<T: Object> Object for Vec<T> {
@@ -188,18 +232,12 @@ impl<T: Object> Object for Vec<T> {
         }
         )
     }
-}
-
-/*
-impl<'a, T: Object> Object for &'a [T] {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write_list(out, self.iter())
-    }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        for elem in self.iter() {
+            elem.view(viewer);
+        }
     }
 }
-*/
 
 impl Object for Primitive {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
@@ -219,12 +257,18 @@ impl Object for Primitive {
     fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
         Ok(p)
     }
-}
-
-/*
-impl<'a, T> Object for &'a T where T: Object {
-    fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {
-        unimplemented!();
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        match *self {
+            Primitive::Null => viewer.text("null"),
+            Primitive::Integer (ref x) => x.view(viewer),
+            Primitive::Number (ref x) => x.view(viewer),
+            Primitive::Boolean (ref x) => x.view(viewer),
+            Primitive::String (ref x) => x.view(viewer),
+            Primitive::Stream (ref x) => x.view(viewer),
+            Primitive::Dictionary (ref x) => x.view(viewer),
+            Primitive::Array (ref x) => x.view(viewer),
+            Primitive::Reference (ref x) => x.view(viewer),
+            Primitive::Name (ref x) => x.view(viewer),
+        }
     }
 }
-*/

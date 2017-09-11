@@ -20,7 +20,6 @@ pub struct Lexer<'a> {
     buf: &'a [u8],
 }
 
-#[allow(should_implement_trait)]
 impl<'a> Lexer<'a> {
     pub fn new(buf: &'a [u8]) -> Lexer<'a> {
         Lexer {

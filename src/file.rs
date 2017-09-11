@@ -1,3 +1,4 @@
+//! This is kind of the entry-point of the type-safe PDF functionality.
 use std::{str, io};
 use std::marker::PhantomData;
 use std::collections::HashMap;
@@ -7,11 +8,6 @@ use types::*;
 use xref::{XRef, XRefTable};
 use primitive::{Primitive, Dictionary, PdfString};
 use backend::Backend;
-use parser::parse;
-use parser::parse_object::parse_indirect_object;
-use parser::lexer::Lexer;
-use parser::parse_xref::read_xref_and_trailer_at;
-use stream::{ObjectStream};
 
 pub struct PromisedRef<T> {
     inner:      PlainRef,
@@ -80,23 +76,6 @@ fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page)
     Err(ErrorKind::PageNotFound {page_nr: page_nr}.into())
 }
 
-/// Because we need a resolve function to parse the trailer before the File has been created.
-fn resolve_helper<B2: Backend>(backend: &B2, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
-    match refs.get(r.id)? {
-        XRef::Raw {pos, ..} => {
-            let mut lexer = Lexer::new(backend.read(pos..)?);
-            Ok(parse_indirect_object(&mut lexer)?.1)
-        }
-        XRef::Stream {stream_id, index} => {
-            let obj_stream = resolve_helper(backend, refs, PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
-            let obj_stream = ObjectStream::from_primitive(obj_stream, &|r| resolve_helper(backend, refs, r))?;
-            let slice = obj_stream.get_object_slice(index)?;
-            parse(slice)
-        }
-        XRef::Free {..} => bail!(ErrorKind::FreeObject {obj_nr: r.id}),
-        _ => panic!()
-    }
-}
 
 pub struct File<B: Backend> {
     backend:    B,
@@ -108,55 +87,16 @@ pub struct File<B: Backend> {
 impl<B: Backend> File<B> {
     pub fn new(b: B) -> File<B> {
         File {
-            backend: b,
+            backend:    b,
             trailer:    Trailer::default(),
             refs:       XRefTable::new(1), // the root object,
             changes:    HashMap::new()
         }
     }
-
     pub fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
-        let xref_offset = locate_xref_offset(backend.read(0..)?)?;
-
-        let (refs, trailer) = {
-            let mut lexer = Lexer::new(backend.read(xref_offset..)?);
-            
-            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
-            
-            let highest_id = trailer.get("Size")
-            .ok_or_else(|| ErrorKind::EntryNotFound {key: "Size"})?
-            .clone().as_integer()?;
-
-            let mut refs = XRefTable::new(highest_id as ObjNr);
-            for section in xref_sections {
-                refs.add_entries_from(section);
-            }
-            
-            let mut prev_trailer = {
-                match trailer.get("Prev") {
-                    Some(p) => Some(p.as_integer()?),
-                    None => None
-                }
-            };
-            while let Some(prev_xref_offset) = prev_trailer {
-                let mut lexer = Lexer::new(backend.read(prev_xref_offset as usize..)?);
-                let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
-                
-                for section in xref_sections {
-                    refs.add_entries_from(section);
-                }
-                
-                prev_trailer = {
-                    match trailer.get("Prev") {
-                        Some(p) => Some(p.as_integer()?),
-                        None => None
-                    }
-                };
-            }
-            (refs, trailer)
-        };
-        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| resolve_helper(&backend, &refs, r))?;
+        let (refs, trailer) = backend.read_xref_table_and_trailer()?;
+        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve_helper(&refs, r))?;
         
         Ok(File {
             backend:    backend,
@@ -166,6 +106,7 @@ impl<B: Backend> File<B> {
         })
     }
 
+
     pub fn get_root(&self) -> &Catalog {
         &self.trailer.root
     }
@@ -173,7 +114,7 @@ impl<B: Backend> File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(ref p) => Ok((*p).clone()),
-            None => resolve_helper(&self.backend, &self.refs, r)
+            None => self.backend.resolve_helper(&self.refs, r)
         }
     }
 
@@ -228,19 +169,11 @@ impl<B: Backend> File<B> {
         
         Ref::from_id(id)
     }
+
 }
 
-// Returns the value of startxref
-fn locate_xref_offset(data: &[u8]) -> Result<usize> {
-    // locate the xref offset at the end of the file
-    // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
-    // u64::MAX has 20 digits + \n\n(2) + %%EOF(5) = 27 bytes max.
 
-    let mut lexer = Lexer::new(data);
-    lexer.set_pos_from_end(0);
-    lexer.seek_substr_back(b"startxref")?;
-    Ok(lexer.next()?.to::<usize>()?)
-}
+
 
 #[derive(Object, Default)]
 #[pdf(Type=false)]
@@ -305,5 +238,8 @@ impl Object for XRefStream {
             data: data,
             info: info,
         })
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        // unimplemented!();
     }
 }

@@ -1,9 +1,9 @@
 use std::io::{self, Write};
-use object::{Object, Resolve, ObjNr, PlainRef};
+use object::{Object, Resolve, ObjNr, PlainRef, Viewer};
 use primitive::{Stream, Primitive, Dictionary};
 use types::StreamFilter;
 use err::*;
-use parser::lexer::Lexer;
+use parser::Lexer;
 use backend::Backend;
 use file::File;
 
@@ -51,6 +51,9 @@ impl Object for GeneralStream {
             info: StreamInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?,
             data: stream.data,
         })
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        // unimplemented!();
     }
 }
 
@@ -142,6 +145,9 @@ impl Object for ObjectStream {
             offsets: offsets,
             id: 0, // TODO
         })
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        // unimplemented!();
     }
 }
 
