@@ -29,7 +29,7 @@ pub trait Backend: Sized {
         // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
         // u64::MAX has 20 digits + \n\n(2) + %%EOF(5) = 27 bytes max.
 
-        let mut lexer = Lexer::new(self.read(..));
+        let mut lexer = Lexer::new(self.read(..)?);
         lexer.set_pos_from_end(0);
         lexer.seek_substr_back(b"startxref")?;
         Ok(lexer.next()?.to::<usize>()?)
@@ -76,15 +76,15 @@ pub trait Backend: Sized {
     // File needs this because it need a resolve function to parse the trailer before the
     // File has been created. However, it could also be useful for applications that are dealing with
     // objects manually.
-    fn resolve_helper(&self, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
+    fn resolve(&self, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
         match refs.get(r.id)? {
             XRef::Raw {pos, ..} => {
                 let mut lexer = Lexer::new(self.read(pos..)?);
                 Ok(parse_indirect_object(&mut lexer)?.1)
             }
             XRef::Stream {stream_id, index} => {
-                let obj_stream = self.resolve_helper(refs, PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
-                let obj_stream = ObjectStream::from_primitive(obj_stream, &|r| self.resolve_helper(refs, r))?;
+                let obj_stream = self.resolve(refs, PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
+                let obj_stream = ObjectStream::from_primitive(obj_stream, &|r| self.resolve(refs, r))?;
                 let slice = obj_stream.get_object_slice(index)?;
                 parse(slice)
             }

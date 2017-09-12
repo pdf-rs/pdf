@@ -96,7 +96,7 @@ impl<B: Backend> File<B> {
     pub fn open(path: &str) -> Result<File<B>> {
         let backend = B::open(path)?;
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
-        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve_helper(&refs, r))?;
+        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve(&refs, r))?;
         
         Ok(File {
             backend:    backend,
@@ -114,7 +114,7 @@ impl<B: Backend> File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(ref p) => Ok((*p).clone()),
-            None => self.backend.resolve_helper(&self.refs, r)
+            None => self.backend.resolve(&self.refs, r)
         }
     }
 

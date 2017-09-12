@@ -8,7 +8,7 @@ pub use self::parse_object::*;
 pub use self::parse_xref::*;
 
 use err::*;
-use self::lexer::{Lexer, StringLexer};
+use self::lexer::{StringLexer};
 use primitive::{Primitive, Dictionary, Stream, PdfString};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
 use enc::decode;
