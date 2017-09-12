@@ -4,6 +4,7 @@
 !rustfmt.toml
 !src/
 !shaders/
+!examples/
 !Cargo.toml
 !tests
 !README.md

@@ -19,6 +19,7 @@ error_chain! {
         Io(::std::io::Error);
         Utf8(::std::str::Utf8Error);
         StringUtf8(::std::string::FromUtf8Error);
+        ParseInt(::std::num::ParseIntError);
     }
     // Define additional `ErrorKind` variants. The syntax here is
     // the same as `quick_error!`, but the `from()` and `cause()`

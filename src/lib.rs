@@ -3,22 +3,20 @@
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
+#![allow(unused_doc_comment)] // /* TODO temporary because of err.rs */
 #[macro_use]
 extern crate pdf_derive;
 #[macro_use]
 extern crate error_chain;
 extern crate num_traits;
 extern crate inflate;
-extern crate ansi_term;
-extern crate byteorder;
 extern crate itertools;
-extern crate ordermap;
 extern crate memmap;
-extern crate encoding;
 extern crate tuple;
+extern crate chrono;
 
-#[macro_use]
-mod macros;
+//#[macro_use]
+//mod macros;
 pub mod parser;
 pub mod object;
 pub mod types;

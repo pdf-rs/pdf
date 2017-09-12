@@ -4,7 +4,8 @@ extern crate glob;
 
 use std::str;
 use memmap::Mmap;
-use pdf::file::{File, ObjectStream};
+use pdf::file::File;
+use pdf::stream::ObjectStream;
 use pdf::object::*;
 use pdf::parser::parse;
 use glob::glob;
