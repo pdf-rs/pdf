@@ -23,7 +23,7 @@ pub trait Backend: Sized {
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]>;
     fn len(&self) -> usize;
 
-    // Returns the value of startxref (currently only used internally!)
+    /// Returns the value of startxref (currently only used internally!)
     fn locate_xref_offset(&self) -> Result<usize> {
         // locate the xref offset at the end of the file
         // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
@@ -34,7 +34,7 @@ pub trait Backend: Sized {
         lexer.seek_substr_back(b"startxref")?;
         Ok(lexer.next()?.to::<usize>()?)
     }
-    // Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
+    /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = self.locate_xref_offset()?;
         let mut lexer = Lexer::new(self.read(xref_offset..)?);
@@ -73,9 +73,9 @@ pub trait Backend: Sized {
         }
         Ok((refs, trailer))
     }
-    // File needs this because it need a resolve function to parse the trailer before the
-    // File has been created. However, it could also be useful for applications that are dealing with
-    // objects manually.
+    /// File needs this because it need a resolve function to parse the trailer before the
+    /// File has been created. However, it could also be useful for applications that are dealing with
+    /// objects manually.
     fn resolve(&self, refs: &XRefTable, r: PlainRef) -> Result<Primitive> {
         match refs.get(r.id)? {
             XRef::Raw {pos, ..} => {

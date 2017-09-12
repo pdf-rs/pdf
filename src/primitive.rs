@@ -1,6 +1,6 @@
 use err::*;
 
-use std::collections::hash_map;
+use std::collections::{btree_map, BTreeMap};
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
 use object::{PlainRef, Resolve, Object};
@@ -26,11 +26,11 @@ pub enum Primitive {
 /// Primitive Dictionary type.
 #[derive(Default, Clone)]
 pub struct Dictionary {
-    dict: hash_map::HashMap<String, Primitive>
+    dict: BTreeMap<String, Primitive>
 }
 impl Dictionary {
     pub fn new() -> Dictionary {
-        Dictionary { dict: hash_map::HashMap::new() }
+        Dictionary { dict: BTreeMap::new() }
     }
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
@@ -38,7 +38,7 @@ impl Dictionary {
     pub fn insert(&mut self, key: String, val: Primitive) -> Option<Primitive> {
         self.dict.insert(key, val)
     }
-    pub fn iter(&self) -> hash_map::Iter<String, Primitive> {
+    pub fn iter(&self) -> btree_map::Iter<String, Primitive> {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
@@ -62,7 +62,7 @@ impl<'a> Index<&'a str> for Dictionary {
 }
 impl<'a> IntoIterator for &'a Dictionary {
     type Item = (&'a String, &'a Primitive);
-    type IntoIter = hash_map::Iter<'a, String, Primitive>;
+    type IntoIter = btree_map::Iter<'a, String, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         (&self.dict).into_iter()
     }
@@ -244,6 +244,53 @@ impl Primitive {
             Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
             p => unexpected_primitive!(Stream, p.get_debug_name())
         }
+    }
+}
+
+impl From<i32> for Primitive {
+    fn from(x: i32) -> Primitive {
+        Primitive::Integer(x)
+    }
+}
+impl From<f32> for Primitive {
+    fn from(x: f32) -> Primitive {
+        Primitive::Number(x)
+    }
+}
+impl From<bool> for Primitive {
+    fn from(x: bool) -> Primitive {
+        Primitive::Boolean(x)
+    }
+}
+impl From<PdfString> for Primitive {
+    fn from(x: PdfString) -> Primitive {
+        Primitive::String (x)
+    }
+}
+impl From<Stream> for Primitive {
+    fn from(x: Stream) -> Primitive {
+        Primitive::Stream (x)
+    }
+}
+impl From<Dictionary> for Primitive {
+    fn from(x: Dictionary) -> Primitive {
+        Primitive::Dictionary (x)
+    }
+}
+impl From<Vec<Primitive>> for Primitive {
+    fn from(x: Vec<Primitive>) -> Primitive {
+        Primitive::Array (x)
+    }
+}
+
+impl From<PlainRef> for Primitive {
+    fn from(x: PlainRef) -> Primitive {
+        Primitive::Reference (x)
+    }
+}
+impl From<String> for Primitive {
+    fn from(x: String) -> Primitive {
+        Primitive::Name (x)
     }
 }
 
