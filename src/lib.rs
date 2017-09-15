@@ -8,20 +8,12 @@ extern crate quote;
 use proc_macro::TokenStream;
 use syn::*;
 
-// for debugging:
+// Debugging:
 /*
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 */
 
-/*
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("/tmp/proj/src/main.rs")
-        .unwrap();
-    write!(file, "{}", gen);
-*/
 
 
 #[proc_macro_derive(Object, attributes(pdf))]
@@ -35,37 +27,47 @@ pub fn object(input: TokenStream) -> TokenStream {
     // Build the impl
     let gen = impl_object(&ast);
     
+    // Debugging
+    /*
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("/tmp/proj/src/main.rs")
+        .unwrap();
+    write!(file, "{}", gen);
+    */
     // Return the generated impl
     gen.parse().unwrap()
 }
 
-fn get_attrs(list: &[NestedMetaItem]) -> (String, bool) {
-    let (mut key, mut opt) = (None, false);
-    for meta in list {
-        match *meta {
-            NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
-            if ident == "key" => {
-                key = Some(value.clone());
-            },
-            NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Bool(value))) 
-            if ident == "opt" => {
-                opt = value;
-            }
-            _ => panic!(r##"only `key="Key"` and `opt=[true|false]` are supported."##)
-        }
-    }
-    (key.expect("attr `key` missing"), opt)
-}
 
-fn pdf_attr(field: &Field) -> (String, bool) {
+/// Returns (key, opt, default)
+fn field_attrs(field: &Field) -> (String, bool, Option<String>) {
     field.attrs.iter()
     .filter_map(|attr| match attr.value {
         MetaItem::List(ref ident, ref list) if ident == "pdf" => {
-            Some(get_attrs(&list))
+            let (mut key, mut opt, mut default) = (None, false, None);
+            for meta in list {
+                match *meta {
+                    NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
+                    if ident == "key"
+                        => key = Some(value.clone()),
+                    NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Bool(value))) 
+                    if ident == "opt"
+                        => opt = value,
+                    NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _)))
+                    if ident == "default"
+                        => default = Some(value.clone()),
+                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `opt=[true|false]`, `default="some code"`."##)
+                }
+            }
+            Some(( key.expect("attr `key` missing"), opt, default))
         },
         _ => None
     }).next().expect("no pdf meta attribute")
 }
+
+
 
 
 /// Just the attributes for the whole struct
@@ -125,13 +127,13 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
     
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        let (key, opt) = pdf_attr(field);
-        (field.ident.clone(), key, opt)
+        let (key, opt, default) = field_attrs(field);
+        (field.ident.clone(), key, opt, default)
     }).collect();
     
     // Implement serialize()
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref key, opt)|
+    .map( |&(ref field, ref key, opt, ref default)|
          if opt {
             quote! {
                 if let Some(ref field) = self.#field {
@@ -164,7 +166,7 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
 
     // Implement view()
     let fields_view = parts.iter()
-    .map( |&(ref field, ref key, opt)| {
+    .map( |&(ref field, ref key, opt, ref default)| {
         quote! {
             viewer.attr(#key, |viewer| self.#field.view(viewer));
         }
@@ -192,7 +194,7 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
 }
 
 fn get_type(field: &Field) -> Ty {
-    let (_name, opt) = pdf_attr(field);
+    let (_name, opt, _default) = field_attrs(field);
 
     match opt {
         false => field.ty.clone(),
@@ -212,35 +214,60 @@ fn get_type(field: &Field) -> Ty {
     }
 }
 
-fn impl_parts(fields: &[Field]) -> Vec<quote::Tokens> {
-    fields.iter().map(|field| {
-        let (key, opt) = pdf_attr(field);
+/// Returns (let assignments, field assignments)
+/// Example:
+/// (`let name = ...;`,
+///  `    name: name`)
+/// 
+fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
+    (fields.iter().map(|field| {
+        let (key, opt, default) = field_attrs(field);
         let ref name = field.ident;
 
         let ty = get_type(field);
         
         if opt {
             quote! {
-                #name: match dict.remove(#key) {
+                let #name = match dict.remove(#key) {
                     Some(p) => Some(
                         {let x: #ty = <#ty as Object>::from_primitive(p, resolve).chain_err(|| #key)?; x},
                     ),
                     None => None
-                },
+                };
+            }
+        } else if let Some(default) = default {
+            let default = syn::parse_token_trees(&default).unwrap();
+            quote! {
+                let #name = {
+                    let primitive: Option<::pdf::primitive::Primitive>
+                        = dict.remove(#key);
+                    let x: #ty = match primitive {
+                        Some(primitive) => <#ty as Object>::from_primitive(primitive, resolve).chain_err( || stringify!(#name) )?,
+                        None => #( #default )*,
+                    };
+                    x
+                };
             }
         } else {
             quote! {
-                #name: {
-                    let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove(#key).ok_or(
-                        ::pdf::err::ErrorKind::EntryNotFound { key: #key }.into()
-                    );
-                    let x: #ty = <#ty as Object>::from_primitive(result_p?, resolve).chain_err(|| stringify!(#name))?;
+                let #name = {
+                    // TODO: perhaps it's better to handle the case that #ty is Vec here, rather
+                    // than allowing Vec<T> to be created from Primitive::Null?
+                    let primitive: ::pdf::primitive::Primitive
+                        = dict.remove(#key).or(Some(Primitive::Null)).unwrap(); // unwrap - we know it's not None
+                    let x: #ty = <#ty as Object>::from_primitive(primitive, resolve)
+                        .chain_err( || stringify!(#name) )?;
+                        // TODO: figure out why the following gives "unexpected token"
+                        // .chain_err( || Err(::pdf::err:ErrorKind::EntryNotFound {key: stringify!(#name)}) );
                     x
-                },
+                };
             }
         }
-    })
-    .collect()
+    }).collect(),
+    fields.iter().map(|field| {
+        let ref name = field.ident;
+        quote! { #name: #name, }
+    }).collect())
 }
 
 
@@ -254,7 +281,7 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
     };
     
     
-    let parts = impl_parts(&fields);
+    let (let_parts, field_parts) = impl_parts(&fields);
 
     
     let type_check = match attrs.pdf_type {
@@ -271,8 +298,9 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
         use ::pdf::err::ResultExt;
         let mut dict = p.to_dictionary(resolve).chain_err(|| stringify!(#name))?;
         #type_check
+        #( #let_parts )*
         Ok(#name {
-            #( #parts )*
+            #( #field_parts )*
         })
     }
 }
@@ -287,7 +315,7 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
         Body::Enum(_) => panic!("#[derive(Object)] can only be used with structs"),
     };
     
-    let parts = impl_parts(&fields);
+    let (let_parts, field_parts) = impl_parts(&fields);
 
     let type_check = match attrs.pdf_type {
         Some(type_name) => quote! {
@@ -304,8 +332,9 @@ fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
         use ::pdf::err::ResultExt;
         let mut dict = p.to_stream(resolve).chain_err(|| stringify!(#name))?.info;
         #type_check
+        #( #let_parts )*
         Ok(#name {
-            #( #parts )*
+            #( #field_parts )*
         })
     }
 
