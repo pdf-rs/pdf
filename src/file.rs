@@ -193,9 +193,8 @@ pub struct Trailer {
     #[pdf(key = "Info", opt = true)]
     pub info_dict:          Option<Dictionary>,
 
-    #[pdf(key = "ID", opt = true)]
-    pub id:                 Option<Vec<PdfString>>,
-    // TODO ^ Vec<u8> is a String type. Maybe make a wrapper for that
+    #[pdf(key = "ID")]
+    pub id:                 Vec<PdfString>,
 }
 
 #[derive(Object, Debug)]
@@ -209,10 +208,11 @@ pub struct XRefInfo {
     #[pdf(key = "Size")]
     pub size: i32,
 
-    #[pdf(key = "Index", opt = true)]
+    //
+    #[pdf(key = "Index", default = "vec![0, size]")]
     /// Array of pairs of integers for each subsection, (first object number, number of entries).
     /// Default value (assumed when None): `(0, self.size)`.
-    pub index: Option<Vec<i32>>,
+    pub index: Vec<i32>,
 
     #[pdf(key = "Prev", opt = true)]
     prev: Option<i32>,

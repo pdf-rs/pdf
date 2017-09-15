@@ -55,10 +55,15 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Re
 
 
     let width = &xref_stream.info.w;
+
+    let index = xref_stream.info.index;
+    println!("index: {:?}", index);
+    /*
     let index = match xref_stream.info.index {
         Some(index) => index,
-        None => vec![0, xref_stream.info.size],
+        None => vec![0, xref_stream.info.size], // TODO <-- This is the default value
     };
+    */
     
     let mut data_left = &xref_stream.data[..];
 

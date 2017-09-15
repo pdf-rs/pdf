@@ -44,14 +44,36 @@ impl Object for PagesNode {
 
 #[derive(Object, Default)]
 pub struct Catalog {
+// Version: Name,
     #[pdf(key="Pages")]
     pub pages: PageTree,
-
+// PageLabels: number_tree,
     #[pdf(key="Names", opt=true)]
     pub names: Option<NameDictionary>,
-    
-    //#[pdf(key="Labels")]
-    //labels: HashMap<usize, PageLabel>
+// Dests: Dict
+// ViewerPreferences: dict
+// PageLayout: name
+// PageMode: name
+// Outlines: dict
+// Threads: array
+// OpenAction: array or dict
+// AA: dict
+// URI: dict
+// AcroForm: dict
+// Metadata: stream
+    #[pdf(key="StructTreeRoot", opt=true)]
+    pub struct_tree_root: Option<StructTreeRoot>,
+// MarkInfo: dict
+// Lang: text string
+// SpiderInfo: dict
+// OutputIntents: array
+// PieceInfo: dict
+// OCProperties: dict
+// Perms: dict
+// Legal: dict
+// Requirements: array
+// Collection: dict
+// NeedsRendering: bool
 }
 
 
@@ -406,3 +428,47 @@ impl Object for Rect {
         viewer.text(format!("Rect{{{},{} to {},{}}}", self.left, self.bottom, self.right, self.top).as_str());
     }
 }
+
+
+// Stuff from chapter 10 of the PDF 1.7 ref
+
+#[derive(Object)]
+pub struct MarkInformation { // TODO no /Type
+    /// indicating whether the document conforms to Tagged PDF conventions
+    #[pdf(key="Marked", default="false")]
+    pub marked: bool,
+    /// Indicating the presence of structure elements that contain user properties attributes
+    #[pdf(key="UserProperties", default="false")]
+    pub user_properties: bool, 
+    /// Indicating the presence of tag suspects
+    #[pdf(key="Suspects", default="false")]
+    pub suspects: bool,
+}
+
+#[derive(Object)]
+#[pdf(Type = "StructTreeRoot")]
+pub struct StructTreeRoot {
+    #[pdf(key="K")]
+    pub children: Vec<StructElem>,
+}
+#[derive(Object)]
+pub struct StructElem {
+    // TODO
+}
+
+
+/*
+#[derive(Object)]
+pub enum StructType {
+    Art,
+    Sect,
+    Div,
+    BlockQuote,
+    Caption,
+    TOC,
+    TOCI,
+    Index,
+    NonStruct,
+    Private,
+}
+*/

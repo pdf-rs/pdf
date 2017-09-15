@@ -90,6 +90,7 @@ pub trait Backend: Sized {
             }
             XRef::Free {..} => bail!(ErrorKind::FreeObject {obj_nr: r.id}),
             _ => panic!()
+                //
         }
     }
 }

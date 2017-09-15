@@ -12,8 +12,8 @@ pub struct StreamInfo {
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
 
-    // #[pdf(key = "DecodeParms", opt=true)]
-    // pub decode_parms: Option<Vec<Option<DecodeParams>>>,
+    // #[pdf(key = "DecodeParms")]
+    // pub decode_parms: Vec<Option<DecodeParams>>,
     
     #[pdf(key = "Type")]
     ty:     String

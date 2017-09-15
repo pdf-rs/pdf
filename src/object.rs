@@ -20,13 +20,13 @@ impl<F> Resolve for F where F: Fn(PlainRef) -> Result<Primitive> {
 }
 
 
-/// Resolve function that just throws an error
 pub struct NoResolve {}
 impl Resolve for NoResolve {
     fn resolve(&self, _: PlainRef) -> Result<Primitive> {
         Err(ErrorKind::FollowReference.into())
     }
 }
+/// Resolve function that just throws an error
 pub const NO_RESOLVE: &'static Resolve = &NoResolve {} as &Resolve;
 
 /// A PDF Object
@@ -35,7 +35,8 @@ pub trait Object: Sized {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>;
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self>;
-    /// Give viewing information to external viewer
+    /// Give viewing information to external viewer (not: this is currently unused and will maybe
+    /// be removed)
     fn view<V: Viewer>(&self, viewer: &mut V);
 }
 
@@ -58,7 +59,8 @@ pub trait Viewer {
 
 
 /* PlainRef */
-#[derive(Copy, Clone, Debug)]
+// TODO move to primitive.rs
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlainRef {
     pub id:     ObjNr,
     pub gen:    GenNr,
@@ -227,6 +229,9 @@ impl<T: Object> Object for Vec<T> {
                     .into_iter()
                     .map(|p| T::from_primitive(p, r))
                     .collect::<Result<Vec<T>>>()?
+            },
+            Primitive::Null => {
+                Vec::new()
             }
             _ => vec![T::from_primitive(p, r)?]
         }
