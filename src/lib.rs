@@ -9,10 +9,8 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // Debugging:
-/*
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-*/
 
 
 
@@ -28,14 +26,12 @@ pub fn object(input: TokenStream) -> TokenStream {
     let gen = impl_object(&ast);
     
     // Debugging
-    /*
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
         .open("/tmp/proj/src/main.rs")
         .unwrap();
     write!(file, "{}", gen);
-    */
     // Return the generated impl
     gen.parse().unwrap()
 }
@@ -115,16 +111,92 @@ impl GlobalAttrs {
 }
 
 fn impl_object(ast: &DeriveInput) -> quote::Tokens {
+    let attrs = GlobalAttrs::from_ast(&ast);
+    if attrs.is_stream {
+        match ast.body {
+            Body::Struct(ref data) => impl_object_for_stream(ast, data.fields()),
+            Body::Enum(ref variants) => panic!("Enum can't be a PDF stream"),
+        }
+    } else {
+        match ast.body {
+            Body::Struct(ref data) => impl_object_for_struct(ast, data.fields()),
+            Body::Enum(ref variants) => impl_object_for_enum(ast, variants),
+        }
+    }
+    
+    
+}
+/// Accepts Name to construct enum
+fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::Tokens {
+    let id = &ast.ident;
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+    let attrs = GlobalAttrs::from_ast(&ast);
+
+    let ser_code: Vec<_> = variants.iter().map(|var| {
+        quote! {
+            #id::#var => stringify!(#id::#var),
+        }
+    }).collect();
+
+    let from_primitive_code = impl_from_name(ast, variants);
+    quote! {
+        impl #impl_generics ::pdf::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+                unimplemented!();
+                /*
+                writeln!(out, "/{}",
+                    match *self {
+                        #( #ser_code )*
+                    }
+                );
+                Ok(())
+                */
+            }
+            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+                #from_primitive_code
+            }
+            fn view<V: Viewer>(&self, viewer: &mut V) {
+                unimplemented!();
+            }
+
+        }
+    }
+}
+// All we need for from_prim is.. 
+// match &name {
+// "Var1" => Var1,
+// "Var2" => Var2,
+// }
+/// Returns code for from_primitive that accepts Name
+fn impl_from_name(ast: &syn::DeriveInput, variants: &Vec<Variant>) -> quote::Tokens {
+    let id = &ast.ident;
+    let parts: Vec<quote::Tokens> = variants.iter().map(|var| {
+        quote! {
+            stringify!(#var) => #id::#var,
+        }
+    }).collect();
+    quote! {
+        Ok(
+        match p {
+            Primitive::Name (name) => {
+                match name.as_str() {
+                    #( #parts )*
+                    s => bail!(format!("Enum {} from_primitive: no variant {}.", stringify!(#id), s)),
+                }
+            }
+            _ => bail!(::pdf::err::Error::from(::pdf::err::ErrorKind::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() })),
+        }
+        )
+    }
+
+}
+
+/// Accepts Dictionary to construct a struct
+fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
-    
-    let fields = match ast.body {
-        Body::Struct(ref data) => data.fields(),
-        Body::Enum(_) => panic!("#[derive(Object)] can only be used with structs"),
-    };
-    
-    
+
     let parts: Vec<_> = fields.iter()
     .map(|field| {
         let (key, opt, default) = field_attrs(field);
@@ -159,10 +231,7 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
     };
 
     // Implement from_primitive()
-    let from_primitive_code = match attrs.is_stream {
-        false => impl_from_dict(&ast),
-        true => impl_from_stream(&ast),
-    };
+    let from_primitive_code =  impl_from_dict(ast, fields);
 
     // Implement view()
     let fields_view = parts.iter()
@@ -190,7 +259,53 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
 
         }
     }
+}
 
+/// Note: must have info and dict (TODO explain in docs)
+fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
+    let name = &ast.ident;
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    let mut info_ty = fields.iter()
+    .filter_map(|field| {
+        if let Some(ident) = field.ident.as_ref() {
+            if ident.as_ref() == "info" {
+                Some(field.ty.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).next().unwrap();
+
+    quote! {
+        impl #impl_generics ::pdf::object::Object for #name #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+                unimplemented!();
+                /*
+                writeln!(out, "<<")?;
+                #type_code
+                #(#fields_ser)*
+                writeln!(out, ">>")?;
+                Ok(())
+                */
+            }
+            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+                let ::pdf::primitive::Stream {info: info, data: data}
+                    = p.to_stream(resolve).chain_err(|| stringify!(#name))?;
+
+                Ok(#name {
+                    info: <#info_ty as Object>::from_primitive(::pdf::primitive::Primitive::Dictionary (info), resolve)?,
+                    data: data,
+                })
+            }
+            fn view<V: Viewer>(&self, viewer: &mut V) {
+                unimplemented!();
+            }
+
+        }
+    }
 }
 
 fn get_type(field: &Field) -> Ty {
@@ -203,12 +318,16 @@ fn get_type(field: &Field) -> Ty {
                 Ty::Path(_, ref path) => path,
                 _ => panic!()
             };
-            assert_eq!(1, path.segments.len());
+            if path.segments.len() != 1 {
+                panic!("Field with `opt` attribute must be of type Option<T>.")
+            }
             let data = match path.segments[0].parameters {
                 PathParameters::AngleBracketed(ref data) => data,
                 _ => panic!()
             };
-            assert_eq!(1, data.types.len());
+            if data.types.len() != 1 {
+                panic!("Field with `opt` attribute must be of type Option<T>.")
+            }
             data.types[0].clone()
         }
     }
@@ -251,8 +370,6 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
         } else {
             quote! {
                 let #name = {
-                    // TODO: perhaps it's better to handle the case that #ty is Vec here, rather
-                    // than allowing Vec<T> to be created from Primitive::Null?
                     let primitive: ::pdf::primitive::Primitive
                         = dict.remove(#key).or(Some(Primitive::Null)).unwrap(); // unwrap - we know it's not None
                     let x: #ty = <#ty as Object>::from_primitive(primitive, resolve)
@@ -271,14 +388,11 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
 }
 
 
-fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
+/// Returns code for from_primitive that accepts Dictionary
+fn impl_from_dict(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
     let name = &ast.ident;
     let attrs = GlobalAttrs::from_ast(&ast);
     
-    let fields = match ast.body {
-        Body::Struct(ref data) => data.fields(),
-        Body::Enum(_) => panic!("#[derive(Object)] can only be used with structs"),
-    };
     
     
     let (let_parts, field_parts) = impl_parts(&fields);
@@ -303,39 +417,4 @@ fn impl_from_dict(ast: &syn::DeriveInput) -> quote::Tokens {
             #( #field_parts )*
         })
     }
-}
-
-
-fn impl_from_stream(ast: &syn::DeriveInput) -> quote::Tokens {
-    let name = &ast.ident;
-    let attrs = GlobalAttrs::from_ast(&ast);
-    
-    let fields = match ast.body {
-        Body::Struct(ref data) => data.fields(),
-        Body::Enum(_) => panic!("#[derive(Object)] can only be used with structs"),
-    };
-    
-    let (let_parts, field_parts) = impl_parts(&fields);
-
-    let type_check = match attrs.pdf_type {
-        Some(type_name) => quote! {
-            // Type check
-            //println!("check for {}", stringify!(#name));
-            let result_p: ::pdf::err::Result<::pdf::primitive::Primitive> = dict.remove("Type").ok_or(
-                ::pdf::err::ErrorKind::EntryNotFound { key: "Type" }.into()
-            );
-            assert_eq!(result_p?.to_name().chain_err(|| "Type")?, #type_name);
-        },
-        None => quote! {}
-    };
-    quote! {
-        use ::pdf::err::ResultExt;
-        let mut dict = p.to_stream(resolve).chain_err(|| stringify!(#name))?.info;
-        #type_check
-        #( #let_parts )*
-        Ok(#name {
-            #( #field_parts )*
-        })
-    }
-
 }
