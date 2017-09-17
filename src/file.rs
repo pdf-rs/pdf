@@ -97,6 +97,7 @@ impl<B: Backend> File<B> {
         let backend = B::open(path)?;
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
         let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve(&refs, r))?;
+        //
         
         Ok(File {
             backend:    backend,
@@ -181,16 +182,16 @@ pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,
 
-    #[pdf(key = "Prev", opt = true)]
+    #[pdf(key = "Prev")]
     pub prev_trailer_pos:   Option<i32>,
 
     #[pdf(key = "Root")]
     pub root:               Catalog,
 
-    #[pdf(key = "Encrypt", opt = true)]
+    #[pdf(key = "Encrypt")]
     pub encrypt_dict:       Option<Dictionary>,
 
-    #[pdf(key = "Info", opt = true)]
+    #[pdf(key = "Info")]
     pub info_dict:          Option<Dictionary>,
 
     #[pdf(key = "ID")]
@@ -214,7 +215,7 @@ pub struct XRefInfo {
     /// Default value (assumed when None): `(0, self.size)`.
     pub index: Vec<i32>,
 
-    #[pdf(key = "Prev", opt = true)]
+    #[pdf(key = "Prev")]
     prev: Option<i32>,
 
     #[pdf(key = "W")]

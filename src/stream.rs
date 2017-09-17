@@ -100,7 +100,7 @@ pub struct ObjStmInfo {
     /// The byte offset in the decoded stream, of the first compressed object.
     pub first: i32,
 
-    #[pdf(key = "Extends", opt=true)]
+    #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
     pub extends: Option<i32>,
 

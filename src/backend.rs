@@ -89,7 +89,7 @@ pub trait Backend: Sized {
                 parse(slice)
             }
             XRef::Free {..} => bail!(ErrorKind::FreeObject {obj_nr: r.id}),
-            _ => panic!()
+            _ => panic!("Trying to dereference a Free object (perhaps it shouldn't give an error though)")
                 //
         }
     }

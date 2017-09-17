@@ -48,7 +48,7 @@ pub struct Catalog {
     #[pdf(key="Pages")]
     pub pages: PageTree,
 // PageLabels: number_tree,
-    #[pdf(key="Names", opt=true)]
+    #[pdf(key="Names")]
     pub names: Option<NameDictionary>,
 // Dests: Dict
 // ViewerPreferences: dict
@@ -61,7 +61,7 @@ pub struct Catalog {
 // URI: dict
 // AcroForm: dict
 // Metadata: stream
-    #[pdf(key="StructTreeRoot", opt=true)]
+    #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
 // MarkInfo: dict
 // Lang: text string
@@ -82,44 +82,35 @@ pub struct Catalog {
 #[derive(Object, Debug, Default)]
 #[pdf(Type = "Pages")]
 pub struct PageTree {
-    #[pdf(key="Parent", opt=true)]
+    #[pdf(key="Parent")]
     pub parent: Option<Ref<PageTree>>,
-    #[pdf(key="Kids", opt=false)]
+    #[pdf(key="Kids")]
     pub kids:   Vec<PagesNode>,
-    #[pdf(key="Count", opt=false)]
+    #[pdf(key="Count")]
     pub count:  i32,
 
-    // #[pdf(key="Resources", opt=false]
-    // resources: Option<Ref<Resources>>,
-}
-impl PageTree {
-    pub fn root() -> PageTree {
-        PageTree {
-            parent: None,
-            kids:   Vec::new(),
-            count:  0
-        }
-    }
+    #[pdf(key="Resources")]
+    resources: Option<Ref<Resources>>,
 }
 
 #[derive(Object, Debug)]
 pub struct Page {
-    #[pdf(key="Parent", opt=false)]
+    #[pdf(key="Parent")]
     pub parent: Ref<PageTree>,
     
-    //#[pdf(key="Parent", opt=true)]
+    //#[pdf(key="Parent")]
     //pub ressources: Option<Ressources>,
     
-    #[pdf(key="MediaBox", opt=true)]
+    #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
     
-    #[pdf(key="CropBox", opt=true)]
+    #[pdf(key="CropBox")]
     pub crop_box:   Option<Rect>,
     
-    #[pdf(key="TrimBox", opt=true)]
+    #[pdf(key="TrimBox")]
     pub trim_box:   Option<Rect>,
     
-    //#[pdf(key="Contents", opt=true)]
+    //#[pdf(key="Contents")]
     //pub contents:   Option<PlainRef>
 }
 impl Page {
@@ -135,15 +126,140 @@ impl Page {
 
 #[derive(Object)]
 pub struct PageLabel {
-    #[pdf(key="S", opt=true)]
+    #[pdf(key="S")]
     style:  Option<Counter>,
     
-    #[pdf(key="P", opt=true)]
+    #[pdf(key="P")]
     prefix: Option<PdfString>,
     
-    #[pdf(key="St", opt=true)]
+    #[pdf(key="St")]
     start:  Option<usize>
 }
+
+#[derive(Object)]
+pub struct Resources {
+    #[pdf(key="ExtGState")]
+    ext_g_state: Option<GraphicsStateParameters>,
+    // color_space: Option<ColorSpace>,
+    // pattern: Option<Pattern>,
+    // shading: Option<Shading>,
+    #[pdf(key="XObject")]
+    xobject: Option<XObject>,
+}
+
+#[derive(Object)]
+#[pdf(Type = "ExtGState")]
+/// `ExtGState`
+pub struct GraphicsStateParameters {
+    //TODO
+}
+
+pub enum XObject {
+    Postscript (PostScriptXObject),
+    Image (ImageXObject),
+    Form (FormXObject),
+}
+
+impl Object for XObject {
+    // Subtype==Image => ImageDictionary
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        panic!("XObject");
+        match p {
+            Primitive::Stream (mut stream) => {
+                let result_p = stream.info.remove("Type")
+                    .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }));
+                assert_eq!(result_p?.to_name().chain_err(|| "Type")?, "XObject");
+            },
+            _ => bail!(Error::from(::pdf::err::ErrorKind::UnexpectedPrimitive { expected: "Stream", found: p.get_debug_name() })),
+        }
+        unimplemented!();
+    }
+    fn view<V: Viewer>(&self, viewer: &mut V) {
+        unimplemented!();
+    }
+}
+
+// TODO XObject is apparently lik ethis..?? /XObject << /Im1 22 0 R >>
+#[derive(Object)]
+/// A variant of XObject
+pub struct PostScriptXObject {
+    // TODO
+}
+
+
+#[derive(Object)]
+#[pdf(is_stream)]
+pub struct ImageXObject {
+    pub info: ImageDictionary,
+    pub data: Vec<u8>,
+}
+
+#[derive(Object)]
+/// A variant of XObject
+pub struct ImageDictionary {
+    #[pdf(key="Width")]
+    width: i32,
+    #[pdf(key="Height")]
+    height: i32,
+    // ColorSpace: name or array
+    #[pdf(key="BitsPerComponent")]
+    bits_per_component: i32,
+    // Note: only allowed values are 1, 2, 4, 8, 16. Enum?
+    
+    #[pdf(key="Intent")]
+    intent: Option<RenderingIntent>,
+    // Note: default: "the current rendering intent in the graphics state" - I don't think this
+    // ought to have a default then
+
+    #[pdf(key="ImageMask", default="false")]
+    image_mask: bool,
+
+    // Mask: stream or array
+    //
+    /// Describes how to map image samples into the range of values appropriate for the image’s color space.
+    /// If `image_mask`: either [0 1] or [1 0]. Else, the length must be twice the number of color
+    /// components required by `color_space` (key ColorSpace)
+    // (see Decode arrays page 344)
+    #[pdf(key="Decode")]
+    decode: Vec<i32>,
+
+    #[pdf(key="Interpolate", default="false")]
+    interpolate: bool,
+
+    // Alternates: Vec<AlternateImage>
+
+    // SMask (soft mask): stream
+    // SMaskInData: i32
+    ///The integer key of the image’s entry in the structural parent tree
+    #[pdf(key="StructParent")]
+    struct_parent: i32,
+
+    #[pdf(key="ID")]
+    id: Option<PdfString>,
+
+    // OPI: dict
+    // Metadata: stream
+    // OC: dict
+    
+}
+
+
+#[derive(Object)]
+pub enum RenderingIntent {
+    AbsoluteColorimetric,
+    RelativeColorimetric,
+    Saturation,
+    Perceptual,
+}
+
+#[derive(Object)]
+/// A variant of XObject
+pub struct FormXObject {
+}
+
 
 pub enum Counter {
     Arabic,
@@ -255,27 +371,27 @@ impl<T: Object> Object for NameTree<T> {
 #[derive(Object)]
 pub struct NameDictionary {
     /*
-    #[pdf(key="Dests", opt=true)]
+    #[pdf(key="Dests")]
     ap: NameTree<T>,
-    #[pdf(key="AP", opt=true)]
+    #[pdf(key="AP")]
     ap: NameTree<T>,
-    #[pdf(key="JavaScript", opt=true)]
+    #[pdf(key="JavaScript")]
     javascript: NameTree<T>,
-    #[pdf(key="Pages", opt=true)]
+    #[pdf(key="Pages")]
     pages: NameTree<T>,
-    #[pdf(key="Templates", opt=true)]
+    #[pdf(key="Templates")]
     templates: NameTree<T>,
-    #[pdf(key="IDS", opt=true)]
+    #[pdf(key="IDS")]
     ids: NameTree<T>,
-    #[pdf(key="URLS", opt=true)]
+    #[pdf(key="URLS")]
     urls: NameTree<T>,
     */
-    #[pdf(key="EmbeddedFiles", opt=true)]
+    #[pdf(key="EmbeddedFiles")]
     embedded_files: Option<NameTree<FileSpecification>>,
     /*
-    #[pdf(key="AlternativePresentations", opt=true)]
+    #[pdf(key="AlternativePresentations")]
     alternate_presentations: NameTree<AlternatePresentation>,
-    #[pdf(key="Renditions", opt=true)]
+    #[pdf(key="Renditions")]
     renditions: NameTree<Rendition>,
     */
 }
@@ -289,10 +405,10 @@ pub struct NameDictionary {
 
 #[derive(Object)]
 pub struct FileSpecification {
-    #[pdf(key="EF", opt=true)]
+    #[pdf(key="EF")]
     ef: Option<Files<EmbeddedFile>>,
     /*
-    #[pdf(key="RF", opt=true)]
+    #[pdf(key="RF")]
     rf: Option<Files<RelatedFilesArray>>,
     */
 }
@@ -300,15 +416,15 @@ pub struct FileSpecification {
 /// Used only as elements in `FileSpecification`
 #[derive(Object)]
 pub struct Files<T: Object> {
-    #[pdf(key="F", opt=true)]
+    #[pdf(key="F")]
     f: Option<T>,
-    #[pdf(key="UF", opt=true)]
+    #[pdf(key="UF")]
     uf: Option<T>,
-    #[pdf(key="DOS", opt=true)]
+    #[pdf(key="DOS")]
     dos: Option<T>,
-    #[pdf(key="Mac", opt=true)]
+    #[pdf(key="Mac")]
     mac: Option<T>,
-    #[pdf(key="Unix", opt=true)]
+    #[pdf(key="Unix")]
     unix: Option<T>,
 }
 
@@ -316,26 +432,26 @@ pub struct Files<T: Object> {
 #[derive(Object)]
 pub struct EmbeddedFile {
     /*
-    #[pdf(key="Subtype", opt=true)]
+    #[pdf(key="Subtype")]
     subtype: Option<String>,
     */
-    #[pdf(key="Params", opt=true)]
+    #[pdf(key="Params")]
     params: Option<EmbeddedFileParamDict>,
 }
 
 #[derive(Object)]
 pub struct EmbeddedFileParamDict {
-    #[pdf(key="Size", opt=true)]
+    #[pdf(key="Size")]
     size: Option<i32>,
     /*
     // TODO need Date type
-    #[pdf(key="CreationDate", opt=true)]
+    #[pdf(key="CreationDate")]
     creationdate: T,
-    #[pdf(key="ModDate", opt=true)]
+    #[pdf(key="ModDate")]
     moddate: T,
-    #[pdf(key="Mac", opt=true)]
+    #[pdf(key="Mac")]
     mac: T,
-    #[pdf(key="CheckSum", opt=true)]
+    #[pdf(key="CheckSum")]
     checksum: T,
     */
 }
@@ -453,13 +569,25 @@ pub struct StructTreeRoot {
 }
 #[derive(Object)]
 pub struct StructElem {
-    // TODO
+    #[pdf(key="S")]
+    /// `S`
+    struct_type: StructType,
+    #[pdf(key="P")]
+    /// `P`
+    parent: Ref<StructElem>,
+    #[pdf(key="ID")]
+    /// `ID`
+    id: Option<PdfString>,
+    #[pdf(key="Pg")]
+    /// `Pg`: A page object representing a page on which some or all of the content items designated by the K entry are rendered.
+    page: Ref<Page>,
 }
 
 
-/*
 #[derive(Object)]
 pub enum StructType {
+    Document,
+    Part,
     Art,
     Sect,
     Div,
@@ -471,4 +599,4 @@ pub enum StructType {
     NonStruct,
     Private,
 }
-*/
+
