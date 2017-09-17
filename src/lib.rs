@@ -37,27 +37,24 @@ pub fn object(input: TokenStream) -> TokenStream {
 }
 
 
-/// Returns (key, opt, default)
-fn field_attrs(field: &Field) -> (String, bool, Option<String>) {
+/// Returns (key, default)
+fn field_attrs(field: &Field) -> (String, Option<String>) {
     field.attrs.iter()
     .filter_map(|attr| match attr.value {
         MetaItem::List(ref ident, ref list) if ident == "pdf" => {
-            let (mut key, mut opt, mut default) = (None, false, None);
+            let (mut key, mut default) = (None, None);
             for meta in list {
                 match *meta {
                     NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
                     if ident == "key"
                         => key = Some(value.clone()),
-                    NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Bool(value))) 
-                    if ident == "opt"
-                        => opt = value,
                     NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _)))
                     if ident == "default"
                         => default = Some(value.clone()),
-                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `opt=[true|false]`, `default="some code"`."##)
+                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
                 }
             }
-            Some(( key.expect("attr `key` missing"), opt, default))
+            Some(( key.expect("attr `key` missing"), default))
         },
         _ => None
     }).next().expect("no pdf meta attribute")
@@ -199,27 +196,17 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        let (key, opt, default) = field_attrs(field);
-        (field.ident.clone(), key, opt, default)
+        let (key, default) = field_attrs(field);
+        (field.ident.clone(), key, default)
     }).collect();
     
     // Implement serialize()
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref key, opt, ref default)|
-         if opt {
-            quote! {
-                if let Some(ref field) = self.#field {
-                    write!(out, "{} ", #key)?;
-                    field.serialize(out)?;
-                    writeln!(out, "")?;
-                }
-            }
-        } else {
-            quote! {
-                write!(out, "{} ", #key)?;
-                self.#field.serialize(out)?;
-                writeln!(out, "")?;
-            }
+    .map( |&(ref field, ref key, ref default)|
+        quote! {
+            write!(out, "{} ", #key)?;
+            self.#field.serialize(out)?;
+            writeln!(out, "")?;
         }
     );
     
@@ -235,7 +222,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 
     // Implement view()
     let fields_view = parts.iter()
-    .map( |&(ref field, ref key, opt, ref default)| {
+    .map( |&(ref field, ref key, ref default)| {
         quote! {
             viewer.attr(#key, |viewer| self.#field.view(viewer));
         }
@@ -308,31 +295,6 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
     }
 }
 
-fn get_type(field: &Field) -> Ty {
-    let (_name, opt, _default) = field_attrs(field);
-
-    match opt {
-        false => field.ty.clone(),
-        true => {
-            let path = match field.ty {
-                Ty::Path(_, ref path) => path,
-                _ => panic!()
-            };
-            if path.segments.len() != 1 {
-                panic!("Field with `opt` attribute must be of type Option<T>.")
-            }
-            let data = match path.segments[0].parameters {
-                PathParameters::AngleBracketed(ref data) => data,
-                _ => panic!()
-            };
-            if data.types.len() != 1 {
-                panic!("Field with `opt` attribute must be of type Option<T>.")
-            }
-            data.types[0].clone()
-        }
-    }
-}
-
 /// Returns (let assignments, field assignments)
 /// Example:
 /// (`let name = ...;`,
@@ -340,22 +302,14 @@ fn get_type(field: &Field) -> Ty {
 /// 
 fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
     (fields.iter().map(|field| {
-        let (key, opt, default) = field_attrs(field);
+        let (key, default) = field_attrs(field);
         let ref name = field.ident;
 
-        let ty = get_type(field);
-        
-        if opt {
-            quote! {
-                let #name = match dict.remove(#key) {
-                    Some(p) => Some(
-                        {let x: #ty = <#ty as Object>::from_primitive(p, resolve).chain_err(|| #key)?; x},
-                    ),
-                    None => None
-                };
-            }
-        } else if let Some(default) = default {
-            let default = syn::parse_token_trees(&default).unwrap();
+        let ty = field.ty.clone();
+
+
+        if let Some(ref default) = default {
+            let default = syn::parse_token_trees(&default).expect("Could not parse `default` code as Rust.");
             quote! {
                 let #name = {
                     let primitive: Option<::pdf::primitive::Primitive>
@@ -370,13 +324,22 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
         } else {
             quote! {
                 let #name = {
-                    let primitive: ::pdf::primitive::Primitive
-                        = dict.remove(#key).or(Some(Primitive::Null)).unwrap(); // unwrap - we know it's not None
-                    let x: #ty = <#ty as Object>::from_primitive(primitive, resolve)
-                        .chain_err( || stringify!(#name) )?;
-                        // TODO: figure out why the following gives "unexpected token"
-                        // .chain_err( || Err(::pdf::err:ErrorKind::EntryNotFound {key: stringify!(#name)}) );
-                    x
+                    match dict.remove(#key) {
+                        Some(primitive) =>
+                            match <#ty as Object>::from_primitive(primitive, resolve) {
+                                Ok(obj) => obj,
+                                Err(e) => bail!(e.chain_err(|| format!("Object {}, Key {} wrong primitive type", stringify!(#name), #key))),
+                                // ^ TODO (??)
+                                // Err(_) => bail!("Hello"),
+                            }
+                        None =>  // Try to construct T from Primitive::Null
+                            match <#ty as Object>::from_primitive(::pdf::primitive::Primitive::Null, resolve) {
+                                Ok(obj) => obj,
+                                Err(e) => bail!("Object {}, Key {} not found", stringify!(#name), #key),
+                            },
+                    }
+                    // ^ By using Primitive::Null when we don't find the key, we allow 'optional'
+                    // types like Option and Vec to be constructed from non-existing values
                 };
             }
         }
