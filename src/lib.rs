@@ -98,8 +98,10 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // Debugging:
+/*
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+*/
 
 
 
@@ -118,12 +120,14 @@ pub fn object(input: TokenStream) -> TokenStream {
     let gen = impl_object(&ast);
     
     // Debugging
+    /*
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
         .open("/tmp/proj/src/main.rs")
         .unwrap();
     write!(file, "{}", gen);
+    */
     // Return the generated impl
     gen.parse().unwrap()
 }
