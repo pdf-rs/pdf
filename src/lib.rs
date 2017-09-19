@@ -98,7 +98,7 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // Debugging:
-use std::fs::{File, OpenOptions};
+use std::fs::{OpenOptions};
 use std::io::Write;
 
 
@@ -123,7 +123,7 @@ pub fn object(input: TokenStream) -> TokenStream {
         .append(true)
         .open("/tmp/proj/src/main.rs")
         .unwrap();
-    write!(file, "{}", gen);
+    write!(file, "{}", gen).unwrap();
     // Return the generated impl
     gen.parse().unwrap()
 }
@@ -170,7 +170,7 @@ struct GlobalAttrs {
     is_stream: bool,
 }
 impl GlobalAttrs {
-    fn default(ast: &DeriveInput) -> GlobalAttrs {
+    fn default() -> GlobalAttrs {
         GlobalAttrs {
             checks: Vec::new(),
             is_stream: false,
@@ -180,7 +180,7 @@ impl GlobalAttrs {
     /// The PDF type may be explicitly specified as an attribute with type "Type". Else, it is the name
     /// of the struct.
     fn from_ast(ast: &DeriveInput) -> GlobalAttrs {
-        let mut attrs = GlobalAttrs::default(ast);
+        let mut attrs = GlobalAttrs::default();
         let mut pdf_type = Some(String::from(ast.ident.as_ref()));
         for attr in &ast.attrs {
             match attr.value {
@@ -225,7 +225,7 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
     if attrs.is_stream {
         match ast.body {
             Body::Struct(ref data) => impl_object_for_stream(ast, data.fields()),
-            Body::Enum(ref variants) => panic!("Enum can't be a PDF stream"),
+            Body::Enum(_) => panic!("Enum can't be a PDF stream"),
         }
     } else {
         match ast.body {
@@ -240,7 +240,6 @@ fn impl_object(ast: &DeriveInput) -> quote::Tokens {
 fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::Tokens {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
-    let attrs = GlobalAttrs::from_ast(&ast);
 
     let ser_code: Vec<_> = variants.iter().map(|var| {
         quote! {
@@ -251,28 +250,20 @@ fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::To
     let from_primitive_code = impl_from_name(ast, variants);
     quote! {
         impl #impl_generics ::pdf::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> ::std::io::Result<()> {
-                unimplemented!();
-                /*
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "/{}",
                     match *self {
                         #( #ser_code )*
                     }
-                );
-                Ok(())
-                */
+                )
             }
-            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+            fn from_primitive(p: Primitive, _resolve: &Resolve) -> Result<Self> {
                 #from_primitive_code
             }
         }
     }
 }
-// All we need for from_prim is.. 
-// match &name {
-// "Var1" => Var1,
-// "Var2" => Var2,
-// }
+
 /// Returns code for from_primitive that accepts Name
 fn impl_from_name(ast: &syn::DeriveInput, variants: &Vec<Variant>) -> quote::Tokens {
     let id = &ast.ident;
@@ -311,7 +302,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
     
     // Implement serialize()
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref key, ref default, skip)|
+    .map( |&(ref field, ref key, ref _default, skip)|
         if skip {
             quote! {}
         } else {
@@ -324,7 +315,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
     );
     let checks_code: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
         quote! {
-            writeln!(out, "/{} /{}", #key, #val);
+            writeln!(out, "/{} /{}", #key, #val)?;
         }
     ).collect();
 
@@ -352,7 +343,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let mut info_ty = fields.iter()
+    let info_ty = fields.iter()
     .filter_map(|field| {
         if let Some(ident) = field.ident.as_ref() {
             if ident.as_ref() == "info" {
