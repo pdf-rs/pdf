@@ -174,8 +174,6 @@ impl<B: Backend> File<B> {
 }
 
 
-
-
 #[derive(Object, Default)]
 #[pdf(Type=false)]
 pub struct Trailer {
@@ -202,8 +200,10 @@ pub struct Trailer {
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
     // Normal Stream fields
+    /* TODO Stream<T>
     #[pdf(key = "Filter")]
     filter: Vec<StreamFilter>,
+    */
 
     // XRefStream fields
     #[pdf(key = "Size")]
@@ -234,7 +234,7 @@ impl Object for XRefStream {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
         let stream = p.to_stream(resolve)?;
         let info = XRefInfo::from_primitive(Primitive::Dictionary (stream.info), resolve)?;
-        let data = stream.data.to_vec();
+        let data = stream.data.clone();
         Ok(XRefStream {
             data: data,
             info: info,

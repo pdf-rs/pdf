@@ -1,12 +1,63 @@
 use itertools::Itertools;
 use tuple::*;
-use types::StreamFilter;
 use inflate::InflateStream;
 use err::*;
 use std::mem;
-use std::str;
 
-use primitive::Dictionary;
+use object::{Object, Resolve, Viewer};
+use primitive::{Primitive, Dictionary};
+
+
+#[derive(Object, Debug, Clone)]
+pub struct LZWFlateParams {
+    #[pdf(key="Predictor", default="1")]
+    predictor: i32,
+    #[pdf(key="Colors", default="1")]
+    n_components: i32,
+    #[pdf(key="BitsPerComponent", default="8")]
+    bits_per_component: i32,
+    #[pdf(key="Columns", default="1")]
+    columns: i32,
+    #[pdf(key="EarlyChange", default="1")]
+    early_change: i32,
+}
+
+#[derive(Object, Debug, Clone)]
+pub struct DCTDecodeParams {
+    // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
+    // 0:   No transformation.
+    // 1:   If the image has three color components, transform RGB values to YUV before encoding and from YUV to RGB after decoding.
+    //      If the image has four components, transform CMYK values to YUVK before encoding and from YUVK to CMYK after decoding.
+    //      This option is ignored if the image has one or two color components.
+    #[pdf(key="ColorTransform")]
+    color_transform: i32,
+}
+
+#[derive(Debug, Clone)]
+pub enum StreamFilter {
+    ASCIIHexDecode,
+    ASCII85Decode,
+    LZWDecode (LZWFlateParams),
+    FlateDecode (LZWFlateParams),
+    JPXDecode, //Jpeg2k
+    DCTDecode (DCTDecodeParams),
+}
+impl StreamFilter {
+    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &Resolve) -> Result<StreamFilter> {
+       let params = Primitive::Dictionary (params);
+       Ok(
+       match kind {
+           "ASCIIHexDecode" => StreamFilter::ASCIIHexDecode,
+           "ASCII85Decode" => StreamFilter::ASCII85Decode,
+           "LZWDecode" => StreamFilter::LZWDecode (LZWFlateParams::from_primitive(params, r)?),
+           "FlateDecode" => StreamFilter::FlateDecode (LZWFlateParams::from_primitive(params, r)?),
+           "JPXDecode" => StreamFilter::JPXDecode,
+           "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
+           _ => bail!("Unrecognized filter type"),
+       } 
+       )
+    }
+}
 
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
@@ -82,30 +133,11 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 
-macro_rules! parameter {
-    ($params:expr, $key:expr, $default:expr) => {
-        match *$params {
-            Some(ref params) => params.get($key).map_or(Ok($default), |x| x.as_integer())?,
-            None => $default
-        };
-    };
-}
-
-fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
-    let predictor = parameter!(params, "Predictor", 1);
-    let n_components = parameter!(params, "Colors", 1) as usize;
-    let _bits_per_component = parameter!(params, "BitsPerComponent", 1);
-    let columns = parameter!(params, "Columns", 1) as usize;
-
-    /* TODO.. the macro should ideally just make a single match
-    let (predictor, n_components) = match *params {
-        Some(ref params) => {
-            (params.get("Predictor").map_or(Ok(1), |x| x.as_integer())?,
-             params.get("Colors").map_or(Ok(1), |x| x.as_integer())?)
-        },
-        None => ..
-    };
-    */
+fn flate_decode(data: &[u8], params: LZWFlateParams) -> Result<Vec<u8>> {
+    let predictor = params.predictor as usize;;
+    let n_components = params.n_components as usize;
+    let _bits_per_component = params.bits_per_component as usize;
+    let columns = params.columns as usize;
 
     // First flate decode
     let mut inflater = InflateStream::from_zlib();
@@ -162,14 +194,14 @@ fn flate_decode(data: &[u8], params: &Option<Dictionary>) -> Result<Vec<u8>> {
 }
 
 
-pub fn decode(data: &[u8], filter: StreamFilter, params: &Option<Dictionary>) -> Result<Vec<u8>> {
-    use self::StreamFilter::*;
+pub fn decode(data: &[u8], filter: StreamFilter) -> Result<Vec<u8>> {
     match filter {
-        AsciiHex => decode_hex(data),
-        Ascii85 => decode_85(data),
-        Lzw => unimplemented!(),
-        Flate => flate_decode(data, params),
-        Jpeg2k => unimplemented!()
+        StreamFilter::ASCIIHexDecode => decode_hex(data),
+        StreamFilter::ASCII85Decode => decode_85(data),
+        StreamFilter::LZWDecode (_params) => unimplemented!(),
+        StreamFilter::FlateDecode (params) => flate_decode(data, params),
+        StreamFilter::JPXDecode => unimplemented!(),
+        StreamFilter::DCTDecode (_params) => unimplemented!(),
     }
 }
 

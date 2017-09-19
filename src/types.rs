@@ -2,7 +2,9 @@ use object::{Object, Ref, Resolve, Viewer};
 use primitive::{Primitive, PdfString};
 use std::io;
 use err::*;
+use std::collections::BTreeMap;
 
+use primitive::Stream;
 
 // Pages:
 
@@ -77,8 +79,6 @@ pub struct Catalog {
 }
 
 
-
-
 #[derive(Object, Debug, Default)]
 #[pdf(Type = "Pages")]
 pub struct PageTree {
@@ -89,17 +89,27 @@ pub struct PageTree {
     #[pdf(key="Count")]
     pub count:  i32,
 
+
+    /// Exists to be inherited to a 'Page' object. Note: *Inheritable*.
+    // Note about inheritance... if we wanted to 'inherit' things at the time of reading, we would
+    // want Option<Ref<Resources>> here most likely.
     #[pdf(key="Resources")]
-    resources: Option<Ref<Resources>>,
+    pub resources: Option<Resources>,
+}
+
+
+impl PageTree {
+    fn inherit_resources(&mut self) {
+    }
 }
 
 #[derive(Object, Debug)]
 pub struct Page {
     #[pdf(key="Parent")]
     pub parent: Ref<PageTree>,
-    
-    //#[pdf(key="Parent")]
-    //pub ressources: Option<Ressources>,
+
+    #[pdf(key="Resources")]
+    pub resources: Option<Resources>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -113,13 +123,15 @@ pub struct Page {
     //#[pdf(key="Contents")]
     //pub contents:   Option<PlainRef>
 }
+
 impl Page {
     pub fn new(parent: Ref<PageTree>) -> Page {
         Page {
             parent:     parent,
             media_box:  None,
             crop_box:   None,
-            trim_box:   None
+            trim_box:   None,
+            resources:  None,
         }
     }
 }
@@ -136,7 +148,8 @@ pub struct PageLabel {
     start:  Option<usize>
 }
 
-#[derive(Object)]
+#[derive(Object, Debug)]
+#[pdf(Type=false)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     ext_g_state: Option<GraphicsStateParameters>,
@@ -144,16 +157,18 @@ pub struct Resources {
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    xobject: Option<XObject>,
+    xobject: Option<BTreeMap<String, XObject>>
+    // /XObject is a dictionary that map arbitrary names to XObjects
 }
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 #[pdf(Type = "ExtGState")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
     //TODO
 }
 
+#[derive(Debug)]
 pub enum XObject {
     Postscript (PostScriptXObject),
     Image (ImageXObject),
@@ -162,44 +177,54 @@ pub enum XObject {
 
 impl Object for XObject {
     // Subtype==Image => ImageDictionary
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        panic!("XObject");
-        match p {
-            Primitive::Stream (mut stream) => {
-                let result_p = stream.info.remove("Type")
-                    .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }));
-                assert_eq!(result_p?.to_name().chain_err(|| "Type")?, "XObject");
-            },
-            _ => bail!(Error::from(::pdf::err::ErrorKind::UnexpectedPrimitive { expected: "Stream", found: p.get_debug_name() })),
+        let mut stream = p.to_stream(resolve)?;
+
+        let ty = stream.info.remove("Type")
+            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?
+            .to_name()?;
+        if ty != "XObject" {
+            bail!("XObject: /Type != XObject");
         }
-        unimplemented!();
+
+        let subty = stream.info.remove("Subtype")
+            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Subtype"}))?
+            .to_name()?;
+        Ok(match subty.as_str() {
+            "PS" => XObject::Postscript (PostScriptXObject::from_primitive(Primitive::Stream(stream), resolve)?),
+            "Image" => XObject::Image (ImageXObject::from_primitive(Primitive::Stream(stream), resolve)?),
+            "Form" => XObject::Form (FormXObject::from_primitive(Primitive::Stream(stream), resolve)?),
+            s => bail!("XObject: invalid /Subtype {}", s),
+        })
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
+    fn view<V: Viewer>(&self, _viewer: &mut V) {
         unimplemented!();
     }
 }
 
-// TODO XObject is apparently lik ethis..?? /XObject << /Im1 22 0 R >>
-#[derive(Object)]
 /// A variant of XObject
-pub struct PostScriptXObject {
+pub type PostScriptXObject = Stream<PostScriptDict>;
+/// A variant of XObject
+pub type ImageXObject = Stream<ImageDict>;
+/// A variant of XObject
+pub type FormXObject = Stream<FormDict>;
+
+#[derive(Object, Debug)]
+#[pdf(Type="XObject", Subtype="PS")]
+pub struct PostScriptDict {
     // TODO
 }
 
 
-#[derive(Object)]
-#[pdf(is_stream)]
-pub struct ImageXObject {
-    pub info: ImageDictionary,
-    pub data: Vec<u8>,
-}
 
-#[derive(Object)]
+
+#[derive(Object, Debug)]
+#[pdf(Type="XObject", Subtype="Image")]
 /// A variant of XObject
-pub struct ImageDictionary {
+pub struct ImageDict {
     #[pdf(key="Width")]
     width: i32,
     #[pdf(key="Height")]
@@ -247,7 +272,7 @@ pub struct ImageDictionary {
 }
 
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
@@ -255,9 +280,11 @@ pub enum RenderingIntent {
     Perceptual,
 }
 
-#[derive(Object)]
-/// A variant of XObject
-pub struct FormXObject {
+
+#[derive(Object, Debug)]
+#[pdf(Type="XObject", Subtype="Form")]
+pub struct FormDict {
+    // TODO
 }
 
 
@@ -283,7 +310,7 @@ impl Object for Counter {
     fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
         unimplemented!();
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
+    fn view<V: Viewer>(&self, _viewer: &mut V) {
         // unimplemented!();
     }
 }
@@ -359,7 +386,7 @@ impl<T: Object> Object for NameTree<T> {
                 }
         })
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
+    fn view<V: Viewer>(&self, _viewer: &mut V) {
         // unimplemented!();
     }
 }
@@ -460,39 +487,6 @@ pub struct EmbeddedFileParamDict {
 
 
 
-#[derive(Debug)]
-pub enum StreamFilter {
-    AsciiHex,
-    Ascii85,
-    Lzw,
-    Flate,
-    Jpeg2k
-}
-impl Object for StreamFilter {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        let s = match *self {
-            StreamFilter::AsciiHex => "/ASCIIHexDecode",
-            StreamFilter::Ascii85 => "/ASCII85Decode",
-            StreamFilter::Lzw => "/LZWDecode",
-            StreamFilter::Flate => "/FlateDecode",
-            StreamFilter::Jpeg2k => "/JPXDecode"
-        };
-        write!(out, "{}", s)
-    }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        match &p.to_name()? as &str {
-            "ASCIIHexDecode"    => Ok(StreamFilter::AsciiHex),
-            "ASCII85Decode"     => Ok(StreamFilter::Ascii85),
-            "LZWDecode"         => Ok(StreamFilter::Lzw),
-            "FlateDecode"       => Ok(StreamFilter::Flate),
-            "JPXDecode"         => Ok(StreamFilter::Jpeg2k),
-            _                   => Err("Filter not recognized".into()),
-        }
-    }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        // unimplemented!();
-    }
-}
 
 pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
     where W: io::Write, T: Object, I: Iterator<Item=&'a T>

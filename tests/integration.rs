@@ -18,8 +18,8 @@ macro_rules! file_path {
 
 #[test]
 fn open_file() {
-    let _ = File::<Vec<u8>>::open(file_path!("example.pdf")).unwrap();
-    let _ = File::<Mmap>::open(file_path!("example.pdf")).unwrap();
+    let _ = File::<Vec<u8>>::open(file_path!("example.pdf")).unwrap_or_else(|e| print_err(e));
+    let _ = File::<Mmap>::open(file_path!("example.pdf")).unwrap_or_else(|e| print_err(e));
 }
 
 #[test]
@@ -45,11 +45,11 @@ fn read_pages() {
 fn parse_objects_from_stream() {
     let file = File::<Vec<u8>>::open(file_path!("xelatex.pdf")).unwrap();
     // .. we know that object 13 of that file is an ObjectStream
-    let obj_stream = file.deref(Ref::<ObjectStream>::new(PlainRef {id: 13, gen: 0})).unwrap();
+    let obj_stream = file.deref(Ref::<ObjectStream>::new(PlainRef {id: 13, gen: 0})).unwrap_or_else(|e| print_err(e));
     for i in 0..obj_stream.n_objects() {
-        let slice = obj_stream.get_object_slice(i).unwrap();
+        let slice = obj_stream.get_object_slice(i).unwrap_or_else(|e| print_err(e));
         println!("Object slice #{}: {}\n", i, str::from_utf8(slice).unwrap());
-        parse(slice).unwrap();
+        parse(slice).unwrap_or_else(|e| print_err(e));
     }
 }
 

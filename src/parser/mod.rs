@@ -9,11 +9,8 @@ pub use self::parse_xref::*;
 
 use err::*;
 use self::lexer::{StringLexer};
-use primitive::{Primitive, Dictionary, Stream, PdfString};
+use primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
-use enc::decode;
-use types::StreamFilter;
-use object::{Object,NO_RESOLVE};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
@@ -54,36 +51,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
             
             let stream_substr = lexer.offset_pos(length as usize);
 
-            // Uncompress/decode if there is a filter
-            let content = match dict.get("Filter") {
-                Some(filter) => {
-                    let params = match dict.get("DecodeParms") {
-                        Some(params) => Some(params.clone().to_dictionary(NO_RESOLVE)?),
-                        None => None,
-                    };
-                    match *filter {
-                        // TODO a lot of clones here
-                        Primitive::Name (_) =>
-                            decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?,
-                        Primitive::Array (ref filters) => {
-                            let mut data =
-                                decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?, &params)?;
-                            for filter in filters.iter().skip(1) {
-                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?;
-                            }
-                            data
-                        }
-                        _ => bail!(ErrorKind::UnexpectedPrimitive {expected: "Name or Array", found: filter.get_debug_name()})
-                    }
-                }
-                None => stream_substr.to_vec()
-            };
             // Finish
             lexer.next_expect("endstream")?;
 
-            Primitive::Stream(Stream {
+            Primitive::Stream(PdfStream {
                 info: dict,
-                data: content,
+                data: stream_substr.to_vec(),
             })
         } else {
             Primitive::Dictionary (dict)
@@ -172,12 +145,12 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 }
 
 
-pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<Stream> {
+pub fn parse_stream(data: &[u8], resolve: &Resolve) -> Result<PdfStream> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve)
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<PdfStream> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -213,37 +186,12 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Stream> {
 
             
             let stream_substr = lexer.offset_pos(length as usize);
-            // Uncompress/decode if there is a filter
-            let content = match dict.get("Filter") {
-                Some(filter) => {
-                    let params = dict.get("DecodeParms").map(|x| x.clone().to_dictionary(NO_RESOLVE));
-                    let params = match params {
-                        Some(result) => Some(result?),
-                        None => None,
-                    };
-                    match *filter {
-                        // TODO a lot of clones here
-                        Primitive::Name (_) =>
-                            decode(stream_substr.as_slice(), StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?,
-                        Primitive::Array (ref filters) => {
-                            let mut data =
-                                decode(stream_substr.as_slice(), StreamFilter::from_primitive(filters[0].clone(), NO_RESOLVE)?, &params)?;
-                            for filter in filters.iter().skip(1) {
-                                data = decode(&data, StreamFilter::from_primitive(filter.clone(), NO_RESOLVE)?, &params)?;
-                            }
-                            data
-                        }
-                        _ => bail!(ErrorKind::UnexpectedPrimitive {expected: "Name or Array", found: filter.get_debug_name()})
-                    }
-                }
-                None => stream_substr.to_vec()
-            };
             // Finish
             lexer.next_expect("endstream")?;
 
-            Stream {
+            PdfStream {
                 info: dict,
-                data: content,
+                data: stream_substr.to_vec(),
             }
         } else {
             bail!(ErrorKind::UnexpectedPrimitive { expected: "Stream", found: "Dictionary" });

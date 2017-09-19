@@ -6,6 +6,7 @@ use std::fmt;
 use std::str;
 use std::marker::PhantomData;
 use types::write_list;
+use std::collections::BTreeMap;
 
 
 pub type ObjNr = u64;
@@ -189,12 +190,6 @@ impl Object for Dictionary {
         }
     }
 }
-/*
-impl<'a> Object for &'a str {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-    }
-}
-*/
 
 impl Object for String {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
@@ -275,5 +270,26 @@ impl Object for Primitive {
             Primitive::Reference (ref x) => x.view(viewer),
             Primitive::Name (ref x) => x.view(viewer),
         }
+    }
+}
+
+impl<V: Object> Object for BTreeMap<String, V> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        match p {
+            Primitive::Dictionary (dict) => {
+                let mut new = Self::new();
+                for (key, val) in dict.iter() {
+                    new.insert(key.clone(), V::from_primitive(val.clone(), resolve)?);
+                }
+                Ok(new)
+            }
+            p =>  Err(ErrorKind::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
+        }
+    }
+    fn view<W: Viewer>(&self, _viewer: &mut W) {
+        unimplemented!();
     }
 }

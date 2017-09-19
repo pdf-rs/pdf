@@ -1,95 +1,21 @@
 use std::io::{self, Write};
 use object::{Object, Resolve, ObjNr, PlainRef, Viewer};
-use primitive::{Stream, Primitive, Dictionary};
-use types::StreamFilter;
+use primitive::{PdfStream, Primitive, Dictionary};
 use err::*;
 use parser::Lexer;
 use backend::Backend;
 use file::File;
 
-#[derive(Object)]
-pub struct StreamInfo {
-    #[pdf(key = "Filter")]
-    pub filter: Vec<StreamFilter>,
 
-    // #[pdf(key = "DecodeParms")]
-    // pub decode_parms: Vec<Option<DecodeParams>>,
-    
-    #[pdf(key = "Type")]
-    ty:     String
-}
-
-
-/// The type-safe version of `Stream`.
-pub struct GeneralStream {
-    pub info:       StreamInfo,
-    pub data:       Vec<u8>
-}
-impl GeneralStream {
-    pub fn empty(ty: &str) -> GeneralStream {
-        GeneralStream {
-            data:   Vec::new(),
-            info:   StreamInfo {
-                filter:         vec![],
-                ty:             ty.to_string()
-            }
-        }
-    }
-}
-impl Object for GeneralStream {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        self.info.serialize(out)?;
-        
-        out.write_all(b"stream\n")?;
-        out.write_all(&self.data)?;
-        out.write_all(b"\nendstream\n")?;
-        Ok(())
-    }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let stream = p.to_stream(resolve)?;
-        Ok(GeneralStream {
-            info: StreamInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?,
-            data: stream.data,
-        })
-    }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        // unimplemented!();
-    }
-}
-
-// TODO (small task) use from_primitive from Object instead
-/*
-impl FromStream for GeneralStream {
-    fn from_stream(stream: Stream, resolve: &Resolve) -> Result<GeneralStream> {
-        let info = StreamInfo::from_dict(stream.info, resolve)?;
-        // TODO: Look at filters of `info` and decode the stream.
-        let data = stream.data.to_vec();
-        Ok(GeneralStream {
-            data: data,
-            info: info,
-        })
-    }
-}
-*/
-
-/*
-pub struct DecodeParams {
-    dict: Dictionary
-}
-
-impl DecodeParams {
-    fn get(&self, key: String) -> Option<Primitive> {
-        self.dict.get(key)
-    }
-}
-*/
 
 #[derive(Object, Default)]
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
-    // Normal Stream fields - added as fields are added to Stream
+
+    /* TODO:  use Stream<T>
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
+    */
 
     // ObjStm fields
     #[pdf(key = "N")]
@@ -146,8 +72,8 @@ impl Object for ObjectStream {
             id: 0, // TODO
         })
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        // unimplemented!();
+    fn view<V: Viewer>(&self, _viewer: &mut V) {
+        unimplemented!();
     }
 }
 
@@ -207,7 +133,7 @@ impl Into<Primitive> for ObjectStream {
         info.insert("N".into(), Primitive::Integer(self.offsets.len() as i32));
         info.insert("First".into(), Primitive::Integer(first as i32));
         
-        Primitive::Stream(Stream {
+        Primitive::Stream(PdfStream {
             info: info,
             data: data
         })
