@@ -98,10 +98,8 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // Debugging:
-/*
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-*/
 
 
 
@@ -120,25 +118,23 @@ pub fn object(input: TokenStream) -> TokenStream {
     let gen = impl_object(&ast);
     
     // Debugging
-    /*
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
         .open("/tmp/proj/src/main.rs")
         .unwrap();
     write!(file, "{}", gen);
-    */
     // Return the generated impl
     gen.parse().unwrap()
 }
 
 
-/// Returns (key, default)
-fn field_attrs(field: &Field) -> (String, Option<String>) {
+/// Returns (key, default, skip)
+fn field_attrs(field: &Field) -> (String, Option<String>, bool) {
     field.attrs.iter()
     .filter_map(|attr| match attr.value {
         MetaItem::List(ref ident, ref list) if ident == "pdf" => {
-            let (mut key, mut default) = (None, None);
+            let (mut key, mut default, mut skip) = (None, None, false);
             for meta in list {
                 match *meta {
                     NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
@@ -147,10 +143,17 @@ fn field_attrs(field: &Field) -> (String, Option<String>) {
                     NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _)))
                     if ident == "default"
                         => default = Some(value.clone()),
+                    NestedMetaItem::MetaItem(MetaItem::Word(ref ident))
+                    if ident == "skip"
+                        => skip = true,
                     _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
                 }
             }
-            Some(( key.expect("attr `key` missing"), default))
+            let key = match skip {
+                true => String::from(""),
+                false => key.expect("attr `key` missing"),
+            };
+            Some(( key, default, skip))
         },
         _ => None
     }).next().expect("no pdf meta attribute")
@@ -262,10 +265,6 @@ fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::To
             fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
                 #from_primitive_code
             }
-            fn view<V: Viewer>(&self, _viewer: &mut V) {
-                unimplemented!();
-            }
-
         }
     }
 }
@@ -306,17 +305,21 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        let (key, default) = field_attrs(field);
-        (field.ident.clone(), key, default)
+        let (key, default, skip) = field_attrs(field);
+        (field.ident.clone(), key, default, skip)
     }).collect();
     
     // Implement serialize()
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref key, ref default)|
-        quote! {
-            write!(out, "{} ", #key)?;
-            self.#field.serialize(out)?;
-            writeln!(out, "")?;
+    .map( |&(ref field, ref key, ref default, skip)|
+        if skip {
+            quote! {}
+        } else {
+            quote! {
+                write!(out, "{} ", #key)?;
+                self.#field.serialize(out)?;
+                writeln!(out, "")?;
+            }
         }
     );
     let checks_code: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
@@ -327,14 +330,6 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 
     // Implement from_primitive()
     let from_primitive_code =  impl_from_dict(ast, fields);
-
-    // Implement view()
-    let fields_view = parts.iter()
-    .map( |&(ref field, ref key, ref default)| {
-        quote! {
-            viewer.attr(#key, |viewer| self.#field.view(viewer));
-        }
-    });
 
     quote! {
         impl #impl_generics ::pdf::object::Object for #name #ty_generics #where_clause {
@@ -348,10 +343,6 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
             fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
                 #from_primitive_code
             }
-            fn view<V: Viewer>(&self, viewer: &mut V) {
-                #(#fields_view)*
-            }
-
         }
     }
 }
@@ -387,7 +378,7 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
                 */
             }
             fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-                let ::pdf::primitive::Stream {info: info, data: data}
+                let ::pdf::primitive::PdfStream {info, data}
                     = p.to_stream(resolve).chain_err(|| stringify!(#name))?;
 
                 Ok(#name {
@@ -395,10 +386,6 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
                     data: data,
                 })
             }
-            fn view<V: Viewer>(&self, _viewer: &mut V) {
-                unimplemented!();
-            }
-
         }
     }
 }
@@ -410,7 +397,10 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 /// 
 fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
     (fields.iter().map(|field| {
-        let (key, default) = field_attrs(field);
+        let (key, default, skip) = field_attrs(field);
+        if skip {
+            return quote! {}; // skip this field..
+        }
         let ref name = field.ident;
 
         let ty = field.ty.clone();
