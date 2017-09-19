@@ -5,7 +5,6 @@ use std::{str, fmt, io};
 use std::ops::{Index, Range};
 use object::{PlainRef, Resolve, Object};
 use chrono::{DateTime, FixedOffset};
-use object::Viewer;
 use types::FileSpecification;
 use enc::*;
 use std::ops::Deref;
@@ -94,10 +93,6 @@ impl Object for PdfStream {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
         p.to_stream(resolve)
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        viewer.attr("info", |viewer| self.info.view(viewer));
-        viewer.attr("data", |viewer| viewer.text(str::from_utf8(&self.data).unwrap()));
-    }
 }
 
 // TODO NOW
@@ -165,7 +160,6 @@ impl<T> Object for Stream<T> {
         // TODO NEXt
         unimplemented!();
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) { unimplemented!() }
 }
 impl<T> Deref for Stream<T> {
     type Target = T;
@@ -221,9 +215,6 @@ impl Object for PdfString {
             Primitive::String (string) => Ok(string),
             _ => unexpected_primitive!(String, p.get_debug_name()),
         }
-    }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        viewer.text(str::from_utf8(&self.data).unwrap());
     }
 }
 
@@ -387,12 +378,6 @@ impl<T: Object> Object for Option<T> {
         }
         )
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        match *self {
-            Some(ref inner) => inner.view(viewer),
-            None => viewer.text("<not present>"),
-        }
-    }
 }
 
 fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default: T) -> T {
@@ -441,9 +426,6 @@ impl Object for DateTime<FixedOffset> {
             }
             _ => unexpected_primitive!(String, p.get_debug_name()),
         }
-    }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        unimplemented!();
     }
 }
 

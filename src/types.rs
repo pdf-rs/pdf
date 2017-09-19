@@ -1,4 +1,4 @@
-use object::{Object, Ref, Resolve, Viewer};
+use object::{Object, Ref, Resolve};
 use primitive::{Primitive, PdfString};
 use std::io;
 use err::*;
@@ -30,16 +30,6 @@ impl Object for PagesNode {
             other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
         )
-    }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        match *self {
-            PagesNode::Tree (ref tree) => {
-                tree.view(viewer)
-            }
-            PagesNode::Leaf (ref page) => {
-                page.view(viewer)
-            }
-        }
     }
 }
 
@@ -200,9 +190,6 @@ impl Object for XObject {
             s => bail!("XObject: invalid /Subtype {}", s),
         })
     }
-    fn view<V: Viewer>(&self, _viewer: &mut V) {
-        unimplemented!();
-    }
 }
 
 /// A variant of XObject
@@ -310,9 +297,6 @@ impl Object for Counter {
     fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
         unimplemented!();
     }
-    fn view<V: Viewer>(&self, _viewer: &mut V) {
-        // unimplemented!();
-    }
 }
 
 
@@ -385,9 +369,6 @@ impl<T: Object> Object for NameTree<T> {
                     None => bail!("Neither Kids nor Names present in NameTree node.")
                 }
         })
-    }
-    fn view<V: Viewer>(&self, _viewer: &mut V) {
-        // unimplemented!();
     }
 }
 
@@ -533,9 +514,6 @@ impl Object for Rect {
             top:    arr[2].as_number()?,
             bottom: arr[3].as_number()?
         })
-    }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        viewer.text(format!("Rect{{{},{} to {},{}}}", self.left, self.bottom, self.right, self.top).as_str());
     }
 }
 

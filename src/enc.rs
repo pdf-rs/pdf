@@ -4,7 +4,7 @@ use inflate::InflateStream;
 use err::*;
 use std::mem;
 
-use object::{Object, Resolve, Viewer};
+use object::{Object, Resolve};
 use primitive::{Primitive, Dictionary};
 
 

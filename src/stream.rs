@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use object::{Object, Resolve, ObjNr, PlainRef, Viewer};
+use object::{Object, Resolve, ObjNr, PlainRef};
 use primitive::{PdfStream, Primitive, Dictionary};
 use err::*;
 use parser::Lexer;
@@ -71,9 +71,6 @@ impl Object for ObjectStream {
             offsets: offsets,
             id: 0, // TODO
         })
-    }
-    fn view<V: Viewer>(&self, _viewer: &mut V) {
-        unimplemented!();
     }
 }
 

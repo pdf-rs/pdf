@@ -240,7 +240,4 @@ impl Object for XRefStream {
             info: info,
         })
     }
-    fn view<V: Viewer>(&self, viewer: &mut V) {
-        // unimplemented!();
-    }
 }
