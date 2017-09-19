@@ -1,12 +1,21 @@
-//! Traits for Object conversions and serialization with some implementations. References.
-use primitive::{Primitive, Dictionary};
-use err::{Result, ErrorKind};
+//! `Object` trait, along with some implementations. References.
+//!
+//! Some of the structs are incomplete (missing fields that are in the PDF references).
+
+mod types;
+mod stream;
+
+pub use self::types::*;
+pub use self::stream::*;
+
+use primitive::*;
+use err::*;
+use enc::*;
+
 use std::io;
 use std::fmt;
 use std::marker::PhantomData;
-use types::write_list;
 use std::collections::BTreeMap;
-
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -37,9 +46,10 @@ pub trait Object: Sized {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self>;
 }
 
+///////
+// Refs
+///////
 
-
-/* PlainRef */
 // TODO move to primitive.rs
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlainRef {
@@ -56,7 +66,6 @@ impl Object for PlainRef {
 }
 
 
-/* Ref<T> */
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
 #[derive(Copy,Clone)]
 pub struct Ref<T> {
@@ -95,12 +104,9 @@ impl<T> fmt::Debug for Ref<T> {
     }
 }
 
-
-
-
-////////////////////////
-// Other Object impls //
-////////////////////////
+//////////////////////////////////////
+// Object for Primitives & other types
+//////////////////////////////////////
 
 impl Object for i32 {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {

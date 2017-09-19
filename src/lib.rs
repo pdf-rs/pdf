@@ -19,10 +19,8 @@ extern crate chrono;
 //mod macros;
 pub mod parser;
 pub mod object;
-pub mod types;
 pub mod xref;
 pub mod primitive;
-pub mod stream;
 pub mod file;
 pub mod backend;
 

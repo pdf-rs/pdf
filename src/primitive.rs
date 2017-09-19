@@ -5,8 +5,6 @@ use std::{str, fmt, io};
 use std::ops::{Index, Range};
 use object::{PlainRef, Resolve, Object};
 use chrono::{DateTime, FixedOffset};
-use types::FileSpecification;
-use enc::*;
 use std::ops::Deref;
 
 
@@ -45,6 +43,12 @@ impl Dictionary {
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
         self.dict.remove(key)
+    }
+}
+impl Deref for Dictionary {
+    type Target = BTreeMap<String, Primitive>;
+    fn deref(&self) -> &BTreeMap<String, Primitive> {
+        &self.dict
     }
 }
 impl fmt::Debug for Dictionary {
@@ -95,78 +99,6 @@ impl Object for PdfStream {
     }
 }
 
-// TODO NOW
-// secondly... T::from_primitive(p) consumes p
-//
-// One question: have general info as some StreamInfo struct that implements Object?
-/// General stream type. `T` is the info dictionary.
-#[derive(Debug, Clone)]
-pub struct Stream<T> {
-    // General dictionary entries
-    pub length: i32,
-    pub filters: Vec<StreamFilter>,
-
-    /*
-    /// Filters to apply to external file specified in `file`.
-    #[pdf(key="FFilter")]
-    file_filters: Vec<StreamFilter>,
-    #[pdf(key="FDecodeParms")]
-    file_decode_parms: Vec<DecodeParms>,
-    /// Number of bytes in the decoded stream
-    #[pdf(key="DL")]
-    dl: Option<usize>,
-    */
-    // Specialized dictionary entries
-    info: T,
-    data: Vec<u8>,
-}
-impl<T> Object for Stream<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
-        unimplemented!();
-    }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        // (TODO) there are a lot of `clone()` here because we can't consume the dict before we
-        // pass it to T::from_primitive.
-        let dict = p.to_dictionary(resolve)?;
-
-        let length = i32::from_primitive(
-            dict.get("Length").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Length"}))?.clone(),
-            resolve)?;
-
-        let filters = Vec::<String>::from_primitive(
-            dict.get("Filter").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Filter"}))?.clone(),
-            resolve)?;
-
-        let decode_params = Vec::<Dictionary>::from_primitive(
-            dict.get("DecodeParms").ok_or(Error::from(ErrorKind::EntryNotFound {key: "DecodeParms"} ))?.clone(),
-            resolve)?;
-
-        let file = Option::<FileSpecification>::from_primitive(
-            dict.get("F").ok_or(Error::from(ErrorKind::EntryNotFound{key:"F"}))?.clone(),
-            resolve)?;
-
-
-        let mut new_filters = Vec::new();
-
-        for (i, filter) in filters.iter().enumerate() {
-            let params = match decode_params.get(i) {
-                Some(params) => params.clone(),
-                None => Dictionary::default(),
-            };
-            new_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve));
-        }
-
-
-        // TODO NEXt
-        unimplemented!();
-    }
-}
-impl<T> Deref for Stream<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        &self.info
-    }
-}
 
 
 macro_rules! unexpected_primitive {

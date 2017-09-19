@@ -1,12 +1,8 @@
-use object::{Object, Ref, Resolve};
-use primitive::{Primitive, PdfString};
+//! Models of PDF types
+
 use std::io;
+use object::*;
 use err::*;
-use std::collections::BTreeMap;
-
-use primitive::Stream;
-
-// Pages:
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]

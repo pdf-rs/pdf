@@ -5,7 +5,6 @@ use std::io::Read;
 use parser::Lexer;
 use parser::{read_xref_and_trailer_at, parse_indirect_object, parse};
 use xref::{XRef, XRefTable};
-use stream::{ObjectStream};
 use primitive::{Primitive, Dictionary};
 use object::*;
 

@@ -1,10 +1,82 @@
-use std::io::{self, Write};
-use object::{Object, Resolve, ObjNr, PlainRef};
-use primitive::{PdfStream, Primitive, Dictionary};
+use object::*;
+use primitive::*;
 use err::*;
 use parser::Lexer;
 use backend::Backend;
 use file::File;
+
+
+use std::io;
+use std::ops::Deref;
+
+/// General stream type. `T` is the info dictionary.
+#[derive(Debug, Clone)]
+pub struct Stream<T> {
+    // General dictionary entries
+    pub length: i32,
+    pub filters: Vec<StreamFilter>,
+
+    /*
+    /// Filters to apply to external file specified in `file`.
+    #[pdf(key="FFilter")]
+    file_filters: Vec<StreamFilter>,
+    #[pdf(key="FDecodeParms")]
+    file_decode_parms: Vec<DecodeParms>,
+    /// Number of bytes in the decoded stream
+    #[pdf(key="DL")]
+    dl: Option<usize>,
+    */
+    // Specialized dictionary entries
+    info: T,
+    data: Vec<u8>,
+}
+impl<T> Object for Stream<T> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        // (TODO) there are a lot of `clone()` here because we can't consume the dict before we
+        // pass it to T::from_primitive.
+        let dict = p.to_dictionary(resolve)?;
+
+        let length = i32::from_primitive(
+            dict.get("Length").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Length"}))?.clone(),
+            resolve)?;
+
+        let filters = Vec::<String>::from_primitive(
+            dict.get("Filter").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Filter"}))?.clone(),
+            resolve)?;
+
+        let decode_params = Vec::<Dictionary>::from_primitive(
+            dict.get("DecodeParms").ok_or(Error::from(ErrorKind::EntryNotFound {key: "DecodeParms"} ))?.clone(),
+            resolve)?;
+
+        let file = Option::<FileSpecification>::from_primitive(
+            dict.get("F").ok_or(Error::from(ErrorKind::EntryNotFound{key:"F"}))?.clone(),
+            resolve)?;
+
+
+        let mut new_filters = Vec::new();
+
+        for (i, filter) in filters.iter().enumerate() {
+            let params = match decode_params.get(i) {
+                Some(params) => params.clone(),
+                None => Dictionary::default(),
+            };
+            new_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve));
+        }
+
+
+        // TODO NEXt
+        unimplemented!();
+    }
+}
+impl<T> Deref for Stream<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.info
+    }
+}
 
 
 
@@ -12,7 +84,7 @@ use file::File;
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
 
-    /* TODO:  use Stream<T>
+    /* TODO:  use Stream<T> .. but then I need the `offsets` here?
     #[pdf(key = "Filter")]
     pub filter: Vec<StreamFilter>,
     */
@@ -106,6 +178,7 @@ impl ObjectStream {
     }
 }
 
+/*
 #[allow(unused_must_use)] // TODO: how to handle Errors from write! ?
 impl Into<Primitive> for ObjectStream {
     fn into(self) -> Primitive {
@@ -136,3 +209,4 @@ impl Into<Primitive> for ObjectStream {
         })
     }
 }
+*/
