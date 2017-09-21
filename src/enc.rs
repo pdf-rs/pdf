@@ -9,6 +9,7 @@ use primitive::{Primitive, Dictionary};
 
 
 #[derive(Object, Debug, Clone)]
+#[pdf(Type=false)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     predictor: i32,
@@ -23,6 +24,7 @@ pub struct LZWFlateParams {
 }
 
 #[derive(Object, Debug, Clone)]
+#[pdf(Type=false)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.
@@ -30,7 +32,7 @@ pub struct DCTDecodeParams {
     //      If the image has four components, transform CMYK values to YUVK before encoding and from YUVK to CMYK after decoding.
     //      This option is ignored if the image has one or two color components.
     #[pdf(key="ColorTransform")]
-    color_transform: i32,
+    color_transform: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +135,7 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 
-fn flate_decode(data: &[u8], params: LZWFlateParams) -> Result<Vec<u8>> {
+fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let predictor = params.predictor as usize;;
     let n_components = params.n_components as usize;
     let _bits_per_component = params.bits_per_component as usize;
@@ -194,14 +196,14 @@ fn flate_decode(data: &[u8], params: LZWFlateParams) -> Result<Vec<u8>> {
 }
 
 
-pub fn decode(data: &[u8], filter: StreamFilter) -> Result<Vec<u8>> {
-    match filter {
+pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
+    match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
         StreamFilter::ASCII85Decode => decode_85(data),
-        StreamFilter::LZWDecode (_params) => unimplemented!(),
-        StreamFilter::FlateDecode (params) => flate_decode(data, params),
+        StreamFilter::LZWDecode (_) => unimplemented!(),
+        StreamFilter::FlateDecode (ref params) => flate_decode(data, params),
         StreamFilter::JPXDecode => unimplemented!(),
-        StreamFilter::DCTDecode (_params) => unimplemented!(),
+        StreamFilter::DCTDecode (_) => unimplemented!(),
     }
 }
 

@@ -1,5 +1,5 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
-use std::{str, io};
+use std::{str};
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use err::*;
@@ -198,12 +198,6 @@ pub struct Trailer {
 #[derive(Object, Debug)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
-    // Normal Stream fields
-    /* TODO Stream<T>
-    #[pdf(key = "Filter")]
-    filter: Vec<StreamFilter>,
-    */
-
     // XRefStream fields
     #[pdf(key = "Size")]
     pub size: i32,
@@ -221,6 +215,7 @@ pub struct XRefInfo {
     pub w: Vec<i32>
 }
 
+/*
 pub struct XRefStream {
     pub data: Vec<u8>,
     pub info: XRefInfo,
@@ -240,3 +235,4 @@ impl Object for XRefStream {
         })
     }
 }
+*/

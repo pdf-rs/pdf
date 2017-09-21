@@ -5,7 +5,6 @@ extern crate glob;
 use std::str;
 use memmap::Mmap;
 use pdf::file::File;
-use pdf::stream::ObjectStream;
 use pdf::object::*;
 use pdf::parser::parse;
 use glob::glob;
@@ -29,7 +28,8 @@ fn read_pages() {
             Ok(path) => {
                 println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
-                let file = File::<Vec<u8>>::open(path.to_str().unwrap()).unwrap_or_else(|e| print_err(e));
+                let path = path.to_str().unwrap();
+                let file = File::<Vec<u8>>::open(path).unwrap_or_else(|e| print_err(e));
                 let num_pages = file.get_root().pages.count;
                 for i in 0..num_pages {
                     println!("\nRead page {}", i);
@@ -43,7 +43,7 @@ fn read_pages() {
 
 #[test]
 fn parse_objects_from_stream() {
-    let file = File::<Vec<u8>>::open(file_path!("xelatex.pdf")).unwrap();
+    let file = File::<Vec<u8>>::open(file_path!("xelatex.pdf")).unwrap_or_else(|e| print_err(e));
     // .. we know that object 13 of that file is an ObjectStream
     let obj_stream = file.deref(Ref::<ObjectStream>::new(PlainRef {id: 13, gen: 0})).unwrap_or_else(|e| print_err(e));
     for i in 0..obj_stream.n_objects() {

@@ -13,8 +13,15 @@ use std::ops::Deref;
 #[derive(Debug, Clone)]
 pub struct Stream<T> {
     // General dictionary entries
-    pub length: i32,
-    pub filters: Vec<StreamFilter>,
+    length: i32,
+    /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and
+    /// `/DecodeParms` in the PDF specs), constructed in `from_primitive()`.
+    filters: Vec<StreamFilter>,
+
+    /// Eventual file containing the stream contentst
+    file: Option<FileSpec>,
+    /// Filters to apply to external file specified in `file`.
+    file_filters: Vec<StreamFilter>,
 
     /*
     /// Filters to apply to external file specified in `file`.
@@ -27,48 +34,109 @@ pub struct Stream<T> {
     dl: Option<usize>,
     */
     // Specialized dictionary entries
-    info: T,
+    pub info: T,
     data: Vec<u8>,
 }
-impl<T> Object for Stream<T> {
+impl<T> Stream<T> {
+    /// If the stream is not encoded, this is a no-op. `decode()` should be called whenever it's uncertain
+    /// whether the stream is encoded.
+    pub fn decode(&mut self) -> Result<()> {
+        for filter in &self.filters {
+            eprintln!("Decode filter: {:?}", filter);
+            self.data = decode(&self.data, filter)?;
+        }
+        self.filters.clear();
+        Ok(())
+    }
+    pub fn encode(&mut self, _filter: StreamFilter) {
+        // TODO this should add the filter to `self.filters` and encode the data with the given
+        // filter
+        unimplemented!();
+    }
+    pub fn get_length(&self) -> i32 {
+        self.length
+    }
+    pub fn get_filters(&self) -> &[StreamFilter] {
+        &self.filters
+    }
+    /// Get data - panics if it's not decoded in advance.
+    /// Ideally I would have it take &mut self and do it itself,
+    /// but that leads to problems in the code...
+    pub fn get_data(&self) -> &[u8] {
+        if self.get_filters().len() > 0 {
+            panic!("Data not decoded! Consider using `get_data_raw`");
+        }
+        &self.data
+    }
+    /// Doesn't decode/unfilter the data.
+    pub fn get_data_raw(&self) -> &[u8] {
+        &self.data
+    }
+}
+impl<T: Object> Object for Stream<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
         // (TODO) there are a lot of `clone()` here because we can't consume the dict before we
         // pass it to T::from_primitive.
-        let dict = p.to_dictionary(resolve)?;
+        let mut stream = p.to_stream(resolve)?;
+        let dict = &mut stream.info;
 
         let length = i32::from_primitive(
-            dict.get("Length").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Length"}))?.clone(),
+            dict.remove("Length").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Length"}))?,
             resolve)?;
 
         let filters = Vec::<String>::from_primitive(
-            dict.get("Filter").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Filter"}))?.clone(),
+            dict.remove("Filter").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Filter"}))?,
             resolve)?;
 
         let decode_params = Vec::<Dictionary>::from_primitive(
-            dict.get("DecodeParms").ok_or(Error::from(ErrorKind::EntryNotFound {key: "DecodeParms"} ))?.clone(),
+            dict.remove("DecodeParms").or(Some(Primitive::Null)).unwrap(),
             resolve)?;
 
-        let file = Option::<FileSpecification>::from_primitive(
-            dict.get("F").ok_or(Error::from(ErrorKind::EntryNotFound{key:"F"}))?.clone(),
+        let file = Option::<FileSpec>::from_primitive(
+            dict.remove("F").or(Some(Primitive::Null)).unwrap(),
+            resolve)?;
+
+        let file_filters = Vec::<String>::from_primitive(
+            dict.remove("FFilter").or(Some(Primitive::Null)).unwrap(),
+            resolve)?;
+
+        let file_decode_params = Vec::<Dictionary>::from_primitive(
+            dict.remove("FDecodeParms").or(Some(Primitive::Null)).unwrap(),
             resolve)?;
 
 
         let mut new_filters = Vec::new();
+        let mut new_file_filters = Vec::new();
 
         for (i, filter) in filters.iter().enumerate() {
             let params = match decode_params.get(i) {
                 Some(params) => params.clone(),
                 None => Dictionary::default(),
             };
-            new_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve));
+            new_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve)?);
+        }
+        for (i, filter) in file_filters.iter().enumerate() {
+            let params = match file_decode_params.get(i) {
+                Some(params) => params.clone(),
+                None => Dictionary::default(),
+            };
+            new_file_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve)?);
         }
 
-
-        // TODO NEXt
-        unimplemented!();
+        Ok(Stream {
+            // General
+            length: length,
+            filters: new_filters,
+            file: file,
+            file_filters: new_file_filters,
+            // Special
+            info: T::from_primitive(Primitive::Dictionary (dict.clone()), resolve)?,
+            // Data
+            data: stream.data,
+        })
     }
 }
 impl<T> Deref for Stream<T> {

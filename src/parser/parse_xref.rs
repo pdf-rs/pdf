@@ -2,7 +2,7 @@ use err::*;
 use num_traits::PrimInt;
 use parser::lexer::Lexer;
 use xref::{XRef, XRefSection};
-use file::XRefStream;
+use file::XRefInfo;
 use primitive::{Primitive, Dictionary};
 use object::*;
 use parser::{parse_with_lexer};
@@ -51,21 +51,14 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = parse_indirect_stream(lexer).chain_err(|| "Reading Xref stream")?.1;
     let trailer = xref_stream.info.clone();
-    let xref_stream = XRefStream::from_primitive(Primitive::Stream(xref_stream), resolve)?;
-
+    let mut xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
+    xref_stream.decode();
+    let mut data_left = &xref_stream.get_data()[..];
 
     let width = &xref_stream.info.w;
 
-    let index = xref_stream.info.index;
-    println!("index: {:?}", index);
-    /*
-    let index = match xref_stream.info.index {
-        Some(index) => index,
-        None => vec![0, xref_stream.info.size], // TODO <-- This is the default value
-    };
-    */
+    let index = &xref_stream.info.index;
     
-    let mut data_left = &xref_stream.data[..];
 
     let mut sections = Vec::new();
     for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {

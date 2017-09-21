@@ -3,7 +3,6 @@ extern crate glob;
 
 use std::str;
 use pdf::file::File;
-use pdf::stream::ObjectStream;
 use pdf::object::*;
 use pdf::parser::parse;
 use glob::glob;

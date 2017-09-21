@@ -391,7 +391,7 @@ pub struct NameDictionary {
     urls: NameTree<T>,
     */
     #[pdf(key="EmbeddedFiles")]
-    embedded_files: Option<NameTree<FileSpecification>>,
+    embedded_files: Option<NameTree<FileSpec>>,
     /*
     #[pdf(key="AlternativePresentations")]
     alternate_presentations: NameTree<AlternatePresentation>,
@@ -407,8 +407,8 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object)]
-pub struct FileSpecification {
+#[derive(Object, Debug, Clone)]
+pub struct FileSpec {
     #[pdf(key="EF")]
     ef: Option<Files<EmbeddedFile>>,
     /*
@@ -417,8 +417,8 @@ pub struct FileSpecification {
     */
 }
 
-/// Used only as elements in `FileSpecification`
-#[derive(Object)]
+/// Used only as elements in `FileSpec`
+#[derive(Object, Debug, Clone)]
 pub struct Files<T: Object> {
     #[pdf(key="F")]
     f: Option<T>,
@@ -433,7 +433,7 @@ pub struct Files<T: Object> {
 }
 
 /// PDF Embedded File Stream.
-#[derive(Object)]
+#[derive(Object, Debug, Clone)]
 pub struct EmbeddedFile {
     /*
     #[pdf(key="Subtype")]
@@ -443,7 +443,7 @@ pub struct EmbeddedFile {
     params: Option<EmbeddedFileParamDict>,
 }
 
-#[derive(Object)]
+#[derive(Object, Debug, Clone)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size")]
     size: Option<i32>,
