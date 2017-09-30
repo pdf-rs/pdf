@@ -98,8 +98,10 @@ use proc_macro::TokenStream;
 use syn::*;
 
 // Debugging:
+/*
 use std::fs::{OpenOptions};
 use std::io::Write;
+*/
 
 
 
@@ -118,12 +120,14 @@ pub fn object(input: TokenStream) -> TokenStream {
     let gen = impl_object(&ast);
     
     // Debugging
+    /*
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
         .open("/tmp/proj/src/main.rs")
         .unwrap();
     write!(file, "{}", gen).unwrap();
+    */
     // Return the generated impl
     gen.parse().unwrap()
 }
@@ -418,8 +422,6 @@ fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
                             match <#ty as Object>::from_primitive(primitive, resolve) {
                                 Ok(obj) => obj,
                                 Err(e) => bail!(e.chain_err(|| format!("Key {}: cannot convert from primitive to type {}", #key, stringify!(#ty)))),
-                                // ^ TODO (??)
-                                // Err(_) => bail!("Hello"),
                             }
                         None =>  // Try to construct T from Primitive::Null
                             match <#ty as Object>::from_primitive(::pdf::primitive::Primitive::Null, resolve) {
