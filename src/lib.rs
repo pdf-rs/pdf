@@ -4,6 +4,7 @@
 //#![feature(slice_get_slice)]
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
 #![allow(unused_doc_comment)] // /* TODO temporary because of err.rs */
+#![feature(use_extern_macros)] // because of error-chain experimenting
 #[macro_use]
 extern crate pdf_derive;
 #[macro_use]
@@ -38,6 +39,15 @@ mod pdf {
 
 /// Prints the error if it is an Error
 pub fn print_err<T>(err: Error) -> T {
+    use std;
+    use std::process::exit;
+
+    // Get path of project... kinda silly way.
+    let mut proj_path = std::env::current_exe().unwrap();
+    proj_path.pop(); proj_path.pop(); proj_path.pop(); proj_path.pop();
+    proj_path.push("src");
+
+    println!("PATH: {:?}", proj_path);
     println!("\n === \nError: {}", err);
     for e in err.iter().skip(1) {
         println!("  caused by: {}", e);
@@ -45,9 +55,19 @@ pub fn print_err<T>(err: Error) -> T {
     println!(" === \n");
 
     if let Some(backtrace) = err.backtrace() {
-        println!("backtrace: {:?}", backtrace);
+        for frame in backtrace.frames() {
+            for symbol in frame.symbols() {
+                if let Some(path) = symbol.filename() {
+                    if let Some(lineno) = symbol.lineno() {
+                        if proj_path < path {
+                            println!("\tat {:?}:{}", path, lineno);
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    println!(" === \n");
-    panic!("Exiting");
+    println!(" === \nExiting...");
+    panic!("");
 }

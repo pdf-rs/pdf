@@ -112,8 +112,14 @@ impl Object for i32 {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         write!(out, "{}", self)
     }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
-        p.as_integer()
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        Ok(
+        match p {
+            Primitive::Integer (n) => n,
+            Primitive::Reference (r) => i32::from_primitive(resolve.resolve(r)?, resolve)?,
+            p => bail!(Error::from(ErrorKind::UnexpectedPrimitive {expected: "Integer", found: p.get_debug_name()}))
+        }
+        )
     }
 }
 impl Object for usize {
@@ -150,7 +156,11 @@ impl Object for Dictionary {
         write!(out, ">>")
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        p.to_dictionary(r)
+        match p {
+            Primitive::Dictionary(dict) => Ok(dict),
+            Primitive::Reference(id) => Dictionary::from_primitive(r.resolve(id)?, r),
+            _ => bail!(ErrorKind::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}),
+        }
     }
 }
 
@@ -229,5 +239,15 @@ impl<V: Object> Object for BTreeMap<String, V> {
             }
             p =>  Err(ErrorKind::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
         }
+    }
+}
+
+impl Object for () {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        write!(out, "null")
+
+    }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        Ok(())
     }
 }

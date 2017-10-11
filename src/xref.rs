@@ -91,10 +91,10 @@ impl XRefTable {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
             let should_be_updated = match self.entries[i] {
-                XRef::Raw { gen_nr: gen, .. } |
-                XRef::Free { gen_nr: gen, .. } => entry.get_gen_nr() > gen,
-                XRef::Stream { .. }
-                | XRef::Invalid => true,
+                XRef::Raw { gen_nr: gen, .. } | XRef::Free { gen_nr: gen, .. }
+                    => entry.get_gen_nr() > gen,
+                XRef::Stream { .. } | XRef::Invalid
+                    => true,
                 x => panic!("found {:?}", x)
             };
             let dst = &mut self.entries[section.first_id as usize + i];

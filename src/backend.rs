@@ -55,6 +55,7 @@ pub trait Backend: Sized {
                 None => None
             }
         };
+        println!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
             let mut lexer = Lexer::new(self.read(prev_xref_offset as usize..)?);
             let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;
@@ -79,17 +80,18 @@ pub trait Backend: Sized {
         match refs.get(r.id)? {
             XRef::Raw {pos, ..} => {
                 let mut lexer = Lexer::new(self.read(pos..)?);
-                Ok(parse_indirect_object(&mut lexer)?.1)
+                Ok(parse_indirect_object(&mut lexer, &|r| self.resolve(refs, r))?.1)
+                // ^ NOTE: using self.resolve is tentative.. don't know if it leads to problems
             }
             XRef::Stream {stream_id, index} => {
                 let obj_stream = self.resolve(refs, PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
                 let obj_stream = ObjectStream::from_primitive(obj_stream, &|r| self.resolve(refs, r))?;
                 let slice = obj_stream.get_object_slice(index)?;
-                parse(slice)
+                parse(slice, &|r| self.resolve(refs, r))
             }
             XRef::Free {..} => bail!(ErrorKind::FreeObject {obj_nr: r.id}),
-            _ => panic!("Trying to dereference a Free object (perhaps it shouldn't give an error though)")
-                //
+            XRef::Promised => unimplemented!(),
+            XRef::Invalid => bail!(ErrorKind::NullRef {obj_nr: r.id}),
         }
     }
 }

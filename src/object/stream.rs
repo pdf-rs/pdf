@@ -13,7 +13,6 @@ use std::ops::Deref;
 #[derive(Debug, Clone)]
 pub struct Stream<T> {
     // General dictionary entries
-    length: i32,
     /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and
     /// `/DecodeParms` in the PDF specs), constructed in `from_primitive()`.
     filters: Vec<StreamFilter>,
@@ -23,6 +22,7 @@ pub struct Stream<T> {
     /// Filters to apply to external file specified in `file`.
     file_filters: Vec<StreamFilter>,
 
+    // TODO:
     /*
     /// Filters to apply to external file specified in `file`.
     #[pdf(key="FFilter")]
@@ -36,6 +36,18 @@ pub struct Stream<T> {
     // Specialized dictionary entries
     pub info: T,
     data: Vec<u8>,
+}
+
+impl<T: Default> Default for Stream<T> {
+    fn default() -> Stream<T> {
+        Stream {
+            filters: Vec::new(),
+            file: None,
+            file_filters: Vec::new(),
+            info: T::default(),
+            data: Vec::new(),
+        }
+    }
 }
 impl<T> Stream<T> {
     /// If the stream is not encoded, this is a no-op. `decode()` should be called whenever it's uncertain
@@ -53,15 +65,15 @@ impl<T> Stream<T> {
         // filter
         unimplemented!();
     }
-    pub fn get_length(&self) -> i32 {
-        self.length
+    pub fn get_length(&self) -> usize {
+        self.data.len()
     }
     pub fn get_filters(&self) -> &[StreamFilter] {
         &self.filters
     }
     /// Get data - panics if it's not decoded in advance.
     /// Ideally I would have it take &mut self and do it itself,
-    /// but that leads to problems in the code...
+    /// but that leads to problems in the code (aliasing)...
     pub fn get_data(&self) -> &[u8] {
         if self.get_filters().len() > 0 {
             panic!("Data not decoded! Consider using `get_data_raw`");
@@ -80,12 +92,13 @@ impl<T: Object> Object for Stream<T> {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
         // (TODO) there are a lot of `clone()` here because we can't consume the dict before we
         // pass it to T::from_primitive.
-        let mut stream = p.to_stream(resolve)?;
+        let mut stream = PdfStream::from_primitive(p, resolve)?;
         let dict = &mut stream.info;
 
-        let length = i32::from_primitive(
+        let length = usize::from_primitive(
             dict.remove("Length").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Length"}))?,
             resolve)?;
+        assert_eq!(length, stream.data.len());
 
         let filters = Vec::<String>::from_primitive(
             dict.remove("Filter").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Filter"}))?,
@@ -128,12 +141,13 @@ impl<T: Object> Object for Stream<T> {
 
         Ok(Stream {
             // General
-            length: length,
             filters: new_filters,
             file: file,
             file_filters: new_file_filters,
             // Special
             info: T::from_primitive(Primitive::Dictionary (dict.clone()), resolve)?,
+
+
             // Data
             data: stream.data,
         })
@@ -174,9 +188,7 @@ pub struct ObjStmInfo {
 
 #[allow(dead_code)]
 pub struct ObjectStream {
-    pub data:       Vec<u8>,
-    /// Fields in the stream dictionary.
-    pub info:       ObjStmInfo,
+    stream: Stream<ObjStmInfo>,
     /// Byte offset of each object. Index is the object number.
     offsets:    Vec<usize>,
     /// The object number of this object.
@@ -184,30 +196,23 @@ pub struct ObjectStream {
 }
 impl Object for ObjectStream {
     fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        self.info.serialize(out)?;
-        
-        out.write_all(b"stream\n")?;
-        out.write_all(&self.data)?;
-        out.write_all(b"\nendstream\n")?;
-        Ok(())
+        unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<ObjectStream> {
-        let stream = p.to_stream(resolve)?;
-        let info = ObjStmInfo::from_primitive(Primitive::Dictionary(stream.info), resolve)?;
-        let data = stream.data.to_vec();
+        let mut stream = Stream::<ObjStmInfo>::from_primitive(p, resolve)?;
+        stream.decode();
 
         let mut offsets = Vec::new();
         {
-            let mut lexer = Lexer::new(&data);
-            for _ in 0..(info.num_objects as ObjNr) {
+            let mut lexer = Lexer::new(&stream.get_data());
+            for _ in 0..(stream.info.num_objects as ObjNr) {
                 let _obj_nr = lexer.next()?.to::<ObjNr>()?;
                 let offset = lexer.next()?.to::<usize>()?;
                 offsets.push(offset);
             }
         }
         Ok(ObjectStream {
-            data: data,
-            info: info,
+            stream: stream,
             offsets: offsets,
             id: 0, // TODO
         })
@@ -216,13 +221,15 @@ impl Object for ObjectStream {
 
 impl ObjectStream {
     pub fn new<B: Backend>(file: &mut File<B>) -> ObjectStream {
+        unimplemented!();
+        /*
         let self_ref: PlainRef = (&file.promise::<ObjectStream>()).into();
         ObjectStream {
-            data:       Vec::new(),
-            info:       ObjStmInfo::default(),
+            stream: Stream::default(),
             offsets:    Vec::new(),
             id:         self_ref.id
         }
+        */
     }
     pub fn id(&self) -> ObjNr {
         self.id
@@ -231,50 +238,17 @@ impl ObjectStream {
         if index >= self.offsets.len() {
             bail!(ErrorKind::ObjStmOutOfBounds {index: index, max: self.offsets.len()});
         }
-        let start = self.info.first as usize + self.offsets[index];
+        let start = self.stream.info.first as usize + self.offsets[index];
         let end = if index == self.offsets.len() - 1 {
-            self.data.len()
+            self.stream.data.len()
         } else {
-            self.info.first as usize + self.offsets[index + 1]
+            self.stream.info.first as usize + self.offsets[index + 1]
         };
 
-        Ok(&self.data[start..end])
+        Ok(&self.stream.data[start..end])
     }
     /// Returns the number of contained objects
     pub fn n_objects(&self) -> usize {
         self.offsets.len()
     }
 }
-
-/*
-#[allow(unused_must_use)] // TODO: how to handle Errors from write! ?
-impl Into<Primitive> for ObjectStream {
-    fn into(self) -> Primitive {
-        let mut data: Vec<u8> = vec![];
-        let mut offsets_iter = self.offsets.iter().cloned();
-        if let Some(first) = offsets_iter.next() {
-            write!(data, "{}", first);
-            for o in offsets_iter {
-                write!(data, " {}", o);
-            }
-        }
-        write!(data, "\n");
-        let first = data.len();
-        
-        data.extend_from_slice(&self.data);
-        
-        
-        let mut info = Dictionary::new();
-        info.insert("Type".into(), Primitive::Name("ObjStm".into()));
-        info.insert("Length".into(), Primitive::Integer(data.len() as i32));
-        info.insert("Filter".into(), Primitive::Null);
-        info.insert("N".into(), Primitive::Integer(self.offsets.len() as i32));
-        info.insert("First".into(), Primitive::Integer(first as i32));
-        
-        Primitive::Stream(PdfStream {
-            info: info,
-            data: data
-        })
-    }
-}
-*/

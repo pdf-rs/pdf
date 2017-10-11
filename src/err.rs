@@ -51,7 +51,7 @@ error_chain! {
         }
         FollowReference {
             description("Cannot follow reference during parsing (most likely /Length of Stream).")
-            display("Cannot follow reference during parsing (most likely /Length of Stream).")
+            display("Cannot follow reference during parsing - no resolve fn given (most likely /Length of Stream).")
         }
         XRefStreamType {found: u64} {
             description("Erroneous 'type' field in xref stream - expected 0, 1 or 2")
@@ -88,6 +88,11 @@ error_chain! {
             description("Tried to dereference free object.")
             display("Tried to dereference free object nr {}.", obj_nr)
         }
+        NullRef {obj_nr: u64} {
+            description("Tried to dereference non-existing object.")
+            display("Tried to dereference non-existing object nr {}.", obj_nr)
+        }
+
         UnexpectedPrimitive {expected: &'static str, found: &'static str} {
             description("Expected a certain primitive kind, found another.")
             display("Expected {}, found {}.", expected, found)

@@ -96,6 +96,7 @@ impl<B: Backend> File<B> {
         let backend = B::open(path)?;
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
         let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve(&refs, r))?;
+        eprintln!("XREFS {:?}", refs);
         //
         
         Ok(File {
@@ -132,6 +133,8 @@ impl<B: Backend> File<B> {
         find_page(&self.trailer.root.pages, 0, n)
     }
     
+    // From earlier attempts
+    /*
     pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
         update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
     }
@@ -169,7 +172,7 @@ impl<B: Backend> File<B> {
         
         Ref::from_id(id)
     }
-
+ */
 }
 
 

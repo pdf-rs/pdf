@@ -4,9 +4,8 @@
 use parser::lexer::*;
 use err::*;
 use primitive::{Primitive, PdfStream};
-use object::PlainRef;
 use parser::{parse_with_lexer, parse_stream_with_lexer};
-use object::{GenNr, ObjNr, NO_RESOLVE};
+use object::*;
 
 
 /// Parses an Object starting at the current position of `lexer`. Almost as
@@ -14,23 +13,23 @@ use object::{GenNr, ObjNr, NO_RESOLVE};
 /// cannot dereference 
 
 
-pub fn parse_indirect_object(lexer: &mut Lexer) -> Result<(PlainRef, Primitive)> {
+pub fn parse_indirect_object(lexer: &mut Lexer, r: &Resolve) -> Result<(PlainRef, Primitive)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;
 
-    let obj = parse_with_lexer(lexer)?;
+    let obj = parse_with_lexer(lexer, r)?;
 
     lexer.next_expect("endobj")?;
 
     Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
 }
-pub fn parse_indirect_stream(lexer: &mut Lexer) -> Result<(PlainRef, PdfStream)> {
+pub fn parse_indirect_stream(lexer: &mut Lexer, r: &Resolve) -> Result<(PlainRef, PdfStream)> {
     let obj_nr = lexer.next()?.to::<ObjNr>()?;
     let gen_nr = lexer.next()?.to::<GenNr>()?;
     lexer.next_expect("obj")?;
 
-    let stm = parse_stream_with_lexer(lexer, NO_RESOLVE)?;
+    let stm = parse_stream_with_lexer(lexer, r)?;
 
     lexer.next_expect("endobj")?;
 

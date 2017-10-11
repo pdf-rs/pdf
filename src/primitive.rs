@@ -95,7 +95,11 @@ impl Object for PdfStream {
         writeln!(out, "\nendstream")
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        p.to_stream(resolve)
+        match p {
+            Primitive::Stream (stream) => Ok(stream),
+            Primitive::Reference (r) => PdfStream::from_primitive(resolve.resolve(r)?, resolve),
+            p => bail!(ErrorKind::UnexpectedPrimitive {expected: "Stream", found: p.get_debug_name()})
+        }
     }
 }
 
@@ -171,6 +175,9 @@ impl PdfString {
 }
 
 
+// TODO:
+// Noticed some inconsistency here.. I think to_* and as_* should not take Resolve, and not accept
+// Reference. Only from_primitive() for the respective type resolves References.
 impl Primitive {
     /// For debugging / error messages: get the name of the variant
     pub fn get_debug_name(&self) -> &'static str {
@@ -187,12 +194,14 @@ impl Primitive {
             Primitive::Name (..) => "Name",
         }
     }
+    /// Doesn't accept a Reference (contrary to i32::from_primitive())
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn as_number(&self) -> Result<f32> {
         match *self {
             Primitive::Integer(n) => Ok(n as f32),
@@ -200,6 +209,7 @@ impl Primitive {
             ref p => unexpected_primitive!(Number, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn as_bool(&self) -> Result<bool> {
         match *self {
             Primitive::Boolean (b) => Ok(b),
@@ -212,36 +222,41 @@ impl Primitive {
             p => unexpected_primitive!(Reference, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn to_array(self, r: &Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
-            Primitive::Reference(id) => r.resolve(id)?.to_array(r),
+            // Primitive::Reference(id) => r.resolve(id)?.to_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn to_dictionary(self, r: &Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
-            Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
+            // Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn to_name(self) -> Result<String> {
         match self {
             Primitive::Name(name) => Ok(name),
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn to_string(self) -> Result<PdfString> {
         match self {
             Primitive::String(data) => Ok(data),
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
+    /// Doesn't accept a Reference
     pub fn to_stream(self, r: &Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
-            Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
+            // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
             p => unexpected_primitive!(Stream, p.get_debug_name())
         }
     }
@@ -303,12 +318,15 @@ impl<T: Object> Object for Option<T> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        Ok(
         match p {
-            Primitive::Null => None,
-            p => Some(T::from_primitive(p, r)?)
+            Primitive::Null => Ok(None),
+            p => match T::from_primitive(p, r) {
+                Ok(p) => Ok(Some(p)),
+                // References to non-existing objects ought not to be an error
+                Err(Error(ErrorKind::NullRef {..}, _)) => Ok(None),
+                Err(e) => bail!(e),
+            }
         }
-        )
     }
 }
 

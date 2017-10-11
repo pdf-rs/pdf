@@ -15,9 +15,12 @@ Read, alter and write PDF files.
 
 
 [dependencies.pdf_derive]
-# git = "https://github.com/pdf-rs/pdf_derive.git"
-path = "../derive"
-version = "= 0.1.15"
+git = "https://github.com/pdf-rs/pdf_derive.git"
+version = "= 0.1.16"
+
+# [dependencies.error-chain]
+# path = "../../error-chain"
+# version = "0.11.0"
 
 [dependencies]
 error-chain = "0.11.0"

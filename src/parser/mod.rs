@@ -14,13 +14,13 @@ use object::{ObjNr, GenNr, PlainRef, Resolve};
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
-pub fn parse(data: &[u8]) -> Result<Primitive> {
-    parse_with_lexer(&mut Lexer::new(data))
+pub fn parse(data: &[u8], r: &Resolve) -> Result<Primitive> {
+    parse_with_lexer(&mut Lexer::new(data), r)
 }
 
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
-pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
+pub fn parse_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -30,7 +30,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.to_string();
-                let obj = parse_with_lexer(lexer)?;
+                let obj = parse_with_lexer(lexer, r)?;
                 dict.insert(key, obj);
             } else if delimiter.equals(b">>") {
                 break;
@@ -44,7 +44,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
 
             let length = match dict.get("Length") {
                 Some(&Primitive::Integer (n)) => n,
-                Some(&Primitive::Reference (_)) => bail!(ErrorKind::FollowReference),
+                Some(&Primitive::Reference (n)) => r.resolve(n)?.as_integer()?,
                 _ => bail!(ErrorKind::EntryNotFound {key: "Length"}),
             };
 
@@ -97,7 +97,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer) -> Result<Primitive> {
         let mut array = Vec::new();
         // Array
         loop {
-            let element = parse_with_lexer(lexer)?;
+            let element = parse_with_lexer(lexer, r)?;
             array.push(element.clone());
 
             // Exit if closing delimiter
@@ -160,7 +160,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<PdfStream> 
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.to_string();
-                let obj = parse_with_lexer(lexer)?;
+                let obj = parse_with_lexer(lexer, r)?;
                 dict.insert(key, obj);
             } else if delimiter.equals(b">>") {
                 break;
@@ -174,11 +174,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<PdfStream> 
 
             // Get length - look up in `resolve_fn` if necessary
             let length = match dict.get("Length") {
-                Some(&Primitive::Reference (reference)) =>
-                    match r.resolve(reference)? {
-                        Primitive::Integer (n) => n,
-                        other => bail!(ErrorKind::UnexpectedPrimitive {expected: "Integer", found: other.get_debug_name()}),
-                    },
+                Some(&Primitive::Reference (reference)) => r.resolve(reference)?.as_integer()?,
                 Some(&Primitive::Integer (n)) => n,
                 Some(other) => bail!(ErrorKind::UnexpectedPrimitive {expected: "Integer or Reference", found: other.get_debug_name()}),
                 None => bail!(ErrorKind::EntryNotFound {key: "Length"}),

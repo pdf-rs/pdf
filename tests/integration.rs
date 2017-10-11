@@ -23,7 +23,8 @@ fn open_file() {
 
 #[test]
 fn read_pages() {
-    for entry in glob("tests/files/*.pdf").expect("Failed to read glob pattern") {
+    // for entry in glob("tests/files/*.pdf").expect("Failed to read glob pattern") {
+    for entry in glob("tests/files/pdf-sample.pdf").expect("Failed to read glob pattern") {
         match entry {
             Ok(path) => {
                 println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
@@ -43,13 +44,14 @@ fn read_pages() {
 
 #[test]
 fn parse_objects_from_stream() {
+    use pdf::object::NO_RESOLVE;
     let file = File::<Vec<u8>>::open(file_path!("xelatex.pdf")).unwrap_or_else(|e| print_err(e));
     // .. we know that object 13 of that file is an ObjectStream
     let obj_stream = file.deref(Ref::<ObjectStream>::new(PlainRef {id: 13, gen: 0})).unwrap_or_else(|e| print_err(e));
     for i in 0..obj_stream.n_objects() {
         let slice = obj_stream.get_object_slice(i).unwrap_or_else(|e| print_err(e));
         println!("Object slice #{}: {}\n", i, str::from_utf8(slice).unwrap());
-        parse(slice).unwrap_or_else(|e| print_err(e));
+        parse(slice, NO_RESOLVE).unwrap_or_else(|e| print_err(e));
     }
 }
 

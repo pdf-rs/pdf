@@ -18,7 +18,7 @@ impl Object for PagesNode {
         }
     }
     fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
-        let dict = p.to_dictionary(r)?;
+        let dict = Dictionary::from_primitive(p, r)?;
         Ok(
         match dict["Type"].clone().to_name()?.as_str() {
             "Page" => PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?),
@@ -167,17 +167,17 @@ impl Object for XObject {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let mut stream = p.to_stream(resolve)?;
+        let mut stream = PdfStream::from_primitive(p, resolve)?;
 
-        let ty = stream.info.remove("Type")
-            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?
+        let ty = stream.info.get("Type")
+            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?.clone()
             .to_name()?;
         if ty != "XObject" {
             bail!("XObject: /Type != XObject");
         }
 
-        let subty = stream.info.remove("Subtype")
-            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Subtype"}))?
+        let subty = stream.info.get("Subtype")
+            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Subtype"}))?.clone()
             .to_name()?;
         Ok(match subty.as_str() {
             "PS" => XObject::Postscript (PostScriptXObject::from_primitive(Primitive::Stream(stream), resolve)?),
@@ -243,7 +243,7 @@ pub struct ImageDict {
     // SMaskInData: i32
     ///The integer key of the image’s entry in the structural parent tree
     #[pdf(key="StructParent")]
-    struct_parent: i32,
+    struct_parent: Option<i32>,
 
     #[pdf(key="ID")]
     id: Option<PdfString>,
