@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::collections::HashMap;
 use err::*;
 use object::*;
-use xref::{XRef, XRefTable};
+use xref::{XRefTable};
 use primitive::{Primitive, Dictionary, PdfString};
 use backend::Backend;
 

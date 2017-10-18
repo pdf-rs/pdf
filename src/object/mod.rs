@@ -247,7 +247,7 @@ impl Object for () {
         write!(out, "null")
 
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(_p: Primitive, _resolve: &Resolve) -> Result<Self> {
         Ok(())
     }
 }

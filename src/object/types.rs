@@ -84,10 +84,6 @@ pub struct PageTree {
 }
 
 
-impl PageTree {
-    fn inherit_resources(&mut self) {
-    }
-}
 
 #[derive(Object, Debug)]
 pub struct Page {

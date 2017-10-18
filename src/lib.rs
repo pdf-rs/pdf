@@ -40,7 +40,6 @@ mod pdf {
 /// Prints the error if it is an Error
 pub fn print_err<T>(err: Error) -> T {
     use std;
-    use std::process::exit;
 
     // Get path of project... kinda silly way.
     let mut proj_path = std::env::current_exe().unwrap();

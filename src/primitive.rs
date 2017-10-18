@@ -223,7 +223,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_array(self, r: &Resolve) -> Result<Vec<Primitive>> {
+    pub fn to_array(self, _r: &Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
             // Primitive::Reference(id) => r.resolve(id)?.to_array(r),
@@ -231,7 +231,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_dictionary(self, r: &Resolve) -> Result<Dictionary> {
+    pub fn to_dictionary(self, _r: &Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
             // Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
@@ -253,7 +253,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_stream(self, r: &Resolve) -> Result<PdfStream> {
+    pub fn to_stream(self, _r: &Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
             // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),

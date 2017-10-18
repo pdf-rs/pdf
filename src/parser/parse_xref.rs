@@ -53,11 +53,11 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Re
     let trailer = xref_stream.info.clone();
     let mut xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
     xref_stream.decode();
-    let mut data_left = &xref_stream.get_data()[..];
+    let mut data_left = &xref_stream.data[..];
 
-    let width = &xref_stream.info.w;
+    let width = &xref_stream.w;
 
-    let index = &xref_stream.info.index;
+    let index = &xref_stream.index;
     
 
     let mut sections = Vec::new();
