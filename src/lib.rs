@@ -462,7 +462,6 @@ fn impl_from_dict(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
         }
     ).collect();
     quote! {
-        use ::pdf::ResultExt;
         let mut dict = Dictionary::from_primitive(p, resolve)?;
         #( #checks )*
         #( #let_parts )*
