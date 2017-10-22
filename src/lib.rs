@@ -171,21 +171,16 @@ fn field_attrs(field: &Field) -> (String, Option<String>, bool) {
 struct GlobalAttrs {
     /// List of checks to do in the dictionary (LHS is the key, RHS is the expected value)
     checks: Vec<(String, String)>,
+    type_name: Option<String>,
+    type_required: bool,
     is_stream: bool,
 }
 impl GlobalAttrs {
-    fn default() -> GlobalAttrs {
-        GlobalAttrs {
-            checks: Vec::new(),
-            is_stream: false,
-        }
-    }
-
     /// The PDF type may be explicitly specified as an attribute with type "Type". Else, it is the name
     /// of the struct.
     fn from_ast(ast: &DeriveInput) -> GlobalAttrs {
         let mut attrs = GlobalAttrs::default();
-        let mut pdf_type = Some(String::from(ast.ident.as_ref()));
+
         for attr in &ast.attrs {
             match attr.value {
                 MetaItem::List(ref ident, ref list) if ident == "pdf" => {
@@ -195,9 +190,16 @@ impl GlobalAttrs {
                             NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, ref value))
                                 => if ident == "Type" {
                                     match *value {
-                                        Lit::Str(ref value, _) => pdf_type = Some(value.clone()),
-                                        Lit::Bool(false) => pdf_type = None,
-                                        _ => panic!("Value of 'Type' attribute must be a String or a Bool."),
+                                        Lit::Str(ref value, _) => {
+                                            if value.ends_with("?") {
+                                                attrs.type_name = Some(value[.. value.len()-1].to_string());
+                                                attrs.type_required = false;
+                                            } else {
+                                                attrs.type_name = Some(value.clone());
+                                                attrs.type_required = true;
+                                            }
+                                        },
+                                        _ => panic!("Value of 'Type' attribute must be a String."),
                                     }
                                 } else {
                                     match *value {
@@ -214,10 +216,6 @@ impl GlobalAttrs {
                 },
                 _ => {}
             }
-        }
-
-        if let Some(pdf_type) = pdf_type {
-            attrs.checks.push(("Type".into(), pdf_type));
         }
 
         attrs
@@ -317,19 +315,24 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
             }
         }
     );
-    let checks_code: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
         quote! {
             writeln!(out, "/{} /{}", #key, #val)?;
         }
-    ).collect();
+    );
 
     // Implement from_primitive()
     let from_primitive_code =  impl_from_dict(ast, fields);
-
+    let pdf_type = match attrs.type_name {
+        Some(ref ty) => quote! { writeln!(out, "/Type /{}", #ty)?; },
+        None => quote! {}
+    };
+    
     quote! {
         impl #impl_generics ::pdf::object::Object for #name #ty_generics #where_clause {
             fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
                 writeln!(out, "<<")?;
+                #pdf_type
                 #( #checks_code )*
                 #(#fields_ser)*
                 writeln!(out, ">>")?;
@@ -461,8 +464,31 @@ fn impl_from_dict(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
             }
         }
     ).collect();
+
+    let ty_check = match (attrs.type_name, attrs.type_required) {
+        (Some(ty), true) => quote! {
+            let ty = dict.remove("Type")
+                .ok_or(::pdf::Error::from(::pdf::ErrorKind::EntryNotFound { key: "Type" }))?
+                .to_name()?;
+            if ty != #ty {
+                bail!("[Dict entry /{}] != /{}", "Type", #ty);
+            }
+        },
+        (Some(ty), false) => quote! {
+            match dict.remove("Type") {
+                Some(ty) => if ty.to_name()? != #ty {
+                    bail!("[Dict entry /{}] != /{}", "Type", #ty);
+                },
+                None => {}
+            }
+        },
+        (None, _) => quote!{}
+    };
+        
+    
     quote! {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
+        #ty_check
         #( #checks )*
         #( #let_parts )*
         Ok(#name {
