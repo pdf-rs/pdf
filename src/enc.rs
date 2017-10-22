@@ -9,7 +9,6 @@ use primitive::{Primitive, Dictionary};
 
 
 #[derive(Object, Debug, Clone)]
-#[pdf(Type=false)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     predictor: i32,
@@ -24,7 +23,6 @@ pub struct LZWFlateParams {
 }
 
 #[derive(Object, Debug, Clone)]
-#[pdf(Type=false)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.

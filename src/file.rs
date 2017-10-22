@@ -177,7 +177,6 @@ impl<B: Backend> File<B> {
 
 
 #[derive(Object, Default)]
-#[pdf(Type=false)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,

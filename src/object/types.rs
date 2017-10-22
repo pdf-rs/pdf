@@ -131,7 +131,6 @@ pub struct PageLabel {
 }
 
 #[derive(Object, Debug)]
-#[pdf(Type=false)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     ext_g_state: Option<GraphicsStateParameters>,
@@ -144,7 +143,7 @@ pub struct Resources {
 }
 
 #[derive(Object, Debug)]
-#[pdf(Type = "ExtGState")]
+#[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
     //TODO
