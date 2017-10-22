@@ -41,6 +41,7 @@ pub enum StreamFilter {
     FlateDecode (LZWFlateParams),
     JPXDecode, //Jpeg2k
     DCTDecode (DCTDecodeParams),
+    CCITTFaxDecode
 }
 impl StreamFilter {
     pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &Resolve) -> Result<StreamFilter> {
@@ -53,7 +54,8 @@ impl StreamFilter {
            "FlateDecode" => StreamFilter::FlateDecode (LZWFlateParams::from_primitive(params, r)?),
            "JPXDecode" => StreamFilter::JPXDecode,
            "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
-           _ => bail!("Unrecognized filter type"),
+           "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode,
+           ty => bail!("Unrecognized filter type {:?}", ty),
        } 
        )
     }
@@ -202,6 +204,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::FlateDecode (ref params) => flate_decode(data, params),
         StreamFilter::JPXDecode => unimplemented!(),
         StreamFilter::DCTDecode (_) => unimplemented!(),
+        StreamFilter::CCITTFaxDecode => unimplemented!(),
     }
 }
 
