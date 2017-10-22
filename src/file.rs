@@ -96,7 +96,7 @@ impl<B: Backend> File<B> {
         let backend = B::open(path)?;
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
         let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve(&refs, r))?;
-        eprintln!("XREFS {:?}", refs);
+        //eprintln!("XREFS {:?}", refs);
         //
         
         Ok(File {
