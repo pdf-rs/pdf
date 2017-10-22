@@ -543,7 +543,7 @@ pub struct StructElem {
     id: Option<PdfString>,
     #[pdf(key="Pg")]
     /// `Pg`: A page object representing a page on which some or all of the content items designated by the K entry are rendered.
-    page: Ref<Page>,
+    page: Option<Ref<Page>>,
 }
 
 
@@ -561,5 +561,6 @@ pub enum StructType {
     Index,
     NonStruct,
     Private,
+    Book,
 }
 
