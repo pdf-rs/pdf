@@ -3,6 +3,7 @@
 use std::io;
 use object::*;
 use err::*;
+use content::Content;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
@@ -102,8 +103,8 @@ pub struct Page {
     #[pdf(key="TrimBox")]
     pub trim_box:   Option<Rect>,
     
-    //#[pdf(key="Contents")]
-    //pub contents:   Option<PlainRef>
+    #[pdf(key="Contents")]
+    pub contents:   Vec<Content>
 }
 
 impl Page {
@@ -114,6 +115,7 @@ impl Page {
             crop_box:   None,
             trim_box:   None,
             resources:  None,
+            contents:   Vec::new(),
         }
     }
 }
@@ -162,7 +164,7 @@ impl Object for XObject {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let mut stream = PdfStream::from_primitive(p, resolve)?;
+        let stream = PdfStream::from_primitive(p, resolve)?;
 
         let ty = stream.info.get("Type")
             .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?.clone()

@@ -24,6 +24,7 @@ pub mod xref;
 pub mod primitive;
 pub mod file;
 pub mod backend;
+pub mod content;
 
 mod err;
 // mod content;
