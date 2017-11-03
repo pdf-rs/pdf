@@ -47,7 +47,7 @@ fn find_page<'a>(pages: &'a PageTree, mut offset: i32, page_nr: i32) -> Result<&
     }
     Err(ErrorKind::PageNotFound {page_nr: page_nr}.into())
 }
-fn scan_pages<F: Fn(&Page)>(pages: &PageTree, mut offset: i32, handler: &F) -> Result<()> {
+fn scan_pages<F: FnMut(&Page)>(pages: &PageTree, mut offset: i32, handler: &mut F) -> Result<()> {
     for kid in &pages.kids {
         match *kid {
             PagesNode::Tree(ref t) => {
@@ -148,10 +148,29 @@ impl<B: Backend> File<B> {
     }
 
     pub fn get_images(&self) -> Vec<ImageXObject> {
-        scan_pages(&self.trailer.root.pages, 0, &|page| {
+        let mut images = Vec::<ImageXObject>::new();
+        scan_pages(&self.trailer.root.pages, 0, &mut |page| {
             println!("Found page!");
+            match page.resources {
+                Some(ref res) => {
+                    match res.xobject {
+                        Some(ref xobjects) => {
+                            for (name, xobject) in xobjects {
+                                match *xobject {
+                                    XObject::Image (ref img_xobject) => {
+                                        images.push(img_xobject.clone())
+                                    }
+                                    _ => {},
+                                }
+                            }
+                        },
+                        None => {},
+                    }
+                },
+                None => {},
+            }
         });
-        Vec::new()
+        images
     }
     
     // From earlier attempts
