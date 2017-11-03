@@ -47,6 +47,20 @@ fn find_page<'a>(pages: &'a PageTree, mut offset: i32, page_nr: i32) -> Result<&
     }
     Err(ErrorKind::PageNotFound {page_nr: page_nr}.into())
 }
+fn scan_pages<F: Fn(&Page)>(pages: &PageTree, mut offset: i32, handler: &F) -> Result<()> {
+    for kid in &pages.kids {
+        match *kid {
+            PagesNode::Tree(ref t) => {
+                scan_pages(t, offset, handler)?;
+            },
+            PagesNode::Leaf(ref p) => {
+                offset += 1;
+                handler(p);
+            }
+        }
+    }
+    Ok(())
+}
     
 // tail call to trick borrowck
 fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
@@ -131,6 +145,13 @@ impl<B: Backend> File<B> {
             return Err(ErrorKind::PageOutOfBounds {page_nr: n, max: self.get_num_pages()?}.into());
         }
         find_page(&self.trailer.root.pages, 0, n)
+    }
+
+    pub fn get_images(&self) -> Vec<ImageXObject> {
+        scan_pages(&self.trailer.root.pages, 0, &|page| {
+            println!("Found page!");
+        });
+        Vec::new()
     }
     
     // From earlier attempts
