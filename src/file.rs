@@ -107,6 +107,8 @@ impl<'a> Iterator for PagesIterator<'a> {
                 }
             }
         }
+
+        None
     }
 }
 
