@@ -75,6 +75,26 @@ fn update_pages(pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page)
     Err(ErrorKind::PageNotFound {page_nr: page_nr}.into())
 }
 
+pub struct PagesIterator<'a> {
+    stack: Vec<(&'a PageTree, usize)> // points to nodes that have not been processed yet
+}
+impl<'a> Iterator for PagesIterator<'a> {
+    type Item = &'a Page;
+    fn next(&mut self) -> Option<&'a Page> {
+        // grab one item. it may or may not point to a valid index
+        while let Some((tree, pos)) = self.stack.pop() {
+            if pos < tree.kids.len() {
+                // push the next index on the stack ...
+                self.stack.push((tree, pos+1));
+                
+                match tree.kids[pos] {
+                    PagesNode::Tree(ref child) => self.stack.push((child, 0)), // push the child on the stack
+                    PagesNode::Leaf(ref page) => return Some(page)
+                }
+            }
+        }
+    }
+}
 
 pub struct File<B: Backend> {
     backend:    B,
@@ -122,6 +142,9 @@ impl<B: Backend> File<B> {
     pub fn deref<T: Object>(&self, r: Ref<T>) -> Result<T> {
         let primitive = self.resolve(r.get_inner())?;
         T::from_primitive(primitive, &|id| self.resolve(id))
+    }
+    pub fn pages(&self) -> PagesIterator {
+        PagesIterator { stack: vec![(&self.get_root().pages, 0)] }
     }
     pub fn get_num_pages(&self) -> Result<i32> {
         Ok(self.trailer.root.pages.count)
