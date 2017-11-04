@@ -52,7 +52,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Re
     let xref_stream = parse_indirect_stream(lexer, resolve).chain_err(|| "Reading Xref stream")?.1;
     let trailer = xref_stream.info.clone();
     let mut xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
-    xref_stream.decode();
+    xref_stream.decode()?;
     let mut data_left = &xref_stream.data[..];
 
     let width = &xref_stream.w;

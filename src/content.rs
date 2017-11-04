@@ -1,12 +1,14 @@
 /// PDF content streams.
-use file::Reader;
-use file::Primitive;
-
 use std;
 use std::fmt::{Display, Formatter};
-use err::*;
 use std::mem::swap;
-use file::lexer::Lexer;
+use std::io;
+
+use err::*;
+use object::*;
+use parser::{Lexer, parse_with_lexer};
+use primitive::*;
+use object::decode_fully;
 
 /// Operation in a PDF content stream.
 #[derive(Debug, Clone)]
@@ -32,7 +34,7 @@ pub struct Content {
 }
 
 impl Content {
-    pub fn parse_from(data: &[u8]) -> Result<Content> {
+    fn parse_from(data: &[u8], resolve: &Resolve) -> Result<Content> {
         let mut lexer = Lexer::new(data);
 
         let mut content = Content {operations: Vec::new()};
@@ -40,7 +42,7 @@ impl Content {
 
         loop {
             let backup_pos = lexer.get_pos();
-            let obj = Reader::parse_direct_object(&mut lexer);
+            let obj = parse_with_lexer(&mut lexer, resolve);
             match obj {
                 Ok(obj) => {
                     // Operand
@@ -49,7 +51,7 @@ impl Content {
                 Err(_) => {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
-                    let operator = lexer.next()?.as_string();
+                    let operator = lexer.next()?.to_string();
                     let mut operation = Operation::new(operator, Vec::new());
                     // Give operands to operation and empty buffer.
                     swap(&mut buffer, &mut operation.operands);
@@ -63,6 +65,18 @@ impl Content {
             }
         }
         Ok(content)
+    }
+}
+
+impl Object for Content {
+    /// Write object as a byte stream
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {unimplemented!()}
+    /// Convert primitive to Self
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
+        let mut info = StreamInfo::<()>::from_primitive(Primitive::Dictionary (info), resolve)?;
+        decode_fully(&mut data, &mut info.filters)?;
+        Content::parse_from(&data, resolve)
     }
 }
 
@@ -81,7 +95,7 @@ impl Display for Operation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "Operation: {} (", self.operator)?;
         for operand in &self.operands {
-            write!(f, "{}, ", operand)?;
+            write!(f, "{:?}, ", operand)?;
         }
         write!(f, ")\n")
     }

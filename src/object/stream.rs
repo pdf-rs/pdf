@@ -20,7 +20,7 @@ impl<I: Object> Object for Stream<I> {
     fn serialize<W: io::Write>(&self, _: &mut W) -> io::Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
+        let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
         Ok(Stream {
             info: info,
@@ -54,12 +54,12 @@ pub struct StreamInfo<I> {
     // General dictionary entries
     /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and
     /// `/DecodeParms` in the PDF specs), constructed in `from_primitive()`.
-    filters: Vec<StreamFilter>,
+    pub filters: Vec<StreamFilter>,
 
     /// Eventual file containing the stream contentst
-    file: Option<FileSpec>,
+    pub file: Option<FileSpec>,
     /// Filters to apply to external file specified in `file`.
-    file_filters: Vec<StreamFilter>,
+    pub file_filters: Vec<StreamFilter>,
 
     // TODO:
     /*
@@ -117,7 +117,7 @@ impl<T: Object> Object for StreamInfo<T> {
             resolve)?;
 
         let filters = Vec::<String>::from_primitive(
-            dict.remove("Filter").ok_or(Error::from(ErrorKind::EntryNotFound{key:"Filter"}))?,
+            dict.remove("Filter").or(Some(Primitive::Null)).unwrap(),
             resolve)?;
 
         let decode_params = Vec::<Dictionary>::from_primitive(
@@ -168,8 +168,8 @@ impl<T: Object> Object for StreamInfo<T> {
 
 
 // TODO: Where should this go??
-/// Decode data with all filters
-fn decode_fully(data: &mut Vec<u8>, filters: &mut Vec<StreamFilter>) -> Result<()> {
+/// Decode data with all filters (should be moved)
+pub fn decode_fully(data: &mut Vec<u8>, filters: &mut Vec<StreamFilter>) -> Result<()> {
     for filter in filters.iter() {
         *data = decode(&data, filter)?;
     }
@@ -212,7 +212,7 @@ impl Object for ObjectStream {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<ObjectStream> {
         let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
         let mut info = StreamInfo::<ObjStmInfo>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        decode_fully(&mut data, &mut info.filters);
+        decode_fully(&mut data, &mut info.filters)?;
 
         let mut offsets = Vec::new();
         {

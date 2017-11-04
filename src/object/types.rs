@@ -3,6 +3,7 @@
 use std::io;
 use object::*;
 use err::*;
+use content::Content;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
@@ -102,8 +103,8 @@ pub struct Page {
     #[pdf(key="TrimBox")]
     pub trim_box:   Option<Rect>,
     
-    //#[pdf(key="Contents")]
-    //pub contents:   Option<PlainRef>
+    #[pdf(key="Contents")]
+    pub contents:   Vec<Content>
 }
 
 impl Page {
@@ -114,6 +115,7 @@ impl Page {
             crop_box:   None,
             trim_box:   None,
             resources:  None,
+            contents:   Vec::new(),
         }
     }
 }
@@ -133,12 +135,12 @@ pub struct PageLabel {
 #[derive(Object, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
-    ext_g_state: Option<GraphicsStateParameters>,
+    pub ext_g_state: Option<GraphicsStateParameters>,
     // color_space: Option<ColorSpace>,
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    xobject: Option<BTreeMap<String, XObject>>
+    pub xobject: Option<BTreeMap<String, XObject>>
     // /XObject is a dictionary that map arbitrary names to XObjects
 }
 
@@ -162,7 +164,7 @@ impl Object for XObject {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let mut stream = PdfStream::from_primitive(p, resolve)?;
+        let stream = PdfStream::from_primitive(p, resolve)?;
 
         let ty = stream.info.get("Type")
             .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?.clone()
@@ -199,26 +201,26 @@ pub struct PostScriptDict {
 
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 #[pdf(Type="XObject", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
     #[pdf(key="Width")]
-    width: i32,
+    pub width: i32,
     #[pdf(key="Height")]
-    height: i32,
+    pub height: i32,
     // ColorSpace: name or array
     #[pdf(key="BitsPerComponent")]
-    bits_per_component: i32,
+    pub bits_per_component: i32,
     // Note: only allowed values are 1, 2, 4, 8, 16. Enum?
     
     #[pdf(key="Intent")]
-    intent: Option<RenderingIntent>,
+    pub intent: Option<RenderingIntent>,
     // Note: default: "the current rendering intent in the graphics state" - I don't think this
     // ought to have a default then
 
     #[pdf(key="ImageMask", default="false")]
-    image_mask: bool,
+    pub image_mask: bool,
 
     // Mask: stream or array
     //
@@ -227,10 +229,10 @@ pub struct ImageDict {
     /// components required by `color_space` (key ColorSpace)
     // (see Decode arrays page 344)
     #[pdf(key="Decode")]
-    decode: Vec<i32>,
+    pub decode: Vec<i32>,
 
     #[pdf(key="Interpolate", default="false")]
-    interpolate: bool,
+    pub interpolate: bool,
 
     // Alternates: Vec<AlternateImage>
 
@@ -238,10 +240,10 @@ pub struct ImageDict {
     // SMaskInData: i32
     ///The integer key of the image’s entry in the structural parent tree
     #[pdf(key="StructParent")]
-    struct_parent: Option<i32>,
+    pub struct_parent: Option<i32>,
 
     #[pdf(key="ID")]
-    id: Option<PdfString>,
+    pub id: Option<PdfString>,
 
     // OPI: dict
     // Metadata: stream
@@ -250,7 +252,7 @@ pub struct ImageDict {
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
