@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use pdf::file::File;
 use pdf::print_err;
-use pdf::object::Page;
+use pdf::object::*;
 
 fn main() {
     let path = args().nth(1).expect("no file given");
@@ -20,6 +20,13 @@ fn main() {
         assert_eq!(p as *const Page, pages.next().unwrap() as *const Page); 
     }
     assert!(pages.next().is_none());
+
+    let images: Vec<_> = file.pages()
+        .filter_map(|page| page.resources.as_ref())
+        .filter_map(|res| res.xobject.as_ref())
+        .flat_map(|xo| xo)
+        .filter_map(|(_, o)| match *o { XObject::Image(ref im) => Some(im), _ => None })
+        .collect();
     
     if let Ok(elapsed) = now.elapsed() {
         println!("Time: {}s", elapsed.as_secs() as f64
