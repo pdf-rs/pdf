@@ -2,6 +2,8 @@ extern crate pdf;
 
 use std::env::args;
 use std::time::SystemTime;
+use std::fs;
+use std::io::Write;
 
 use pdf::file::File;
 use pdf::print_err;
@@ -28,6 +30,12 @@ fn main() {
         .filter_map(|(_, o)| match *o { XObject::Image(ref im) => Some(im), _ => None })
         .collect();
 
+    for (i,img) in images.iter().enumerate() {
+        let fname = format!("extracted_image{}.jpeg", i);
+        let mut f = fs::File::create(fname.as_str()).unwrap();
+        f.write(&img.data).unwrap();
+        println!("Wrote file {}.", fname);
+    }
     println!("Found {} image(s).", images.len());
 
     let fonts: Vec<_> =  file.pages()
