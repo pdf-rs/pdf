@@ -32,6 +32,9 @@ impl Dictionary {
     pub fn new() -> Dictionary {
         Dictionary { dict: BTreeMap::new() }
     }
+    pub fn len(&self) -> usize {
+        self.dict.len()
+    }
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }

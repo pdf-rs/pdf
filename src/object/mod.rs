@@ -237,6 +237,7 @@ impl<V: Object> Object for BTreeMap<String, V> {
                 }
                 Ok(new)
             }
+            Primitive::Reference (id) => BTreeMap::from_primitive(resolve.resolve(id)?, resolve),
             p =>  Err(ErrorKind::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
         }
     }

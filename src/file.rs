@@ -172,6 +172,7 @@ impl<B: Backend> File<B> {
         find_page(&self.trailer.root.pages, 0, n)
     }
 
+    /*
     pub fn get_images(&self) -> Vec<ImageXObject> {
         let mut images = Vec::<ImageXObject>::new();
         scan_pages(&self.trailer.root.pages, 0, &mut |page| {
@@ -197,6 +198,7 @@ impl<B: Backend> File<B> {
         });
         images
     }
+    */
     
     // From earlier attempts
     /*

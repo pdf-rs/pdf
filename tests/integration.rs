@@ -23,8 +23,7 @@ fn open_file() {
 
 #[test]
 fn read_pages() {
-    // for entry in glob("tests/files/*.pdf").expect("Failed to read glob pattern") {
-    for entry in glob("tests/files/pdf-sample.pdf").expect("Failed to read glob pattern") {
+    for entry in glob("tests/files/*.pdf").expect("Failed to read glob pattern") {
         match entry {
             Ok(path) => {
                 println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());

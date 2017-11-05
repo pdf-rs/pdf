@@ -23,10 +23,21 @@ fn main() {
 
     let images: Vec<_> = file.pages()
         .filter_map(|page| page.resources.as_ref())
-        .filter_map(|res| res.xobject.as_ref())
+        .filter_map(|res| res.xobjects.as_ref())
         .flat_map(|xo| xo)
         .filter_map(|(_, o)| match *o { XObject::Image(ref im) => Some(im), _ => None })
         .collect();
+
+    println!("Found {} image(s).", images.len());
+
+    let fonts: Vec<_> =  file.pages()
+        .filter_map(|page| page.resources.as_ref())
+        .filter_map(|res| res.fonts.as_ref())
+        .flat_map(|xo| xo)
+        .filter_map(|(_, o)| Some(o) )
+        .collect();
+
+    println!("Found {} font(s).", fonts.len());
     
     if let Ok(elapsed) = now.elapsed() {
         println!("Time: {}s", elapsed.as_secs() as f64

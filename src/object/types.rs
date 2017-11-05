@@ -140,8 +140,48 @@ pub struct Resources {
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    pub xobject: Option<BTreeMap<String, XObject>>
+    pub xobjects: Option<BTreeMap<String, XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
+    #[pdf(key="Font")]
+    pub fonts: Option<BTreeMap<String, Font>>,
+}
+
+#[derive(Debug)]
+pub enum Font {
+    Type0,
+    Type1,
+    MMType1,
+    Type3,
+    TrueType,
+    CIDFontType0,
+    CIDFontType2,
+}
+impl Object for Font {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> { unimplemented!() }
+    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+        let dict = Dictionary::from_primitive(p, resolve)?;
+        let ty = dict.get("Type")
+            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?.clone()
+            .to_name()?;
+        if ty != "Font" {
+            bail!("Font dictionary: /Type != Font");
+        }
+
+        match dict.get("Subtype") {
+            Some(&Primitive::Name(ref name)) =>
+                Ok(match name.as_str() {
+                    "Type0" => Font::Type0,
+                    "Type1" => Font::Type1,
+                    "MMType1" => Font::MMType1,
+                    "Type3" => Font::Type3,
+                    "TrueType" => Font::TrueType,
+                    "CIDFontType0" => Font::CIDFontType0,
+                    "CIDFontType2" => Font::CIDFontType2,
+                    s => bail!("Wrong /Type {} for font dictionary.", s),
+                }),
+            _ => bail!(ErrorKind::EntryNotFound {key: "Type"}),
+        }
+    }
 }
 
 #[derive(Object, Debug)]
