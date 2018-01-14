@@ -1,7 +1,5 @@
-use memmap::{Mmap, Protection};
+use memmap::Mmap;
 use err::*;
-use std::fs::File;
-use std::io::Read;
 use parser::Lexer;
 use parser::{read_xref_and_trailer_at, parse_indirect_object, parse};
 use xref::{XRef, XRefTable};
@@ -17,7 +15,6 @@ use std::ops::{
 
 
 pub trait Backend: Sized {
-    fn open(path: &str) -> Result<Self>;
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]>;
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]>;
     fn len(&self) -> usize;
@@ -98,9 +95,6 @@ pub trait Backend: Sized {
 
 
 impl Backend for Mmap {
-    fn open(path: &str) -> Result<Mmap> {
-        Ok(Mmap::open_path(path, Protection::Read)?)
-    }
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
         let r = range.to_range(self.len());
         Ok(unsafe {
@@ -120,12 +114,6 @@ impl Backend for Mmap {
 
 
 impl Backend for Vec<u8> {
-    fn open(path: &str) -> Result<Self> {
-        let mut buf = Vec::new();
-        let mut f = File::open(path)?;
-        f.read_to_end(&mut buf)?;
-        Ok(buf)
-    }
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
         let r = range.to_range(self.len());
         Ok(&self[r])

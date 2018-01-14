@@ -1,4 +1,6 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
+use std;
+use std::io::Read;
 use std::{str};
 use std::marker::PhantomData;
 use std::collections::HashMap;
@@ -128,12 +130,16 @@ impl<B: Backend> File<B> {
             changes:    HashMap::new()
         }
     }
-    pub fn open(path: &str) -> Result<File<B>> {
-        let backend = B::open(path)?;
+
+    /// Opens the file at `path` and uses Vec<u8> as backend.
+    pub fn open(path: &str) -> Result<File<Vec<u8>>> {
+        // Read file contents to Vec
+        let mut backend = Vec::new();
+        let mut f = std::fs::File::open(path)?;
+        f.read_to_end(&mut backend)?;
+
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
         let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &|r| backend.resolve(&refs, r))?;
-        //eprintln!("XREFS {:?}", refs);
-        //
         
         Ok(File {
             backend:    backend,
