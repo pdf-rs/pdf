@@ -133,7 +133,7 @@ impl fmt::Debug for PdfString {
                 x => write!(f, "\\x{:02x}", x)?
             }
         }
-        Ok(())
+        write!(f, "b\"")
     }
 }
 impl Object for PdfString {
