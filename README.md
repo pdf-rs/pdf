@@ -5,5 +5,4 @@ Read, alter and write PDF files.
 
 One easy way you can contribute is to add different PDF files to `tests/files` and see if they pass the tests (`cargo test`).
 
-Feel free to contribute with ideas, issues or code! You can also join the discussion on `#rust-pdf` on freenode.
-
+Feel free to contribute with ideas, issues or code! You can also join the discussion on `#rust-pdf` at Mozilla IRC.
