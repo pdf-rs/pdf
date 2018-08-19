@@ -22,7 +22,7 @@ use num_traits::int::PrimInt;
 
 #[derive(Clone)]
 pub struct StringLexer<'a> {
-    pos: usize,
+    pos: usize, // points to next byte
     nested: i32, // How far in () we are nested
     buf: &'a [u8],
 }
@@ -65,27 +65,19 @@ impl<'a> StringLexer<'a> {
 
                     _ => {
                         self.back()?;
-                        // A character code must follow. 1-3 numbers.
+                        let start = self.get_offset();
                         let mut char_code: u8 = 0;
-                        let mut octal_digits = Vec::new();
+                        
+                        // A character code must follow. 1-3 numbers.
                         for _ in 0..3 {
                             let c = self.peek_byte()?;
                             if c >= b'0' && c <= b'9' {
                                 self.next_byte()?;
-                                octal_digits.push(c - b'0');
+                                char_code = char_code * 8 + (c - b'0');
                             } else {
                                 break;
                             }
                         }
-                        if octal_digits.is_empty() {
-                            bail!("Wrong character following `\\`: {}", self.peek_byte()?);
-                        }
-                        // Convert string of octal digits to number
-                        octal_digits.reverse(); // little-endian
-                        for (i, digit) in octal_digits.iter().enumerate() {
-                            char_code += digit * 8.pow(i as u32);
-                        }
-
                         Some(char_code)
                     }
                 }
@@ -111,7 +103,7 @@ impl<'a> StringLexer<'a> {
     }
 
     fn next_byte(&mut self) -> Result<u8> {
-        if self.pos < self.buf.len() - 1 {
+        if self.pos < self.buf.len() {
             self.pos += 1;
             Ok(self.buf[self.pos-1])
         } else {
@@ -127,8 +119,8 @@ impl<'a> StringLexer<'a> {
         }
     }
     fn peek_byte(&mut self) -> Result<u8> {
-        if self.pos < self.buf.len() - 1 {
-            Ok(self.buf[self.pos + 1])
+        if self.pos < self.buf.len() {
+            Ok(self.buf[self.pos])
         } else {
             bail!(ErrorKind::EOF);
         }
