@@ -78,7 +78,6 @@ impl<'a> StringLexer<'a> {
                                 break;
                             }
                         }
-                        println!("{} -> o{:o}", ::std::str::from_utf8(&self.buf[start - 1 .. start + 3]).unwrap(), char_code); 
                         Some(char_code)
                     }
                 }
