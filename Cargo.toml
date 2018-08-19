@@ -2,7 +2,7 @@
 name = "pdf"
 version = "0.6.2"
 authors = ["Erlend Hofstad Langseth <3rlendhl@gmail.com>", "Sebastian Köln <sebk@rynx.org>"]
-repository = "https://github.com/Ploppz/pdf-rs"
+repository = "https://github.com/pdf/pdf-rs"
 readme = "README.md"
 keywords = ["pdf"]
 license = "MIT"
@@ -34,7 +34,7 @@ ordermap = "0.2.9"
 memmap = "0.5.2"
 encoding = "0.2.33"
 lzw = "0.10.0"
-tuple = "0.1.7"
+tuple = "0.4.0"
 glob = "0.2.11"
 chrono = "0.4.0"
 
