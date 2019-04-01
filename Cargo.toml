@@ -13,16 +13,8 @@ Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)
 """
 
-
-[dependencies.pdf_derive]
-git = "https://github.com/pdf-rs/pdf_derive.git"
-version = "= 0.1.17"
-
-# [dependencies.error-chain]
-# path = "../../error-chain"
-# version = "0.11.0"
-
 [dependencies]
+pdf_derive = "0.1.17"
 error-chain = "0.11.0"
 isatty = "0.1"
 num-traits = "0.1.36"
