@@ -3,7 +3,7 @@
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
-#![allow(unused_doc_comment)] // /* TODO temporary because of err.rs */
+    #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
 #![feature(use_extern_macros)] // because of error-chain experimenting
 #[macro_use]
 extern crate pdf_derive;

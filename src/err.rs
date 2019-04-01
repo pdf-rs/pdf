@@ -1,3 +1,7 @@
+// Workaround until 
+// https://github.com/rust-lang-nursery/error-chain/pull/255
+// is implemented:
+#![allow(deprecated)]
 use object::ObjNr;
 error_chain! {
     // The type defined for this error. These are the conventional
