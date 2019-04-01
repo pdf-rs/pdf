@@ -1,10 +1,8 @@
-#![feature(attr_literals)]
 #![recursion_limit="128"]
 //#![feature(collections_range)]
 //#![feature(slice_get_slice)]
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
     #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
-#![feature(use_extern_macros)] // because of error-chain experimenting
 #[macro_use]
 extern crate pdf_derive;
 #[macro_use]
