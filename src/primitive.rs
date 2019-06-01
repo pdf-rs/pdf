@@ -326,7 +326,8 @@ impl<T: Object> Object for Option<T> {
             p => match T::from_primitive(p, r) {
                 Ok(p) => Ok(Some(p)),
                 // References to non-existing objects ought not to be an error
-                Err(Error(ErrorKind::NullRef {..}, _)) => Ok(None),
+                Err(Error(ErrorKind::NullRef {..}, _)) |
+                Err(Error(ErrorKind::FreeObject { .. }, _)) => Ok(None),
                 Err(e) => bail!(e),
             }
         }
