@@ -206,11 +206,11 @@ impl Object for XObject {
     fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
         let stream = PdfStream::from_primitive(p, resolve)?;
 
-        let ty = stream.info.get("Type")
-            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?.clone()
-            .to_name()?;
-        if ty != "XObject" {
-            bail!("XObject: /Type != XObject");
+        match stream.info.get("Type") {
+            Some(ty) => if ty.clone().to_name()? != "XObject" {
+                bail!("XObject: /Type != XObject");
+            }
+            None => {},
         }
 
         let subty = stream.info.get("Subtype")
@@ -233,7 +233,7 @@ pub type ImageXObject = Stream<ImageDict>;
 pub type FormXObject = Stream<FormDict>;
 
 #[derive(Object, Debug)]
-#[pdf(Type="XObject", Subtype="PS")]
+#[pdf(Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
 }
@@ -242,7 +242,7 @@ pub struct PostScriptDict {
 
 
 #[derive(Object, Debug, Clone)]
-#[pdf(Type="XObject", Subtype="Image")]
+#[pdf(Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
     #[pdf(key="Width")]
@@ -302,7 +302,7 @@ pub enum RenderingIntent {
 
 
 #[derive(Object, Debug)]
-#[pdf(Type="XObject", Subtype="Form")]
+#[pdf(Subtype="Form")]
 pub struct FormDict {
     // TODO
 }
