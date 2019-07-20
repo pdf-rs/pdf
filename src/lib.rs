@@ -7,6 +7,8 @@
 extern crate pdf_derive;
 #[macro_use]
 extern crate error_chain;
+#[macro_use]
+extern crate log;
 extern crate num_traits;
 extern crate inflate;
 extern crate itertools;
