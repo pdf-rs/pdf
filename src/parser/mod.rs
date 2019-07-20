@@ -8,7 +8,7 @@ pub use self::parse_object::*;
 pub use self::parse_xref::*;
 
 use err::*;
-use self::lexer::{StringLexer};
+use self::lexer::{HexStringLexer, StringLexer};
 use primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use object::{ObjNr, GenNr, PlainRef, Resolve};
 
@@ -125,9 +125,20 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &Resolve) -> Result<Primitive> {
 
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
-        let hex_str = lexer.next()?.to_vec();
-        lexer.next_expect(">")?;
-        Primitive::String (PdfString::new(hex_str))
+        let mut string: Vec<u8> = Vec::new();
+
+        let bytes_traversed = {
+            let mut hex_string_lexer = HexStringLexer::new(lexer.get_remaining_slice());
+            for byte in hex_string_lexer.iter() {
+                let byte = byte?;
+                string.push(byte);
+            }
+            hex_string_lexer.get_offset()
+        };
+        // Advance to end of string
+        lexer.offset_pos(bytes_traversed);
+
+        Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"true") {
         Primitive::Boolean (true)
     } else if first_lexeme.equals(b"false") {
