@@ -90,7 +90,7 @@ impl XRefTable {
     pub fn add_entries_from(&mut self, section: XRefSection) {
         for (i, entry) in section.entries.iter().enumerate() {
             // Early return if the entry we have has larger or equal generation number
-            let should_be_updated = match self.entries[i] {
+            let should_be_updated = match self.entries[section.first_id as usize + i] {
                 XRef::Raw { gen_nr: gen, .. } | XRef::Free { gen_nr: gen, .. }
                     => entry.get_gen_nr() > gen,
                 XRef::Stream { .. } | XRef::Invalid
