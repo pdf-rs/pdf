@@ -97,15 +97,23 @@ pub trait Backend: Sized {
 impl Backend for Mmap {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
         let r = range.to_range(self.len());
-        Ok(unsafe {
-            &self.as_slice()[r]
-        })
+        if r.end >= r.start {
+            Ok(unsafe {
+                &self.as_slice()[r]
+            })
+        } else {
+            bail!(ErrorKind::EOF)
+        }
     }
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
         let r = range.to_range(self.len());
-        Ok(unsafe {
-            &mut self.as_mut_slice()[r]
-        })
+        if r.end >= r.start {
+            Ok(unsafe {
+                &mut self.as_mut_slice()[r]
+            })
+        } else {
+            bail!(ErrorKind::EOF)
+        }
     }
     fn len(&self) -> usize {
         self.len()
@@ -116,11 +124,19 @@ impl Backend for Mmap {
 impl Backend for Vec<u8> {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
         let r = range.to_range(self.len());
-        Ok(&self[r])
+        if r.end >= r.start {
+            Ok(&self[r])
+        } else {
+            bail!(ErrorKind::EOF)
+        }
     }
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
         let r = range.to_range(self.len());
-        Ok(&mut self[r])
+        if r.end >= r.start {
+            Ok(&mut self[r])
+        } else {
+            bail!(ErrorKind::EOF)
+        }
     }
     fn len(&self) -> usize {
         self.len()
