@@ -143,18 +143,171 @@ impl<'a, 'b> Iterator for StringLexerIter<'a, 'b> {
     }
 }
 
-/* not done..
+pub struct HexStringLexer<'a> {
+    pos: usize, // points to next byte
+    buf: &'a [u8],
+}
 
+impl<'a> HexStringLexer<'a> {
+    /// `buf` should start right after the `<` delimiter, and may span all the way to EOF.
+    /// HexStringLexer will determine the end of the string.
+    pub fn new(buf: &'a [u8]) -> HexStringLexer<'a> {
+        HexStringLexer { pos: 0, buf }
+    }
 
-#[cfg(test)]
-mod tests {
-    use reader::lexer::StringLexer;
-    #[test]
-    fn tests() {
-        let vec = b"a\\nb\\rc\\td\\(f/)\\\\hei)";
-        let lexer = StringLexer::new(vec);
-        let lexemes: Vec<Result<u8>> = lexer.iter().collect();
+    pub fn iter<'b>(&'b mut self) -> HexStringLexerIter<'a, 'b> {
+        HexStringLexerIter { lexer: self }
+    }
+
+    /// Get offset/position from start of string
+    pub fn get_offset(&self) -> usize {
+        self.pos
+    }
+
+    fn next_non_whitespace_char(&mut self) -> Result<u8> {
+        let mut byte = self.read_byte()?;
+        while byte == b' ' || byte == b'\t' || byte == b'\n' || byte == b'\r' || byte == b'\x0c' {
+            byte = self.read_byte()?;
+        }
+        Ok(byte)
+    }
+
+    pub fn next_hex_byte(&mut self) -> Result<Option<u8>> {
+        let c1 = self.next_non_whitespace_char()?;
+        let high_nibble: u8 = match c1 {
+            b'0'...b'9' => c1 - b'0',
+            b'A'...b'F' => c1 - b'A' + 0xA,
+            b'a'...b'f' => c1 - b'a' + 0xA,
+            b'>' => return Ok(None),
+            _ => bail!(ErrorKind::HexDecode {
+                pos: self.pos,
+                bytes: [c1, self.peek_byte().unwrap_or(0)]
+            }),
+        };
+        let c2 = self.next_non_whitespace_char()?;
+        let low_nibble: u8 = match c2 {
+            b'0'...b'9' => c2 - b'0',
+            b'A'...b'F' => c2 - b'A' + 0xA,
+            b'a'...b'f' => c2 - b'a' + 0xA,
+            b'>' => {
+                self.back()?;
+                0
+            }
+            _ => bail!(ErrorKind::HexDecode {
+                pos: self.pos,
+                bytes: [c1, c2]
+            }),
+        };
+        Ok(Some((high_nibble << 4) | low_nibble))
+    }
+
+    fn read_byte(&mut self) -> Result<u8> {
+        if self.pos < self.buf.len() {
+            self.pos += 1;
+            Ok(self.buf[self.pos - 1])
+        } else {
+            bail!(ErrorKind::EOF);
+        }
+    }
+
+    fn back(&mut self) -> Result<()> {
+        if self.pos > 0 {
+            self.pos -= 1;
+            Ok(())
+        } else {
+            bail!(ErrorKind::EOF);
+        }
+    }
+
+    fn peek_byte(&mut self) -> Result<u8> {
+        if self.pos < self.buf.len() {
+            Ok(self.buf[self.pos])
+        } else {
+            bail!(ErrorKind::EOF)
+        }
     }
 }
 
-*/
+pub struct HexStringLexerIter<'a: 'b, 'b> {
+    lexer: &'b mut HexStringLexer<'a>,
+}
+
+impl<'a, 'b> Iterator for HexStringLexerIter<'a, 'b> {
+    type Item = Result<u8>;
+
+    fn next(&mut self) -> Option<Result<u8>> {
+        match self.lexer.next_hex_byte() {
+            Err(e) => Some(Err(e)),
+            Ok(Some(s)) => Some(Ok(s)),
+            Ok(None) => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Result;
+    use parser::lexer::{HexStringLexer, StringLexer};
+
+    #[test]
+    fn tests() {
+        let vec = b"a\\nb\\rc\\td\\(f/)\\\\hei)";
+        let mut lexer = StringLexer::new(vec);
+        let lexemes: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+        assert_eq!(
+            lexemes,
+            vec![
+                b'a',
+                b'\n',
+                b'b',
+                b'\r',
+                b'c',
+                b'\t',
+                b'd',
+                b'(',
+                b'f',
+                b'/',
+            ]
+        );
+    }
+
+    #[test]
+    fn hex_test() {
+        let input = b"901FA3>";
+        let mut lexer = HexStringLexer::new(input);
+        let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+        assert_eq!(
+            result,
+            vec![
+                b'\x90',
+                b'\x1f',
+                b'\xa3',
+            ]
+        );
+
+        let input = b"901FA>";
+        let mut lexer = HexStringLexer::new(input);
+        let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+        assert_eq!(
+            result,
+            vec![
+                b'\x90',
+                b'\x1f',
+                b'\xa0',
+            ]
+        );
+
+        let input = b"1 9F\t5\r\n4\x0c62a>";
+        let mut lexer = HexStringLexer::new(input);
+        let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+        assert_eq!(
+            result,
+            vec![
+                b'\x19',
+                b'\xf5',
+                b'\x46',
+                b'\x2a',
+            ]
+        );
+    }
+}
