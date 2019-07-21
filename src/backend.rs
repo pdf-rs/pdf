@@ -52,7 +52,7 @@ pub trait Backend: Sized {
                 None => None
             }
         };
-        println!("READ XREF AND TABLE");
+        trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
             let mut lexer = Lexer::new(self.read(prev_xref_offset as usize..)?);
             let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, NO_RESOLVE)?;

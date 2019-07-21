@@ -32,7 +32,7 @@ impl<I: Object> Object for Stream<I> {
 impl<I: Object> Stream<I> {
     pub fn decode(&mut self) -> Result<()> {
         for filter in &self.info.filters {
-            eprintln!("Decode filter: {:?}", filter);
+            trace!("Decode filter: {:?}", filter);
             self.data = decode(&self.data, filter)?;
         }
         self.info.filters.clear();
