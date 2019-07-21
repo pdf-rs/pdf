@@ -96,24 +96,16 @@ pub trait Backend: Sized {
 
 impl Backend for Mmap {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
-        let r = range.to_range(self.len());
-        if r.end >= r.start {
-            Ok(unsafe {
-                &self.as_slice()[r]
-            })
-        } else {
-            bail!(ErrorKind::EOF)
-        }
+        let r = range.to_range(self.len())?;
+        Ok(unsafe {
+            &self.as_slice()[r]
+        })
     }
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
-        let r = range.to_range(self.len());
-        if r.end >= r.start {
-            Ok(unsafe {
-                &mut self.as_mut_slice()[r]
-            })
-        } else {
-            bail!(ErrorKind::EOF)
-        }
+        let r = range.to_range(self.len())?;
+        Ok(unsafe {
+            &mut self.as_mut_slice()[r]
+        })
     }
     fn len(&self) -> usize {
         self.len()
@@ -123,20 +115,12 @@ impl Backend for Mmap {
 
 impl Backend for Vec<u8> {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
-        let r = range.to_range(self.len());
-        if r.end >= r.start {
-            Ok(&self[r])
-        } else {
-            bail!(ErrorKind::EOF)
-        }
+        let r = range.to_range(self.len())?;
+        Ok(&self[r])
     }
     fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
-        let r = range.to_range(self.len());
-        if r.end >= r.start {
-            Ok(&mut self[r])
-        } else {
-            bail!(ErrorKind::EOF)
-        }
+        let r = range.to_range(self.len())?;
+        Ok(&mut self[r])
     }
     fn len(&self) -> usize {
         self.len()
@@ -157,8 +141,30 @@ pub trait IndexRange
     fn end(&self) -> Option<usize> { None }
 
     /// `len`: the size of whatever container that is being indexed
-    fn to_range(&self, len: usize) -> Range<usize> {
-        self.start().unwrap_or(0) .. self.end().unwrap_or(len)
+    fn to_range(&self, len: usize) -> Result<Range<usize>> {
+        let start = match self.start() {
+            Some(start) => {
+                if start < 0 {
+                    return bail!(ErrorKind::EOF);
+                }
+                start
+            }
+            None => 0,
+        };
+        let end = match self.end() {
+            Some(end) => {
+                if end > len {
+                    return bail!(ErrorKind::EOF);
+                }
+                end
+            }
+            None => len,
+        };
+        if end >= start {
+            Ok(start .. end)
+        } else {
+            bail!(ErrorKind::EOF)
+        }
     }
 }
 
