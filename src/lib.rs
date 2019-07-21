@@ -259,7 +259,7 @@ fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::To
                     }
                 )
             }
-            fn from_primitive(p: Primitive, _resolve: &Resolve) -> Result<Self> {
+            fn from_primitive(p: Primitive, _resolve: &Resolve) -> ::pdf::Result<Self> {
                 #from_primitive_code
             }
         }
