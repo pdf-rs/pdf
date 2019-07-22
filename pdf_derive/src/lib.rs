@@ -18,7 +18,7 @@
 //!
 //! Examples:
 //!
-//! ```
+//! ```norun
 //! #[derive(Object)]
 //! #[pdf(Type="XObject", Subtype="Image")]
 //! /// A variant of XObject
@@ -47,7 +47,7 @@
 //!
 //! Example:
 //!
-//! ```
+//! ```norun
 //! #[derive(Object)]
 //! #[pdf(Type = "XRef")]
 //! pub struct XRefInfo {
@@ -73,7 +73,7 @@
 //! ## 3. Enum from PDF Name
 //! Example:
 //!
-//! ```
+//! ```norun
 //! #[derive(Object, Debug)]
 //! pub enum StreamFilter {
 //!     ASCIIHexDecode,
@@ -96,6 +96,7 @@ extern crate quote;
 
 use proc_macro::TokenStream;
 use syn::*;
+type SynStream = syn::export::TokenStream2;
 
 // Debugging:
 /*
@@ -110,57 +111,65 @@ use std::io::Write;
 
 #[proc_macro_derive(Object, attributes(pdf))]
 pub fn object(input: TokenStream) -> TokenStream {
-    // Construct a string representation of the type definition
-    let s = input.to_string();
-    
-    // Parse the string representation
-    let ast = syn::parse_derive_input(&s).unwrap();
+    let ast = parse_macro_input!(input as DeriveInput);
 
     // Build the impl
-    let gen = impl_object(&ast);
-    
-    // Debugging
-    /*
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("/tmp/proj/src/main.rs")
-        .unwrap();
-    write!(file, "{}", gen).unwrap();
-    */
-    // Return the generated impl
-    gen.parse().unwrap()
+    impl_object(&ast)
 }
 
-
-/// Returns (key, default, skip)
-fn field_attrs(field: &Field) -> (String, Option<String>, bool) {
-    field.attrs.iter()
-    .filter_map(|attr| match attr.value {
-        MetaItem::List(ref ident, ref list) if ident == "pdf" => {
-            let (mut key, mut default, mut skip) = (None, None, false);
-            for meta in list {
+#[derive(Default)]
+struct FieldAttrs {
+    key: Option<LitStr>,
+    default: Option<LitStr>,
+    name: Option<LitStr>,
+    skip: bool,
+    other: bool
+}
+impl FieldAttrs {
+    fn new() -> FieldAttrs {
+        FieldAttrs {
+            key: None,
+            default: None,
+            name: None,
+            skip: false,
+            other: false
+        }
+    }
+    fn key(&self) -> &LitStr {
+        self.key.as_ref().expect("no 'key' in field attributes")
+    }
+    fn name(&self) -> &LitStr {
+        self.name.as_ref().expect("no 'name' in field attributes")
+    }
+    fn default(&self) -> Option<Expr> {
+        self.default.as_ref().map(|s| parse_str(&s.value()).expect("can't parse `default` as EXPR"))
+    }
+    fn parse(list: &[Attribute]) -> FieldAttrs {
+        let mut attrs = FieldAttrs::new();
+        for attr in list.iter().filter(|attr| attr.path.is_ident("pdf")) {
+            let list = match attr.parse_meta() {
+                Ok(Meta::List(list)) => list,
+                Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
+                Err(e) => panic!("can't parse meta attributes: {}", e)
+            };
+            for meta in list.nested.iter() {
                 match *meta {
-                    NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _))) 
-                    if ident == "key"
-                        => key = Some(value.clone()),
-                    NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, Lit::Str(ref value, _)))
-                    if ident == "default"
-                        => default = Some(value.clone()),
-                    NestedMetaItem::MetaItem(MetaItem::Word(ref ident))
-                    if ident == "skip"
-                        => skip = true,
+                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref ident, lit: Lit::Str(ref value), ..})) => {
+                        match ident.to_string().as_str() {
+                            "key" => attrs.key = Some(value.clone()),
+                            "default" => attrs.default = Some(value.clone()),
+                            "name" => attrs.name = Some(value.clone()),
+                            id => panic!("unsupported key {}", id)
+                        }
+                    },
+                    NestedMeta::Meta(Meta::Word(ref ident)) if ident == "skip" => attrs.skip = true,
+                    NestedMeta::Meta(Meta::Word(ref ident)) if ident == "other" => attrs.other = true,
                     _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
                 }
             }
-            let key = match skip {
-                true => String::from(""),
-                false => key.expect("attr `key` missing"),
-            };
-            Some(( key, default, skip))
-        },
-        _ => None
-    }).next().expect("no pdf meta attribute")
+        }
+        attrs
+    }
 }
 
 
@@ -173,48 +182,49 @@ struct GlobalAttrs {
     checks: Vec<(String, String)>,
     type_name: Option<String>,
     type_required: bool,
-    is_stream: bool,
+    is_stream: bool
 }
 impl GlobalAttrs {
     /// The PDF type may be explicitly specified as an attribute with type "Type". Else, it is the name
     /// of the struct.
     fn from_ast(ast: &DeriveInput) -> GlobalAttrs {
         let mut attrs = GlobalAttrs::default();
-
-        for attr in &ast.attrs {
-            match attr.value {
-                MetaItem::List(ref ident, ref list) if ident == "pdf" => {
-                    // Loop through list of attributes
-                    for meta in list {
-                        match *meta {
-                            NestedMetaItem::MetaItem(MetaItem::NameValue(ref ident, ref value))
-                                => if ident == "Type" {
-                                    match *value {
-                                        Lit::Str(ref value, _) => {
-                                            if value.ends_with("?") {
-                                                attrs.type_name = Some(value[.. value.len()-1].to_string());
-                                                attrs.type_required = false;
-                                            } else {
-                                                attrs.type_name = Some(value.clone());
-                                                attrs.type_required = true;
-                                            }
-                                        },
-                                        _ => panic!("Value of 'Type' attribute must be a String."),
-                                    }
-                                } else {
-                                    match *value {
-                                        Lit::Str(ref value, _) => attrs.checks.push((String::from(ident.as_ref()), value.clone())),
-                                        _ => panic!("Other checks must have RHS String."),
-                                    }
+        
+        for attr in ast.attrs.iter().filter(|attr| attr.path.is_ident("pdf")) {
+            let list = match attr.parse_meta() {
+                Ok(Meta::List(list)) => list,
+                Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
+                Err(e) => panic!("can't parse meta attributes: {}", e)
+            };
+            
+            // Loop through list of attributes
+            for meta in list.nested.iter() {
+                match *meta {
+                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref ident, ref lit, ..})) => {
+                        if ident == "Type" {
+                            match lit {
+                                Lit::Str(ref value) => {
+                                    let mut value = value.value();
+                                    attrs.type_required = if value.ends_with("?") {
+                                        value.pop(); // remove '?'
+                                        false
+                                    } else {
+                                        true
+                                    };
+                                    attrs.type_name = Some(value);
                                 },
-
-                            NestedMetaItem::MetaItem(MetaItem::Word(ref ident))
-                            if ident == "is_stream" => attrs.is_stream = true,
-                            _ => {}
+                                _ => panic!("Value of 'Type' attribute must be a String."),
+                            }
+                        } else {
+                            match lit {
+                                Lit::Str(ref value) => attrs.checks.push((ident.to_string(), value.value())),
+                                _ => panic!("Other checks must have RHS String."),
+                            }
                         }
-                    }
-                },
-                _ => {}
+                    },
+                    NestedMeta::Meta(Meta::Word(ref ident)) if ident == "is_stream" => attrs.is_stream = true,
+                    _ => {}
+                }
             }
         }
 
@@ -222,92 +232,132 @@ impl GlobalAttrs {
     }
 }
 
-fn impl_object(ast: &DeriveInput) -> quote::Tokens {
+fn impl_object(ast: &DeriveInput) -> TokenStream {
     let attrs = GlobalAttrs::from_ast(&ast);
-    if attrs.is_stream {
-        match ast.body {
-            Body::Struct(ref data) => impl_object_for_stream(ast, data.fields()),
-            Body::Enum(_) => panic!("Enum can't be a PDF stream"),
-        }
-    } else {
-        match ast.body {
-            Body::Struct(ref data) => impl_object_for_struct(ast, data.fields()),
-            Body::Enum(ref variants) => impl_object_for_enum(ast, variants),
-        }
+    match (attrs.is_stream, &ast.data) {
+        (true, Data::Struct(ref data)) => impl_object_for_stream(ast, &data.fields).into(),
+        (false, Data::Struct(ref data)) => impl_object_for_struct(ast, &data.fields).into(),
+        (true, Data::Enum(ref variants)) => impl_enum_from_stream(ast, variants, &attrs).into(),
+        (false, Data::Enum(ref variants)) => impl_object_for_enum(ast, variants).into(),
+        (_, _) => unimplemented!()
     }
-    
-    
 }
 /// Accepts Name to construct enum
-fn impl_object_for_enum(ast: &DeriveInput, variants: &Vec<Variant>) -> quote::Tokens {
+fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let ser_code: Vec<_> = variants.iter().map(|var| {
-        quote! {
-            #id::#var => stringify!(#id::#var),
-        }
+    let pairs: Vec<_> = data.variants.iter().map(|var| {
+        let attrs = FieldAttrs::parse(&var.attrs);
+        let var_ident = &var.ident;
+        let name = attrs.name.map(|lit| lit.value()).unwrap_or_else(|| var.ident.to_string());
+        (name, quote! { #id::#var_ident })
     }).collect();
+    
+    let ser_code = pairs.iter().map(|(name, var)| {
+        quote! {
+            #var => #name
+        }
+    });
 
-    let from_primitive_code = impl_from_name(ast, variants);
+    let parts = pairs.iter().map(|(name, var)| {
+        quote! {
+            #name => Ok(#var)
+        }
+    });
+    
     quote! {
-        impl #impl_generics ::pdf::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> crate::error::Result<()> {
                 writeln!(out, "/{}",
                     match *self {
-                        #( #ser_code )*
+                        #( #ser_code, )*
                     }
-                )
+                )?;
+                Ok(())
             }
-            fn from_primitive(p: Primitive, _resolve: &Resolve) -> ::pdf::Result<Self> {
-                #from_primitive_code
+            fn from_primitive(p: crate::primitive::Primitive, _resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
+                match p {
+                    crate::primitive::Primitive::Name(name) => {
+                        match name.as_str() {
+                            #( #parts, )*
+                            s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
+                        }
+                    }
+                    _ => Err(crate::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
+                }
             }
         }
     }
 }
 
-/// Returns code for from_primitive that accepts Name
-fn impl_from_name(ast: &syn::DeriveInput, variants: &Vec<Variant>) -> quote::Tokens {
+fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs) -> SynStream {
     let id = &ast.ident;
-    let parts: Vec<quote::Tokens> = variants.iter().map(|var| {
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    let ty_check = match (&attrs.type_name, attrs.type_required) {
+        (Some(ref ty), required) => quote! {
+            stream.info.expect(stringify!(#id), "Type", #ty, #required)?;
+        },
+        (None, _) => quote!{}
+    };
+    
+    let variants_code: Vec<_> = data.variants.iter().map(|var| {
+        let attrs = FieldAttrs::parse(&var.attrs);
+        let inner_ty = match var.fields {
+            Fields::Unnamed(ref fields) => {
+                assert_eq!(fields.unnamed.len(), 1, "all variants in a stream enum have to have exactly one unnamed field");
+                fields.unnamed.first().unwrap().value().ty.clone()
+            },
+            _ => panic!("all variants in a stream enum have to have exactly one unnamed field")
+        };
+        let name = attrs.name.map(|lit| lit.value()).unwrap_or_else(|| var.ident.to_string());
+        let variant_ident = &var.ident;
         quote! {
-            stringify!(#var) => #id::#var,
+            #name => Ok(#id::#variant_ident ( #inner_ty::from_primitive(crate::primitive::Primitive::Stream(stream), resolve)?))
         }
     }).collect();
+    
     quote! {
-        Ok(
-        match p {
-            Primitive::Name (name) => {
-                match name.as_str() {
-                    #( #parts )*
-                    s => bail!(format!("Enum {} from_primitive: no variant {}.", stringify!(#id), s)),
+        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> crate::error::Result<()> {
+                unimplemented!();
+            }
+            fn from_primitive(p: crate::primitive::Primitive, resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
+                let mut stream = PdfStream::from_primitive(p, resolve)?;
+                #ty_check
+                
+                let subty = stream.info.get("Subtype")
+                    .ok_or(PdfError::MissingEntry { typ: stringify!(#id), field: "Subtype".into()})?
+                    .as_name()?;
+                
+                match subty {
+                    #( #variants_code, )*
+                    s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.into() })
                 }
             }
-            _ => bail!(::pdf::Error::from(::pdf::ErrorKind::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() })),
         }
-        )
     }
-
 }
 
 /// Accepts Dictionary to construct a struct
-fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
-    let name = &ast.ident;
+fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
+    let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
 
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        let (key, default, skip) = field_attrs(field);
-        (field.ident.clone(), key, default, skip)
+        (field.ident.clone(), FieldAttrs::parse(&field.attrs))
     }).collect();
     
     // Implement serialize()
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref key, ref _default, skip)|
-        if skip {
-            quote! {}
+    .map( |&(ref field, ref attrs)|
+        if attrs.skip | attrs.other {
+            quote!()
         } else {
+            let key = attrs.key();
             quote! {
                 write!(out, "{} ", #key)?;
                 self.#field.serialize(out)?;
@@ -321,16 +371,106 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
         }
     );
 
-    // Implement from_primitive()
-    let from_primitive_code =  impl_from_dict(ast, fields);
+    ///////////////////////
+    let typ = id.to_string();
+    let let_parts = fields.iter().map(|field| {
+        let ref name = field.ident;
+        let attrs = FieldAttrs::parse(&field.attrs);
+        if attrs.skip {
+            return quote! {}
+        }
+        if attrs.other {
+            return quote! { 
+                let #name = dict;
+            };
+        }
+        
+        let key = attrs.key();
+
+        let ty = field.ty.clone();
+        if let Some(ref default) = attrs.default() {
+            quote! {
+                let #name = {
+                    let primitive: Option<crate::primitive::Primitive>
+                        = dict.remove(#key);
+                    let x: #ty = match primitive {
+                        Some(primitive) => <#ty as crate::object::Object>::from_primitive(primitive, resolve).map_err(|e| 
+                            crate::PdfError::FromPrimitive {
+                                typ: #typ,
+                                field: stringify!(#name),
+                                source: Box::new(e)
+                            })?,
+                        None => #default,
+                    };
+                    x
+                };
+            }
+        } else {
+            quote! {
+                let #name = {
+                    match dict.remove(#key) {
+                        Some(primitive) =>
+                            match <#ty as crate::object::Object>::from_primitive(primitive, resolve) {
+                                Ok(obj) => obj,
+                                Err(e) => return Err(crate::PdfError::FromPrimitive {
+                                    typ: stringify!(#ty),
+                                    field: stringify!(#name),
+                                    source: Box::new(e)
+                                })
+                            }
+                        None =>  // Try to construct T from Primitive::Null
+                            match <#ty as crate::object::Object>::from_primitive(crate::primitive::Primitive::Null, resolve) {
+                                Ok(obj) => obj,
+                                Err(_) => return Err(crate::PdfError::MissingEntry {
+                                    typ: stringify!(#ty),
+                                    field: String::from(stringify!(#name)),
+                                })
+                            },
+                    }
+                    // ^ By using Primitive::Null when we don't find the key, we allow 'optional'
+                    // types like Option and Vec to be constructed from non-existing values
+                };
+            }
+        }
+    });
+    
+    let field_parts = fields.iter().map(|field| {
+        let ref name = field.ident;
+        quote! { #name: #name, }
+    });
+    
+    let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
+        quote! {
+            dict.expect(#typ, #key, #val, true)?;
+        }
+    ).collect();
+
+    let ty_check = match (&attrs.type_name, attrs.type_required) {
+        (Some(ref ty), required) => quote! {
+            dict.expect(#typ, "Type", #ty, #required)?;
+        },
+        (None, _) => quote!{}
+    };
+        
+    
+    let from_primitive_code = quote! {
+        let mut dict = crate::primitive::Dictionary::from_primitive(p, resolve)?;
+        #ty_check
+        #( #checks )*
+        #( #let_parts )*
+        Ok(#id {
+            #( #field_parts )*
+        })
+    };
+    
     let pdf_type = match attrs.type_name {
         Some(ref ty) => quote! { writeln!(out, "/Type /{}", #ty)?; },
         None => quote! {}
     };
     
     quote! {
-        impl #impl_generics ::pdf::object::Object for #name #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> ::std::io::Result<()> {
+        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> crate::error::Result<()> {
                 writeln!(out, "<<")?;
                 #pdf_type
                 #( #checks_code )*
@@ -338,7 +478,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
                 writeln!(out, ">>")?;
                 Ok(())
             }
-            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+            fn from_primitive(p: crate::primitive::Primitive, resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
                 #from_primitive_code
             }
         }
@@ -346,14 +486,14 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
 }
 
 /// Note: must have info and dict (TODO explain in docs)
-fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
-    let name = &ast.ident;
+fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
+    let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     let info_ty = fields.iter()
     .filter_map(|field| {
         if let Some(ident) = field.ident.as_ref() {
-            if ident.as_ref() == "info" {
+            if ident == "info" {
                 Some(field.ty.clone())
             } else {
                 None
@@ -364,8 +504,8 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
     }).next().unwrap();
 
     quote! {
-        impl #impl_generics ::pdf::object::Object for #name #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> ::std::io::Result<()> {
+        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> crate::error::Result<()> {
                 unimplemented!();
                 /*
                 writeln!(out, "<<")?;
@@ -375,124 +515,15 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens 
                 Ok(())
                 */
             }
-            fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-                let ::pdf::primitive::PdfStream {info, data}
-                    = p.to_stream(resolve).chain_err(|| stringify!(#name))?;
+            fn from_primitive(p: crate::primitive::Primitive, resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
+                let crate::primitive::PdfStream {info, data}
+                    = p.to_stream(resolve)?;
 
-                Ok(#name {
-                    info: <#info_ty as Object>::from_primitive(::pdf::primitive::Primitive::Dictionary (info), resolve)?,
+                Ok(#id {
+                    info: <#info_ty as crate::object::Object>::from_primitive(crate::primitive::Primitive::Dictionary (info), resolve)?,
                     data: data,
                 })
             }
         }
-    }
-}
-
-/// Returns (let assignments, field assignments)
-/// Example:
-/// (`let name = ...;`,
-///  `    name: name`)
-/// 
-fn impl_parts(fields: &[Field]) -> (Vec<quote::Tokens>, Vec<quote::Tokens>) {
-    (fields.iter().map(|field| {
-        let (key, default, skip) = field_attrs(field);
-        if skip {
-            return quote! {}; // skip this field..
-        }
-        let ref name = field.ident;
-
-        let ty = field.ty.clone();
-
-
-        if let Some(ref default) = default {
-            let default = syn::parse_token_trees(&default).expect("Could not parse `default` code as Rust.");
-            quote! {
-                let #name = {
-                    let primitive: Option<::pdf::primitive::Primitive>
-                        = dict.remove(#key);
-                    let x: #ty = match primitive {
-                        Some(primitive) => <#ty as Object>::from_primitive(primitive, resolve).chain_err( || stringify!(#name) )?,
-                        None => #( #default )*,
-                    };
-                    x
-                };
-            }
-        } else {
-            quote! {
-                let #name = {
-                    match dict.remove(#key) {
-                        Some(primitive) =>
-                            match <#ty as Object>::from_primitive(primitive, resolve) {
-                                Ok(obj) => obj,
-                                Err(e) => bail!(e.chain_err(|| format!("Key {}: cannot convert from primitive to type {}", #key, stringify!(#ty)))),
-                            }
-                        None =>  // Try to construct T from Primitive::Null
-                            match <#ty as Object>::from_primitive(::pdf::primitive::Primitive::Null, resolve) {
-                                Ok(obj) => obj,
-                                Err(_) => bail!("Object {}, Key {} not found", stringify!(#name), #key),
-                            },
-                    }
-                    // ^ By using Primitive::Null when we don't find the key, we allow 'optional'
-                    // types like Option and Vec to be constructed from non-existing values
-                };
-            }
-        }
-    }).collect(),
-    fields.iter().map(|field| {
-        let ref name = field.ident;
-        quote! { #name: #name, }
-    }).collect())
-}
-
-
-/// Returns code for from_primitive that accepts Dictionary
-fn impl_from_dict(ast: &DeriveInput, fields: &[Field]) -> quote::Tokens {
-    let name = &ast.ident;
-    let attrs = GlobalAttrs::from_ast(&ast);
-    
-    
-    
-    let (let_parts, field_parts) = impl_parts(&fields);
-
-    let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
-        quote! {
-            let ty = dict.remove(#key)
-                .ok_or(::pdf::Error::from(::pdf::ErrorKind::EntryNotFound { key: #key }))?
-                .to_name()?;
-            if ty != #val {
-                bail!("[Dict entry /{}] != /{}", #key, #val);
-            }
-        }
-    ).collect();
-
-    let ty_check = match (attrs.type_name, attrs.type_required) {
-        (Some(ty), true) => quote! {
-            let ty = dict.remove("Type")
-                .ok_or(::pdf::Error::from(::pdf::ErrorKind::EntryNotFound { key: "Type" }))?
-                .to_name()?;
-            if ty != #ty {
-                bail!("[Dict entry /{}] != /{}", "Type", #ty);
-            }
-        },
-        (Some(ty), false) => quote! {
-            match dict.remove("Type") {
-                Some(ty) => if ty.to_name()? != #ty {
-                    bail!("[Dict entry /{}] != /{}", "Type", #ty);
-                },
-                None => {}
-            }
-        },
-        (None, _) => quote!{}
-    };
-        
-    
-    quote! {
-        let mut dict = Dictionary::from_primitive(p, resolve)?;
-        #ty_check
-        #( #checks )*
-        #( #let_parts )*
-        Ok(#name {
-            #( #field_parts )*
-        })
     }
 }

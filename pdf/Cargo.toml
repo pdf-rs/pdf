@@ -1,26 +1,27 @@
 [package]
 name = "pdf"
-version = "0.6.3"
+version = "0.7.0"
 authors = ["Erlend Hofstad Langseth <3rlendhl@gmail.com>", "Sebastian Köln <sebk@rynx.org>"]
-repository = "https://github.com/pdf-rs/pdf"
+repository = "https://github.com/pdf-rs"
 readme = "README.md"
 keywords = ["pdf"]
 license = "MIT"
-documentation = "https://docs.rs/pdf/0.6.0/pdf/"
-
+documentation = "https://docs.rs/pdf"
+edition = "2018"
 description = """
 Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)
 """
 
+
 [dependencies.pdf_derive]
 path = "../pdf_derive"
 
 [dependencies]
-error-chain = "0.11.0"
+snafu = "0.4"
 isatty = "0.1"
 num-traits = "0.1.36"
-inflate = "0.1.1"
+inflate = "0.4.5"
 ansi_term = "0.9.0"
 byteorder = "1.0.0"
 itertools = "0.6.0"
@@ -31,7 +32,10 @@ lzw = "0.10.0"
 tuple = "0.4.0"
 glob = "0.2.11"
 chrono = "0.4.0"
-log = "0.4.6"
+once_cell = "0.2"
+log = "0.3"
+tempfile = "3.1"
+md5 = "0.6"
 
 [lib]
 doctest = false

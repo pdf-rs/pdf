@@ -1,11 +1,11 @@
 use itertools::Itertools;
 use tuple::*;
-use inflate::InflateStream;
-use err::*;
+use inflate::inflate_bytes_zlib;
 use std::mem;
 
-use object::{Object, Resolve};
-use primitive::{Primitive, Dictionary};
+use crate::error::*;
+use crate::object::{Object, Resolve};
+use crate::primitive::{Primitive, Dictionary};
 
 
 #[derive(Object, Debug, Clone)]
@@ -44,7 +44,7 @@ pub enum StreamFilter {
     CCITTFaxDecode
 }
 impl StreamFilter {
-    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &Resolve) -> Result<StreamFilter> {
+    pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &impl Resolve) -> Result<StreamFilter> {
        let params = Primitive::Dictionary (params);
        Ok(
        match kind {
@@ -63,20 +63,20 @@ impl StreamFilter {
 
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
-        n @ b'0' ... b'9' => Some(n - b'0'),
-        a @ b'a' ... b'h' => Some(a - b'a' + 0xa),
-        a @ b'A' ... b'H' => Some(a - b'A' + 0xA),
+        n @ b'0' ..= b'9' => Some(n - b'0'),
+        a @ b'a' ..= b'h' => Some(a - b'a' + 0xa),
+        a @ b'A' ..= b'H' => Some(a - b'A' + 0xA),
         _ => None
     }
 }
 
-fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
+pub fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(data.len() / 2);
     for (i, (&high, &low)) in data.iter().tuples().enumerate() {
         if let (Some(low), Some(high)) = (decode_nibble(low), decode_nibble(high)) {
             out.push(high << 4 | low);
         } else {
-            return Err(ErrorKind::HexDecode {pos: i * 2, bytes: [high, low]}.into())
+            return Err(PdfError::HexDecode {pos: i * 2, bytes: [high, low]})
         }
     }
     Ok(out)
@@ -85,7 +85,7 @@ fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
 #[inline]
 fn sym_85(byte: u8) -> Option<u8> {
     match byte {
-        b @ 0x21 ... 0x75 => Some(b - 0x21),
+        b @ 0x21 ..= 0x75 => Some(b - 0x21),
         _ => None
     }
 }
@@ -119,17 +119,17 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
         out.extend_from_slice(&word);
         pos += advance as usize;
     }
-    let tail_len = substr(&data[pos..], b"~>").ok_or(ErrorKind::Ascii85TailError)?;
+    let tail_len = substr(&data[pos..], b"~>").ok_or(PdfError::Ascii85TailError)?;
     assert!(tail_len < 5);
     let tail: [u8; 5] = T5::from_iter(
         data[pos..pos+tail_len].iter()
         .cloned()
         .chain(repeat(b'u'))
     )
-    .ok_or(ErrorKind::Ascii85TailError)?
+    .ok_or(PdfError::Ascii85TailError)?
     .into();
     
-    let (_, last) = word_85(&tail).ok_or(ErrorKind::Ascii85TailError)?;
+    let (_, last) = word_85(&tail).ok_or(PdfError::Ascii85TailError)?;
     out.extend_from_slice(&last[.. tail_len-1]);
     Ok(out)
 }
@@ -138,25 +138,16 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let predictor = params.predictor as usize;;
     let n_components = params.n_components as usize;
-    let _bits_per_component = params.bits_per_component as usize;
     let columns = params.columns as usize;
 
     // First flate decode
-    let mut inflater = InflateStream::from_zlib();
-    let mut out = Vec::<u8>::new();
-    let mut n = 0;
-    while n < data.len() {
-        let res = inflater.update(&data[n..]);
-        let (num_bytes_read, result) = res?;
-        n += num_bytes_read;
-        out.extend(result);
-    }
+    let decoded = inflate_bytes_zlib(data)?;
 
     // Then unfilter (PNG)
     // For this, take the old out as input, and write output to out
 
     if predictor > 10 {
-        let inp = out; // input buffer
+        let inp = decoded; // input buffer
         let rows = inp.len() / (columns+1);
         
         // output buffer
@@ -191,7 +182,7 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         }
         Ok(out)
     } else {
-        Ok(out)
+        Ok(decoded)
     }
 }
 
@@ -229,7 +220,7 @@ impl PredictorType {
     pub fn from_u8(n: u8) -> Result<PredictorType> {
         match n {
             n if n <= 4 => Ok(unsafe { mem::transmute(n) }),
-            n => Err(ErrorKind::IncorrectPredictorType {n}.into())
+            n => Err(PdfError::IncorrectPredictorType {n}.into())
         }
     }
 }

@@ -1,13 +1,13 @@
-use err::*;
-use num_traits::PrimInt;
-use parser::lexer::Lexer;
-use xref::{XRef, XRefSection};
-use file::XRefInfo;
-use primitive::{Primitive, Dictionary};
-use object::*;
-use parser::{parse_with_lexer};
-use parser::parse_object::{parse_indirect_stream};
+use crate::error::*;
+use crate::parser::lexer::Lexer;
+use crate::xref::{XRef, XRefSection};
+use crate::file::XRefInfo;
+use crate::primitive::{Primitive, Dictionary};
+use crate::object::*;
+use crate::parser::{parse_with_lexer};
+use crate::parser::parse_object::{parse_indirect_stream};
 
+use num_traits::PrimInt;
 
 // Just the part of Parser which reads xref sections from xref stream.
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
@@ -25,7 +25,7 @@ fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32]
             0 => XRef::Free {next_obj_nr: field1 as ObjNr, gen_nr: field2 as GenNr},
             1 => XRef::Raw {pos: field1 as usize, gen_nr: field2 as GenNr},
             2 => XRef::Stream {stream_id: field1 as ObjNr, index: field2 as usize},
-            _ => bail!(ErrorKind::XRefStreamType {found: _type}), // TODO: Should actually just be seen as a reference to the null object
+            _ => return Err(PdfError::XRefStreamType {found: _type}), // TODO: Should actually just be seen as a reference to the null object
         };
         entries.push(entry);
     }
@@ -48,12 +48,11 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
-pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
-    let xref_stream = parse_indirect_stream(lexer, resolve).chain_err(|| "Reading Xref stream")?.1;
+pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+    let xref_stream = parse_indirect_stream(lexer, resolve)?.1;
     let trailer = xref_stream.info.clone();
-    let mut xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
-    xref_stream.decode()?;
-    let mut data_left = &xref_stream.data[..];
+    let xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
+    let mut data_left = xref_stream.data()?;
 
     let width = &xref_stream.w;
 
@@ -71,7 +70,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Re
 
 
 /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
-pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let mut sections = Vec::new();
     
     // Keep reading subsections until we hit `trailer`
@@ -90,7 +89,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Res
             } else if w3.equals(b"n") {
                 section.add_inuse_entry(w1.to::<usize>()?, w2.to::<GenNr>()?);
             } else {
-                bail!(ErrorKind::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.to_string(), expected: "f or n"});
+                return Err(PdfError::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.to_string(), expected: "f or n"});
             }
         }
         sections.push(section);
@@ -103,7 +102,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &Resolve) -> Res
     Ok((sections, trailer))
 }
 
-pub fn read_xref_and_trailer_at(lexer: &mut Lexer, resolve: &Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+pub fn read_xref_and_trailer_at(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let next_word = lexer.next()?;
     if next_word.equals(b"xref") {
         // Read classic xref table

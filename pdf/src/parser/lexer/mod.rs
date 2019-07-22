@@ -6,10 +6,10 @@ use std::str::FromStr;
 use std::ops::Range;
 use std::io::SeekFrom;
 
-use err::*;
+use crate::error::*;
 
 mod str;
-pub use self::str::{HexStringLexer, StringLexer};
+pub use self::str::{StringLexer, HexStringLexer};
 
 
 /// `Lexer` has functionality to jump around and traverse the PDF lexemes of a string in any direction.
@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
     pub fn peek(&self) -> Result<Substr<'a>> {
         match self.next_word(true) {
             Ok((substr, _)) => Ok(substr),
-            Err(Error(ErrorKind::EOF,_)) => Ok(self.new_substr(self.pos..self.pos)),
+            Err(PdfError::EOF) => Ok(self.new_substr(self.pos..self.pos)),
             Err(e) => Err(e),
         }
 
@@ -63,7 +63,7 @@ impl<'a> Lexer<'a> {
         if word.equals(expected.as_bytes()) {
             Ok(())
         } else {
-            Err(ErrorKind::UnexpectedLexeme {pos: self.pos, lexeme: word.to_string(), expected: expected}.into())
+            Err(PdfError::UnexpectedLexeme {pos: self.pos, lexeme: word.to_string(), expected: expected})
         }
     }
 
@@ -74,10 +74,23 @@ impl<'a> Lexer<'a> {
     // TODO ^ backward case is actually not tested or.. thought about that well.
     fn next_word(&self, forward: bool) -> Result<(Substr<'a>, usize)> {
         let mut pos = self.pos;
+        
         // Move away from eventual whitespace
         while self.is_whitespace(pos) {
             pos = self.advance_pos(pos, forward)?;
         }
+        
+        while self.buf.get(pos) == Some(&b'%') {
+            if let Some(off) = self.buf[pos+1..].iter().position(|&b| b == b'\n') {
+                pos += off+2;
+            }
+            
+            // Move away from eventual whitespace
+            while self.is_whitespace(pos) {
+                pos = self.advance_pos(pos, forward)?;
+            }
+        }
+        
         let start_pos = pos;
 
         // If first character is delimiter, this lexeme only contains that character.
@@ -118,16 +131,18 @@ impl<'a> Lexer<'a> {
             if pos < self.buf.len() {
                 Ok(pos + 1)
             } else {
-                bail!(ErrorKind::EOF);
+                Err(PdfError::EOF)
             }
         } else if pos > 0 {
-                Ok(pos - 1)
+            Ok(pos - 1)
         } else {
-                bail!(ErrorKind::EOF);
+            Err(PdfError::EOF)
         }
     }
 
-    pub fn next_as<T: FromStr>(&mut self) -> Result<T> {
+    pub fn next_as<T>(&mut self) -> Result<T>
+        where T: FromStr, T::Err: std::error::Error + 'static
+    {
         self.next().and_then(|word| word.to::<T>())
     }
 
@@ -235,7 +250,7 @@ impl<'a> Lexer<'a> {
                 break;
             }
             if self.pos == 0 {
-                bail!(ErrorKind::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())});
+                err!(PdfError::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())});
             }
             self.pos -= 1;
         }
@@ -283,20 +298,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_delimiter(&self, pos: usize) -> bool {
-        if pos >= self.buf.len() {
-            false
-        } else {
-            self.buf[pos] == b'(' ||
-            self.buf[pos] == b')' ||
-            self.buf[pos] == b'<' ||
-            self.buf[pos] == b'>' ||
-            self.buf[pos] == b'[' ||
-            self.buf[pos] == b']' ||
-            self.buf[pos] == b'{' ||
-            self.buf[pos] == b'}' ||
-            self.buf[pos] == b'/' ||
-            self.buf[pos] == b'%'
-        }
+        self.buf.get(pos).map(|b| b"()<>[]{}/%".contains(&b)).unwrap_or(false)
     }
 }
 
@@ -317,11 +319,10 @@ impl<'a> Substr<'a> {
     pub fn to_vec(&self) -> Vec<u8> {
         self.slice.to_vec()
     }
-    pub fn to<T: FromStr>(&self) -> Result<T> {
-        std::str::from_utf8(self.slice)?.parse::<T>()
-            .map_err(|_| ErrorKind::FromStrError {
-                    word: String::from(self.as_str())
-                }.into())
+    pub fn to<T>(&self) -> Result<T>
+        where T: FromStr, T::Err: std::error::Error + 'static
+    {
+        std::str::from_utf8(self.slice)?.parse::<T>().map_err(|e| PdfError::Parse { source: e.into() })
     }
     pub fn is_integer(&self) -> bool {
         match self.to::<i32>() {
