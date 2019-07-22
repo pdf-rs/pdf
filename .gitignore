@@ -1,10 +1,3 @@
-/*
-*.bk
-!.gitignore
-!rustfmt.toml
-!src/
-!shaders/
-!examples/
-!Cargo.toml
-!tests
-!README.md
+target/
+**/*.rs.bk
+Cargo.lock

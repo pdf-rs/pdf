@@ -13,8 +13,10 @@ Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)
 """
 
+[dependencies.pdf_derive]
+path = "../pdf_derive"
+
 [dependencies]
-pdf_derive = "0.1.17"
 error-chain = "0.11.0"
 isatty = "0.1"
 num-traits = "0.1.36"
