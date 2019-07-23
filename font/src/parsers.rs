@@ -1,11 +1,15 @@
+use std::fmt;
 use nom::{
-    bytes::complete::{take_till, tag},
-    sequence::{delimited, tuple, preceded},
+    bytes::complete::{take_till, take_till1, take_while, tag},
+    sequence::{delimited, tuple, preceded, terminated},
     combinator::{opt, map, recognize},
-    character::complete::{one_of, digit0, digit1, alpha1},
+    character::complete::{one_of, digit0, digit1},
     branch::alt,
+    multi::many0
 };
-use crate::R;
+use decorum::R32;
+use crate::{R};
+
 
 fn special_char(b: u8) -> bool {
     match b {
@@ -14,28 +18,37 @@ fn special_char(b: u8) -> bool {
     }
 }
 
-pub fn literal<'a>(i: &'a [u8]) -> R<'a, Vec<u8>> {
+pub fn name(i: &[u8]) -> R<&[u8]> {
     alt((
-        map(
-            preceded(
-                tag("/"),
-                take_till(|b| word_sep(b) || special_char(b))
-            ),
-            |s: &[u8]| s.to_owned()
-        ),
-        delimited(
-            tag("("),
-            delimited_literal,
-            tag(")")
-        )
+        tag("["), tag("]"),
+        take_till1(|b| word_sep(b) || special_char(b))
     ))(i)
+}
+
+pub fn literal_name(i: &[u8]) -> R<&[u8]> {
+    preceded(
+        tag("/"),
+        take_till(|b| word_sep(b) || special_char(b))
+    )(i)
 }
 #[test]
 fn test_literal() {
     assert_eq!(
-        literal(&b"/FontBBox{-180 -293 1090 1010}readonly def"[..]),
-        Ok((&b"{-180 -293 1090 1010}readonly def"[..], b"FontBBox".to_vec()))
+        literal_name(&b"/FontBBox{-180 -293 1090 1010}readonly def"[..]),
+        Ok((&b"{-180 -293 1090 1010}readonly def"[..], &b"FontBBox"[..]))
     );
+    assert_eq!(
+        literal_name(&b"/.notdef "[..]),
+        Ok((&b" "[..], &b".notdef"[..]))
+    );
+}
+
+pub fn string(i: &[u8]) -> R<Vec<u8>> {
+    delimited(
+        tag("("),
+        delimited_literal,
+        tag(")")
+    )(i)
 }
 
 pub fn integer(i: &[u8]) -> R<i32> {
@@ -154,7 +167,85 @@ pub fn word_sep(b: u8) -> bool {
         _ => false
     }
 }
+pub fn space(i: &[u8]) -> R<&[u8]> {
+    take_while(word_sep)(i)
+}
 
-pub fn name(i: &[u8]) -> R<&[u8]> {
-    alt((alpha1, tag("["), tag("]")))(i)
+pub fn comment(i: &[u8]) -> R<&[u8]> {
+    preceded(tag("%"), take_until_and_consume(line_sep))(i)
+}
+
+#[derive(PartialEq, Eq)]
+pub enum Token<'a> {
+    Int(i32),
+    Real(R32),
+    Literal(&'a [u8]),
+    Name(&'a [u8]),
+    String(Vec<u8>),
+    Procedure(Vec<Token<'a>>)
+}
+
+impl<'a> fmt::Debug for Token<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::Int(i) => i.fmt(f),
+            Token::Real(r) => r.fmt(f),
+            Token::Literal(ref s) => write!(f, "/{}", String::from_utf8_lossy(&s)),
+            Token::Name(ref s) => write!(f, "{}", String::from_utf8_lossy(&s)),
+            Token::String(ref data) => write!(f, "({:?})", String::from_utf8_lossy(data)),
+            Token::Procedure(ref vec) => f.debug_set().entries(vec).finish(),
+        }
+    }
+}
+
+fn procedure(i: &[u8]) -> R<Vec<Token>> {
+    delimited(
+        tag("{"),
+        many0(
+            preceded(
+                space,
+                token
+            ),
+        ),
+        preceded(
+            space,
+            tag("}")
+        )
+    )(i)
+}
+#[test]
+fn test_procedure() {
+    assert_eq!(
+        procedure("{-180 -293 1090 1010}readonly ".as_bytes()).get(),
+        vec![
+            Token::Int(-180),
+            Token::Int(-293),
+            Token::Int(1090),
+            Token::Int(1010)
+        ]
+    );
+    assert_eq!(
+        procedure("{1 index exch /.notdef put} ".as_bytes()).get(),
+        vec![
+            Token::Int(1),
+            Token::Name("index".as_bytes()),
+            Token::Name("exch".as_bytes()),
+            Token::Literal(".notdef".as_bytes()),
+            Token::Name("put".as_bytes()),
+        ]
+    );
+}
+
+pub fn token(i: &[u8]) -> R<Token> {
+    terminated(
+        alt((
+            map(integer, |i| Token::Int(i)),
+            map(float, |f| Token::Real(f.into())),
+            map(literal_name, |s| Token::Literal(s)),
+            map(procedure, |v| Token::Procedure(v)),
+            map(string, |v| Token::String(v)),
+            map(name, |s| Token::Name(s))
+        )),
+        take_while(word_sep)
+    )(i)
 }

@@ -6,20 +6,14 @@ use pathfinder_canvas::{CanvasFontContext, CanvasRenderingContext2D};
 use pathfinder_geometry::vector::Vector2F;
 use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_export::{Export, FileFormat};
-use font::{Font, TrueTypeFont, CffFont};
+use font::{Font, parse_file};
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     let args: Vec<String> = env::args().collect();
-    let font_data = fs::read(args[1].as_str())?;
-    let font: Box<dyn Font> = match args[2].as_str() {
-        "cff" => Box::new(CffFont::parse(&font_data, 0)?) as _,
-        "otf" => Box::new(CffFont::parse_opentype(&font_data, 0)?) as _,
-        "tt" => Box::new(TrueTypeFont::parse(&font_data)?) as _,
-        _ => panic!("unsupported format")
-    };
-    let gid = args[3].parse().expect("not a number");
+    let font = parse_file(&args[1]).unwrap();
+    let gid = args[2].parse().expect("not a number");
     
     let font_context = CanvasFontContext::from_system_source();
     let mut canvas = CanvasRenderingContext2D::new(font_context, Vector2F::new(1000.0, 1000.0));

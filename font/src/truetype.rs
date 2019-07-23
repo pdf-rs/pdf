@@ -49,3 +49,4 @@ impl<'a> Font for TrueTypeFont<'a> {
         })
     }
 }
+

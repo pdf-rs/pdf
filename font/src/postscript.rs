@@ -1,17 +1,14 @@
 use std::collections::HashMap;
 use std::fmt;
-use nom::{
-    bytes::complete::{tag, take_while},
-    error::{make_error, ErrorKind},
-    Err::Failure
-};
+use std::ops::Deref;
+use std::borrow::{Cow};
 use slotmap::SlotMap;
-use tuple::TupleElements;
+use tuple::{TupleElements, Map};
 use decorum::R32;
-use istring::IString;
+use indexmap::set::IndexSet;
 use crate::R;
-use crate::parsers::*;
-
+use crate::parsers::{token, Token, comment, space};
+use crate::eexec::Decoder;
 
 new_key_type! {
     pub struct DictKey;
@@ -19,7 +16,10 @@ new_key_type! {
     pub struct StringKey;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct LitKey(usize);
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Item {
     Null,
     Bool(bool),
@@ -27,53 +27,230 @@ pub enum Item {
     Real(R32),
     Dict(DictKey),
     Array(ArrayKey),
-    Literal(StringKey),
-    Name(IString),
+    String(StringKey),
+    Name(LitKey),
+    Literal(LitKey),
+    Operator(Operator),
+    Mark,
+    File
 }
+pub struct DisplayItem<'a>(&'a Vm, Item);
+
+impl<'a> DisplayItem<'a> {
+    fn fmt_string(&self, k: StringKey) -> Cow<str> {
+        let s = self.0.get_string(k);
+        String::from_utf8_lossy(&s[.. s.len().min(100)])
+    }
+    fn fmt_lit(&self, k: LitKey) -> Cow<str> {
+        let s = self.0.get_lit(k);
+        String::from_utf8_lossy(&s[.. s.len().min(100)])
+    }
+}
+impl<'a> fmt::Debug for DisplayItem<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.1 {
+            Item::Null => write!(f, "Null"),
+            Item::Mark => write!(f, "Mark"),
+            Item::File => write!(f, "File"),
+            Item::Operator(op) => op.fmt(f),
+            Item::Bool(b) => b.fmt(f),
+            Item::Int(i) => i.fmt(f),
+            Item::Real(r) => r.fmt(f),
+            Item::Dict(key) => f.debug_map()
+                .entries(
+                    self.0.get_dict(key).iter()
+                    .map(|(&key, &val)| (DisplayItem(self.0, key), DisplayItem(self.0, val)))
+                )
+                .finish(),
+            Item::Array(key) => f.debug_list()
+                .entries(
+                    self.0.get_array(key).iter()
+                    .map(|&item| DisplayItem(self.0, item))
+                ).finish(),
+            Item::String(key) => write!(f, "({:?})", self.fmt_string(key)),
+            Item::Literal(key) => write!(f, "/{:?}", self.fmt_lit(key)),
+            Item::Name(key) => write!(f, "{:?}", self.fmt_lit(key)),
+        }
+    }
+}
+
 type Array = Vec<Item>;
 type Dictionary = HashMap<Item, Item>;
 
 #[derive(Debug)]
 struct Mode {
-    writable: bool,
-    executable: bool,
+    write: bool,
+    execute: bool,
+    read: bool
 }
 impl Mode {
     fn all() -> Mode {
         Mode {
-            writable: true,
-            executable: true
+            write: true,
+            execute: true,
+            read: true
         }
     }
     fn read_only(&mut self) {
-        self.writable = false;
+        self.write = false;
     }
     fn execute_only(&mut self) {
-        self.executable = false
+        self.read = false;
+        self.write = false;
+    }
+    fn noaccess(&mut self) {
+        self.write = false;
+        self.execute = false;
+        self.read = false;
     }
 }
-enum FileSource {
-    Transparent,
-    ExecEncrypted
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum Operator {
+    Array,
+    Begin,
+    CurrentDict,
+    CurrentFile,
+    For,
+    Def,
+    Dict,
+    Dup,
+    End,
+    EndArray,
+    Exch,
+    ExecuteOnly,
+    Eexec,
+    False,
+    Get,
+    Index,
+    NoAccess,
+    Pop,
+    Put,
+    ReadOnly,
+    ReadString,
+    True,
+    StartArray,
+    String,
 }
 
-#[derive(Debug)]
+macro_rules! map {
+    ($($key:expr => $val:expr),*) => (
+        [$(($key, $val)),*]
+    )
+}
+
+const OPERATOR_MAP: &[(&'static str, Operator)] = {
+    use Operator::*;
+    &map!{
+        "array"         => Array,
+        "begin"         => Begin,
+        "currentdict"   => CurrentDict,
+        "currentfile"   => CurrentFile,
+        "for"           => For,
+        "def"           => Def,
+        "dict"          => Dict,
+        "dup"           => Dup,
+        "end"           => End,
+        "exch"          => Exch,
+        "executeonly"   => ExecuteOnly,
+        "eexec"         => Eexec,
+        "false"         => False,
+        "get"           => Get,
+        "index"         => Index,
+        "noaccess"      => NoAccess,
+        "pop"           => Pop,
+        "put"           => Put,
+        "readonly"      => ReadOnly,
+        "readstring"    => ReadString,
+        "string"        => String,
+        "true"          => True,
+        "]"             => EndArray,
+        "["             => StartArray
+    }
+};
+
+struct Input<'a> {
+    data:   &'a [u8]
+}
+impl<'a> Input<'a> {
+    pub fn new(data: &'a [u8]) -> Input<'a> {
+        Input { data }
+    }
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+    fn take(&mut self, n: usize) -> &'a [u8] {
+        let (first, second) = self.data.split_at(n);
+        self.data = second;
+        first
+    }
+    fn advance(&mut self, n: usize) {
+        self.data = &self.data[n ..];
+    }
+    // true if buf.len() bytes were read
+    // false if EOF (buf will be truncated)
+    fn read_to(&mut self, buf: &mut Vec<u8>) -> bool {
+        if self.len() >= buf.len() {
+            let len = buf.len();
+            // normal case 
+            buf.copy_from_slice(self.take(len));
+            true
+        } else {
+            let len = self.len();
+            buf.truncate(len);
+            buf.copy_from_slice(self.take(len));
+            false
+        }
+    }
+    fn try_parse<T>(&mut self, parser: impl Fn(&'a [u8]) -> R<'a, T>) -> Option<T> {
+        match parser(self.data) {
+            Ok((i, t)) => {
+                let n = self.data.len() - i.len();
+                self.advance(n);
+                Some(t)
+            },
+            Err(_) => None
+        }
+    }
+    fn parse<T>(&mut self, parser: impl Fn(&'a [u8]) -> R<'a, T>) -> T {
+        self.try_parse(parser).unwrap()
+    }
+}
+impl<'a> Deref for Input<'a> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.data
+    }
+}
 pub struct Vm {
-    dicts:  SlotMap<DictKey, (Dictionary, Mode)>,
-    arrays: SlotMap<ArrayKey, (Array, Mode)>,
-    strings: SlotMap<StringKey, (Vec<u8>, Mode)>,
+    dicts:      SlotMap<DictKey, (Dictionary, Mode)>,
+    arrays:     SlotMap<ArrayKey, (Array, Mode)>,
+    strings:    SlotMap<StringKey, (Vec<u8>, Mode)>,
+    literals:   IndexSet<Vec<u8>>,
     dict_stack: Vec<DictKey>,
-    stack:  Vec<Item>
+    stack:      Vec<Item>
 }
 impl Vm {
     pub fn new() -> Vm {
-        Vm { 
+        let mut vm = Vm { 
             dicts: SlotMap::with_key(),
             arrays: SlotMap::with_key(),
             strings: SlotMap::with_key(),
+            literals: IndexSet::new(),
             dict_stack: Vec::new(),
-            stack: Vec::new()
-        }
+            stack: Vec::new(),
+        };
+        let system_dict = OPERATOR_MAP.iter()
+            .map(|&(name, op)| (Item::Literal(vm.make_lit(name.as_bytes())), Item::Operator(op))) 
+            .collect();
+        
+        let key = vm.make_dict(system_dict, Mode { write: false, execute: false, read: true });
+        vm.push_dict(key);
+        
+        let key = vm.make_dict(Dictionary::new(), Mode { write: true, execute: false, read: true });
+        vm.push_dict(key);
+        
+        vm
     }
     fn pop_tuple<T>(&mut self) -> T where
         T: TupleElements<Element=Item>
@@ -90,19 +267,30 @@ impl Vm {
     fn push_dict(&mut self, dict: DictKey) {
         self.dict_stack.push(dict);
     }
+    fn make_lit(&mut self, lit: &[u8]) -> LitKey {
+        if let Some((index, _)) = self.literals.get_full(lit) {
+            return LitKey(index);
+        }
+        let (index, _) = self.literals.insert_full(lit.into());
+        LitKey(index)
+    }
+    fn get_lit(&self, LitKey(index): LitKey) -> &[u8] {
+        self.literals.get_index(index).expect("no such key").as_slice()
+    }
     fn make_array(&mut self, array: Array) -> ArrayKey {
         self.arrays.insert((array, Mode::all()))
     }
     fn make_string(&mut self, s: Vec<u8>) -> StringKey {
-        println!("{:?}", std::str::from_utf8(&s[.. s.len().min(100)]));
-        assert!(s.len() < 100);
         self.strings.insert((s, Mode::all()))
     }
-    fn make_dict(&mut self) -> DictKey {
-        self.dicts.insert((Dictionary::new(), Mode::all()))
+    fn make_dict(&mut self, dict: Dictionary, mode: Mode) -> DictKey {
+        self.dicts.insert((dict, mode))
     }
     fn get_string(&self, key: StringKey) -> &[u8] {
         &self.strings.get(key).unwrap().0
+    }
+    fn get_string_mut(&mut self, key: StringKey) -> &mut Vec<u8> {
+        &mut self.strings.get_mut(key).unwrap().0
     }
     fn get_array(&self, key: ArrayKey) -> &Array {
         match self.arrays.get(key).expect("no item for key") {
@@ -111,7 +299,7 @@ impl Vm {
     }
     fn get_array_mut(&mut self, key: ArrayKey) -> &mut Array {
         match self.arrays.get_mut(key).expect("no item for key") {
-            (ref mut array, Mode { writable: true, .. }) => array,
+            (ref mut array, Mode { write: true, .. }) => array,
             _ => panic!("array is locked")
         }
     }
@@ -122,7 +310,7 @@ impl Vm {
     }
     fn get_dict_mut(&mut self, key: DictKey) -> &mut Dictionary {
         match self.dicts.get_mut(key).expect("no item for key") {
-            (ref mut dict, Mode { writable: true, .. }) => dict,
+            (ref mut dict, Mode { write: true, .. }) => dict,
             _ => panic!("dict is locked")
         }
     }
@@ -140,197 +328,289 @@ impl Vm {
     pub fn stack(&self) -> &[Item] {
         &self.stack
     }
-    pub fn exec(&mut self, item: Item) {
-        debug!("exec {:?}", self.display(&item));
+    
+    // resolve name items. or keep them unchanged if unresolved
+    fn resolve(&self, item: Item) -> Option<Item> {
+        for &dict_key in self.dict_stack.iter().rev() {
+            let dict = self.get_dict(dict_key);
+            if let Some(&val) = dict.get(&item) {
+                debug!("-> {:?}", self.display(val));
+                return Some(val.clone());
+            }
+        }
+        None
+    }
+    
+    fn transform_token(&mut self, token: Token) -> Item {
+        match token {
+            Token::Int(i) => Item::Int(i),
+            Token::Real(r) => Item::Real(r),
+            Token::Literal(name) => Item::Literal(self.make_lit(name)),
+            Token::Name(name) => Item::Name(self.make_lit(name)),
+            Token::String(vec) => Item::String(self.make_string(vec)),
+            Token::Procedure(tokens) => {
+                let array = tokens.into_iter().map(|t| self.transform_token(t)).collect();
+                Item::Array(self.make_array(array))
+            }
+        }
+    }
+    pub fn exec_token(&mut self, token: Token, input: &mut Input) {
+        let item = self.transform_token(token);
         match item {
-            Item::Name(ref name) => match name.as_str() {
-                "array" => {
-                    match self.pop() {
-                        Item::Int(i) if i >= 0 => {
-                            let key = self.make_array(vec![Item::Null; i as usize]);
-                            self.push(Item::Array(key));
-                        }
-                        i => panic!("array: invalid count: {:?}", i)
-                    }
-                }
-                "begin" => {
-                    match self.pop() {
-                        Item::Dict(dict) => self.push_dict(dict),
-                        item => panic!("begin: unespected item {:?}", item)
-                    }
-                }
-                "currentdict" => {
-                    let &key = self.dict_stack.last().expect("no current dictionary");
-                    self.push(Item::Dict(key));
-                }
-                "for" => {
-                    match self.pop_tuple() {
-                        (Item::Int(initial), Item::Int(increment), Item::Int(limit), Item::Array(procedure)) => {
-                            match increment {
-                                i if i > 0 => assert!(limit > initial),
-                                i if i < 0 => assert!(limit < initial),
-                                _ => panic!("zero increment")
-                            }
-                            // proc would be allowed to modify the procedure array…
-                            let proc_array = self.get_array(procedure).clone();
-                            let mut val = initial;
-                            while val < limit {
-                                self.push(Item::Int(val));
-                                for item in &proc_array {
-                                    self.exec(item.clone());
-                                }
-                                val += increment;
+            Item::Operator(op) => self.exec_operator(op, input),
+            Item::Name(key) => {
+                let item = self.resolve(Item::Literal(key)).expect("undefined");
+                self.exec(item, input)
+            }
+            item => self.push(item)
+        }
+    }
+    
+    fn exec(&mut self, item: Item, input: &mut Input) {
+        self.print_stack();
+        debug!("exec {:?}", self.display(item));
+        match item {
+            Item::Operator(op) => self.exec_operator(op, input),
+            Item::Name(key) => {
+                let item = self.resolve(Item::Literal(key)).expect("undefined");
+                self.exec(item, input)
+            }
+            Item::Array(key) => {
+                // check that the array is executable
+                let mut pos = 0;
+                loop {
+                    match self.arrays.get(key).expect("no item for key") {
+                        (ref items, Mode { execute: true, .. }) => {
+                            match items.get(pos) {
+                                Some(&item) => self.exec(item, input),
+                                None => break
                             }
                         },
-                        args => panic!("for: invalid args {:?}", args)
+                        _ => panic!("exec: array is not executable")
                     }
+                    pos += 1;
                 }
-                "def" => {
-                    let (key, val) = self.pop_tuple();
-                    self.current_dict_mut().insert(key, val);
-                }
-                "dict" => {
-                    let dict = self.make_dict();
-                    self.push(Item::Dict(dict));
-                }
-                "dup" => {
-                    let v = self.pop();
-                    self.push(v.clone());
-                    self.push(v);
-                }
-                "end" => self.pop_dict(),
-                "exch" => {
-                    let (a, b) = self.pop_tuple();
-                    self.push(b);
-                    self.push(a);
-                }
-                "executeonly" => {
-                    let item = self.pop();
-                    match item {
-                        Item::Array(key) => self.arrays[key].1.read_only(),
-                        Item::Dict(key) => self.dicts[key].1.read_only(),
-                        Item::Literal(key) => self.strings[key].1.read_only(),
-                        ref i => panic!("can't make {:?} readonly", i)
+            }
+            item => self.push(item)
+        }
+    }
+    
+    #[deny(unreachable_patterns)]
+    fn exec_operator(&mut self, op: Operator, input: &mut Input) {
+        use Operator::*;
+        match op {
+            Array => {
+                match self.pop() {
+                    Item::Int(i) if i >= 0 => {
+                        let key = self.make_array(vec![Item::Null; i as usize]);
+                        self.push(Item::Array(key));
                     }
-                    self.push(item);
-                },
-                "false" => self.push(Item::Bool(false)),
-                "index" => match self.pop() {
-                    Item::Int(idx) if idx >= 0 => {
-                        let n = self.stack.len();
-                        let item = self.stack.get(n - idx as usize - 1).expect("out of bounds").clone();
-                        self.push(item);
+                    i => panic!("array: invalid count: {:?}", self.display(i))
+                }
+            }
+            Begin => {
+                match self.pop() {
+                    Item::Dict(dict) => self.push_dict(dict),
+                    item => panic!("begin: unespected item {:?}", self.display(item))
+                }
+            }
+            CurrentDict => {
+                let &key = self.dict_stack.last().expect("no current dictionary");
+                self.push(Item::Dict(key));
+            }
+            For => {
+                match self.pop_tuple() {
+                    (Item::Int(initial), Item::Int(increment), Item::Int(limit), Item::Array(procedure)) => {
+                        match increment {
+                            i if i > 0 => assert!(limit > initial),
+                            i if i < 0 => assert!(limit < initial),
+                            _ => panic!("zero increment")
+                        }
+                        // proc would be allowed to modify the procedure array…
+                        let proc_array = self.get_array(procedure).clone();
+                        let mut val = initial;
+                        while val < limit {
+                            self.push(Item::Int(val));
+                            for item in &proc_array {
+                                self.exec(item.clone(), input);
+                            }
+                            val += increment;
+                        }
                     },
-                    arg => panic!("index: invalid argument {:?}", arg)
+                    args => panic!("for: invalid args {:?}", self.display_tuple(args))
                 }
-                "put" => {
-                    let (a, b, c) = self.pop_tuple();
-                    match (a, b, c) {
-                        (Item::Array(array), Item::Int(idx), any) => {
-                            *self.get_array_mut(array).get_mut(idx as usize).expect("out of bounds") = any;
-                        }
-                        (Item::Dict(dict), key, any) => {
-                            self.get_dict_mut(dict).insert(key, any);
-                        }
-                        (a, b, c) => panic!("put: unsupported args {:?}, {:?}, {:?})", a, b, c)
+            }
+            Def => {
+                let (key, val) = self.pop_tuple();
+                self.current_dict_mut().insert(key, val);
+                debug!("currentdict: {:?}", self.display(Item::Dict(*self.dict_stack.last().expect("no current dict"))));
+            }
+            Dict => {
+                match self.pop() {
+                    Item::Int(n) if n >= 0 => {
+                        let dict = self.make_dict(Dictionary::with_capacity(n as usize), Mode::all());
+                        self.push(Item::Dict(dict));
                     }
+                    arg => panic!("dict: unsupported {:?}", self.display(arg))
                 }
-                "readonly" => {
-                    let item = self.pop();
-                    match item {
-                        Item::Array(key) => self.arrays[key].1.read_only(),
-                        Item::Dict(key) => self.dicts[key].1.read_only(),
-                        Item::Literal(key) => self.strings[key].1.read_only(),
-                        ref i => panic!("can't make {:?} readonly", i)
-                    }
+            }
+            String => {
+                match self.pop() {
+                    Item::Int(n) if n >= 0 => {
+                        let string = self.make_string(vec![0; n as usize]);
+                        self.push(Item::String(string));
+                    },
+                    len => panic!("string: unsupported {:?}", self.display(len))
+                }
+            },
+            ReadString => {
+                match self.pop_tuple() {
+                    (Item::File, Item::String(key)) => {
+                        let string = self.get_string_mut(key);
+                        let flag = input.read_to(string);
+                        input.parse(space);
+                        
+                        self.push(Item::String(key));
+                        self.push(Item::Bool(flag));
+                    },
+                    args => panic!("readstring: invalid arguments {:?}", self.display_tuple(args))
+                }
+            }
+            Dup => {
+                let v = self.pop();
+                self.push(v.clone());
+                self.push(v);
+            },
+            Pop => {
+                self.pop();
+            }
+            End => self.pop_dict(),
+            Exch => {
+                let (a, b) = self.pop_tuple();
+                self.push(b);
+                self.push(a);
+            }
+            False => self.push(Item::Bool(false)),
+            True => self.push(Item::Bool(true)),
+            Index => match self.pop() {
+                Item::Int(idx) if idx >= 0 => {
+                    let n = self.stack.len();
+                    let item = self.stack.get(n - idx as usize - 1).expect("out of bounds").clone();
                     self.push(item);
                 },
-                "true" => self.push(Item::Bool(true)),
-                "]" => {
-                    let start = self.stack.iter().rposition(|item| {
-                        match item {
-                            Item::Name(ref name) => name == "[",
-                            _ => false
-                        }
-                    }).expect("unmatched ]");
-                    let array = self.stack.drain(start ..).collect();
-                    let key = self.make_array(array);
-                    self.push(Item::Array(key));
-                },
-                "[" => self.push(item),
-                name => panic!("unknown name: {}", name)
+                arg => panic!("index: invalid argument {:?}", self.display(arg))
+            }
+            Get => match self.pop_tuple() {
+                (Item::Array(key), Item::Int(index)) if index >= 0 => {
+                    let &item = self.get_array(key).get(index as usize).expect("out of bounds");
+                    self.push(item);
+                }
+                (Item::String(key), Item::Int(index)) if index >= 0 => {
+                    let &byte = self.get_string(key).get(index as usize).expect("out of bounds");
+                    self.push(Item::Int(byte as i32));
+                }
+                (Item::Dict(dict_key), key) => {
+                    let &item = self.get_dict(dict_key).get(&key).expect("no such entry");
+                    self.push(item);
+                }
+                args => panic!("get: invalid arguments {:?}", self.display_tuple(args))
+            }
+            Put => {
+                let (a, b, c) = self.pop_tuple();
+                let a = self.resolve(a).unwrap_or(a);
+                match (a, b, c) {
+                    (Item::Array(array), Item::Int(idx), any) => {
+                        *self.get_array_mut(array).get_mut(idx as usize).expect("out of bounds") = any;
+                    }
+                    (Item::Dict(dict), key, any) => {
+                        self.get_dict_mut(dict).insert(key, any);
+                    }
+                    args => panic!("put: unsupported args {:?})", self.display_tuple(args))
+                }
+            }
+            ReadOnly => {
+                let item = self.pop();
+                match item {
+                    Item::Array(key) => self.arrays[key].1.read_only(),
+                    Item::Dict(key) => self.dicts[key].1.read_only(),
+                    Item::String(key) => self.strings[key].1.read_only(),
+                    i => panic!("can't make {:?} readonly", self.display(i))
+                }
+                self.push(item);
             },
-            _ => self.push(item)
+            ExecuteOnly => {
+                let item = self.pop();
+                match item {
+                    Item::Array(key) => self.arrays[key].1.execute_only(),
+                    Item::Dict(key) => self.dicts[key].1.execute_only(),
+                    Item::String(key) => self.strings[key].1.execute_only(),
+                    i => panic!("can't make {:?} executeonly", self.display(i))
+                }
+                self.push(item);
+            },
+            NoAccess => {
+                let item = self.pop();
+                match item {
+                    Item::Array(key) => self.arrays[key].1.noaccess(),
+                    Item::Dict(key) => self.dicts[key].1.noaccess(),
+                    Item::String(key) => self.strings[key].1.noaccess(),
+                    i => panic!("can't make {:?} executeonly", self.display(i))
+                }
+                self.push(item);
+            }
+            EndArray => {
+                let start = self.stack.iter()
+                    .rposition(|item| *item == Item::Mark)
+                    .expect("unmatched ]");
+                let array = self.stack.drain(start ..).collect();
+                let key = self.make_array(array);
+                self.push(Item::Array(key));
+            },
+            StartArray => self.push(Item::Mark),
+            CurrentFile => self.push(Item::File),
+            Eexec => {
+                match self.pop() {
+                    Item::File => {},
+                    Item::String(key) => {
+                        let data = self.get_string(key);
+                        let decoded = Decoder::charstring().decode(data);
+                        let mut input = Input::new(&decoded[4 ..]);
+                        self.parse_and_exec(&mut input);
+                    },
+                    arg => panic!("eexec: unsupported arg {:?})", self.display(arg))
+                }
+            }
         }
     }
-    pub fn parse<'a>(&mut self, i: &'a [u8]) -> R<'a, Item> {
-        if let Ok((i, j)) = integer(i) {
-            return Ok((i, Item::Int(j)))
-        }
-        if let Ok((i, f)) = float(i) {
-            return Ok((i, Item::Real(f.into())))
-        }
-        if let Ok((i, lit)) = literal(i) {
-            return Ok((i, Item::Literal(self.make_string(lit))));
-        }
-        if let Ok((i, array)) = procedure(self, i) {
-            return Ok((i, Item::Array(self.make_array(array))));
-        }
-        if let Ok((i, b)) = name(i) {
-            let s = std::str::from_utf8(b).unwrap();
-            return Ok((i, Item::Name(s.into())));
-        }
-        Err(Failure(make_error(i, ErrorKind::Alt)))
-    }
-    pub fn display<'a>(&'a self, item: &'a Item) -> DisplayItem<'a> {
+    pub fn display(&self, item: Item) -> DisplayItem {
         DisplayItem(self, item)
     }
+    pub fn display_tuple<'a, T>(&'a self, tuple: T) -> T::Output where
+        T: TupleElements<Element=Item>,
+        T: Map<DisplayItem<'a>>
+    {
+        tuple.map(|item| DisplayItem(self, item))
+    }
     pub fn print_stack(&self) {
-        for (i, item) in self.stack.iter().rev().enumerate() {
+        for (i, &item) in self.stack.iter().rev().enumerate() {
             println!("stack[{}]: {:?}", i, self.display(item));
         }
     }
-}
-
-pub struct DisplayItem<'a>(&'a Vm, &'a Item);
-
-impl<'a> fmt::Debug for DisplayItem<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self.1 {
-            Item::Null => write!(f, "null"),
-            Item::Bool(b) => b.fmt(f),
-            Item::Int(i) => i.fmt(f),
-            Item::Real(r) => r.fmt(f),
-            Item::Dict(key) => f.debug_map()
-                .entries(
-                    self.0.get_dict(key).iter()
-                    .map(|(key, val)| (DisplayItem(self.0, key), DisplayItem(self.0, val)))
-                )
-                .finish(),
-            Item::Array(key) => f.debug_list()
-                .entries(
-                    self.0.get_array(key).iter()
-                    .map(|item| DisplayItem(self.0, item))
-                ).finish(),
-            Item::Literal(key) => String::from_utf8_lossy(self.0.get_string(key)).fmt(f),
-            Item::Name(ref s) => s.fmt(f)
+    pub fn step(&mut self, input: &mut Input) {
+        debug!("input: {:?}", String::from_utf8_lossy(&input[.. input.len().min(100)]));
+        if let Some(_) = input.try_parse(comment) {
+            return;
+        }
+        let tk = input.parse(token);
+        
+        debug!("token: {:?}", tk);
+        self.exec_token(tk, input);
+    }
+    pub fn parse_and_exec(&mut self, data: &[u8]) {
+        let mut input = Input::new(data);
+        while input.len() > 0 {
+            self.step(&mut input);
         }
     }
 }
 
-fn procedure<'a>(vm: &mut Vm, i: &'a [u8]) -> R<'a, Vec<Item>> {
-    let (i, _) = tag("{")(i)?;
-    let (i, _) = take_while(word_sep)(i)?;
-    
-    let mut array = Vec::new();
-    let mut input = i;
-    
-    while let Ok((i, item)) = vm.parse(input) {
-        array.push(item);
-        let (i, _) = take_while(word_sep)(i)?;
-        input = i;
-    }
-    let (i, _) = tag("}")(input)?;
-    
-    Ok((i, array))
-}

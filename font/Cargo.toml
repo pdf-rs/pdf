@@ -20,4 +20,5 @@ slotmap = { version = "0.3", features = ["unstable"] }
 tuple = "*"
 decorum = "*"
 itertools = "*"
-istring = "*"
+rental = "0.5"
+indexmap = "1.0"

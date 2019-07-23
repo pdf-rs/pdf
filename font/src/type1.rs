@@ -2,59 +2,10 @@ use std::io::{self, Read};
 use std::error::Error;
 use nom::{IResult,
     number::complete::{be_u8, le_u8, be_i32, le_u32},
-    bytes::complete::{tag, take_while},
-    sequence::preceded,
 };
 use crate::{Font, Glyph, Context, State, v, R, IResultExt};
-use crate::postscript::{Vm, Item};
-use crate::parsers::*;
-
-struct Decoder {
-    r: u16,
-}
-impl Decoder {
-    fn new(r: u16) -> Decoder {
-        Decoder { 
-            r
-        }
-    }
-    fn decode_byte(&mut self, cipher: u8) -> u8 {
-        const C1: u16 = 52845;
-        const C2: u16 = 22719;
-        
-        let plain = cipher ^ (self.r >> 8) as u8;
-        self.r = (cipher as u16).wrapping_add(self.r).wrapping_mul(C1).wrapping_add(C2);
-        
-        return plain;
-    }
-}
-
-struct ExecReader<R: Read> {
-    reader: R,
-    decoder: Decoder
-}
-impl<R: Read> ExecReader<R> {
-    fn new(reader: R, skip: usize, r: u16) -> io::Result<ExecReader<R>> {
-        let decoder = Decoder::new(r);
-        let mut e = ExecReader {
-            reader,
-            decoder
-        };
-        for _ in 0 .. skip {
-            e.read(&mut [0])?;
-        }
-        Ok(e)
-    }
-}
-impl<R: Read> Read for ExecReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let len = self.reader.read(buf)?;
-        for b in buf[..len].iter_mut() {
-            *b = self.decoder.decode_byte(*b);
-        }
-        Ok(len)
-    }
-}
+use crate::postscript::{Vm};
+use crate::eexec::Decoder;
 
 pub struct Type1Font {
 }
@@ -65,36 +16,16 @@ impl Font for Type1Font {
     }
 }
 impl Type1Font {
-    pub fn parse(data: &[u8]) -> Result<Self, Box<dyn Error>> {
-        Ok(type1(data).get())
+    pub fn parse_pfb(data: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(parse_pfb(data).get())
     }
 }
-fn parse_text<'a>(vm: &mut Vm, data: &'a [u8]) -> R<'a, ()> {
-    let mut input = data;
-    while input.len() > 0 {
-        if let Ok((i, _)) = preceded(tag("%"), take_until_and_consume(line_sep))(input) {
-            input = i;
-            continue;
-        }
-        
-        vm.print_stack();
-        let (i, item) = vm.parse(input)?;
-        match item {
-            Item::Name(ref name) if name == "currentfile" => {},
-            Item::Name(ref name) if name == "eexec" => break,
-            _ => vm.exec(item)
-        }
-        
-        let (i, _) = take_while(word_sep)(i)?;
-        input = i;
-    }
-    Ok((input, ()))
-}
+
 fn parse_binary<'a>(vm: &mut Vm, data: &'a [u8]) {
-    let mut decoder = Decoder::new(55665);
-    let decoded: Vec<u8> = data.iter().map(|&b| decoder.decode_byte(b)).collect();
+    let mut decoder = Decoder::file();
+    let decoded = decoder.decode(data);
     
-    parse_text(vm, &decoded[4 ..]).get()
+    vm.parse_and_exec(&decoded[4 ..])
 }
 
 #[test]
@@ -104,7 +35,7 @@ fn test_parser() {
     vm.print_stack();
     assert_eq!(vm.stack().len(), 2);
 }
-fn type1(i: &[u8]) -> R<Type1Font> {
+fn parse_pfb(i: &[u8]) -> R<Type1Font> {
     let mut vm = Vm::new();
     
     let mut input = i;
@@ -118,7 +49,7 @@ fn type1(i: &[u8]) -> R<Type1Font> {
     
         let block = &i[.. block_len as usize];
         match block_type {
-            1 => parse_text(&mut vm, block).get(),
+            1 => vm.parse_and_exec(block),
             2 => parse_binary(&mut vm, block),
             n => panic!("unknown block type {}", n)
         }

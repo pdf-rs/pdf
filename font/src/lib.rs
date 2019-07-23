@@ -1,5 +1,6 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate slotmap;
+#[macro_use] extern crate rental; 
 
 use std::error::Error;
 use pathfinder_canvas::Path2D;
@@ -44,6 +45,7 @@ mod type1;
 mod type2;
 mod postscript;
 mod parsers;
+mod eexec;
 
 pub use truetype::TrueTypeFont;
 pub use cff::CffFont;
@@ -187,4 +189,64 @@ impl<T> IResultExt for IResult<&[u8], T, VerboseError<&[u8]>> {
             }
         }
     }
+}
+
+rental! {
+    mod owned {
+        use crate::{TrueTypeFont, CffFont};
+        
+        #[rental]
+        pub struct OwnedTrueTypeFont {
+            head: Vec<u8>,
+            iref: TrueTypeFont<'head>
+        }
+        #[rental]
+        pub struct OwnedCffFont {
+            head: Vec<u8>,
+            iref: CffFont<'head>
+        }
+    }
+}
+macro_rules! impl_owned {
+    ($($ty:ident),*) => (
+        $( impl Font for crate::owned::$ty {
+            fn num_glyphs(&self) -> u32 {
+                self.rent(|f| f.num_glyphs())
+            }
+            fn font_matrix(&self) -> Transform2F {
+                self.rent(|f| f.font_matrix())
+            }
+            fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
+                self.rent(|f| f.glyph(id))
+            }
+            fn glyphs(&self) -> Glyphs {
+                self.rent(|f| f.glyphs())
+            }
+        })*
+    )
+}
+impl_owned!(OwnedTrueTypeFont, OwnedCffFont);
+    
+pub fn parse_file(name: &str) -> Result<Box<dyn Font>, Box<dyn Error>> {
+    let data: Vec<u8> = std::fs::read(name)?;
+    let font: Box<dyn Font> = match name.rsplit(".").next().unwrap() {
+        "cff" => Box::new(
+            owned::OwnedCffFont::try_new(data,
+                |data| CffFont::parse(&data, 0)
+            ).map_err(|e| e.0)?
+        ) as _,
+        "otf" => Box::new(
+            owned::OwnedCffFont::try_new(data,
+                |data| CffFont::parse_opentype(&data, 0)
+            ).map_err(|e| e.0)?
+        ) as _,
+        "tt" => Box::new(
+            owned::OwnedTrueTypeFont::try_new(data,
+                |data| TrueTypeFont::parse(data)
+            ).map_err(|e| e.0)?
+        ) as _,
+        "PFB" => Box::new(Type1Font::parse_pfb(&data)?) as _,
+        _ => panic!("unsupported format")
+    };
+    Ok(font)
 }
