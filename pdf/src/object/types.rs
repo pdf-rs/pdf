@@ -268,7 +268,7 @@ pub struct PostScriptDict {
 }
 
 #[derive(Object, Debug)]
-#[pdf(Type="XObject", Subtype="Image")]
+#[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
     #[pdf(key="Width")]
