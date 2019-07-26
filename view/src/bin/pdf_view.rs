@@ -11,7 +11,7 @@
 use pathfinder_geometry::vector::{Vector2F};
 use pathfinder_content::color::ColorF;
 use pathfinder_gl::{GLDevice, GLVersion};
-use pathfinder_gpu::resources::{FilesystemResourceLoader};
+use pathfinder_gpu::resources::{EmbeddedResourceLoader};
 use pathfinder_renderer::concurrent::rayon::RayonExecutor;
 use pathfinder_renderer::concurrent::scene_proxy::SceneProxy;
 use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererOptions};
@@ -34,7 +34,7 @@ fn main() -> Result<(), PdfError> {
     println!("read: {}", path);
     let file = PdfFile::<Vec<u8>>::open(&path)?;
     
-    let pages: Vec<_> = file.pages().filter_map(|p| p.ok()).collect();
+    let pages: Vec<_> = file.pages().map(|p| p.unwrap()).collect();
     let num_pages = pages.len();
     let mut current_page = 0;
     let mut cache = Cache::new();
@@ -65,9 +65,8 @@ fn main() -> Result<(), PdfError> {
     window.gl_make_current(&gl_context).unwrap();
 
     // Create a Pathfinder renderer.
-    let resource_loader = FilesystemResourceLoader::locate();
     let mut renderer = Renderer::new(GLDevice::new(GLVersion::GL3, 0),
-                                     &resource_loader,
+                                     &EmbeddedResourceLoader,
                                      DestFramebuffer::full_window(window_size),
                                      RendererOptions { background_color: Some(ColorF::white()) });
 

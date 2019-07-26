@@ -6,19 +6,20 @@ use pathfinder_canvas::{CanvasFontContext, CanvasRenderingContext2D};
 use pathfinder_geometry::vector::Vector2F;
 use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_export::{Export, FileFormat};
-use font::{Font, parse_file};
+use font::{Font, parse};
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     let args: Vec<String> = env::args().collect();
-    let font = parse_file(&args[1]).unwrap();
+    let font = parse(&args[1]).unwrap();
     
     let num_glyphs = font.num_glyphs();
+    let scale = Vector2F::new(200., 200.);
     let aspect_ratio = 4. / 3.; // width to height
     let glyphs_x = (num_glyphs as f32 * aspect_ratio).sqrt().ceil() as u32;
     let glyphs_y = (num_glyphs + glyphs_x - 1) / glyphs_x;
-    let size = Vector2F::new(glyphs_x as f32, glyphs_y as f32);
+    let size = scale * Vector2F::new(glyphs_x as f32 + 0.5, glyphs_y as f32 + 0.5);
     
     println!("{} glyphs in {} by {}", num_glyphs, glyphs_x, glyphs_y);
     
@@ -28,8 +29,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     for gid in 0 .. num_glyphs {
         let y = (gid as u32 / glyphs_x);
         let x = (gid as u32 % glyphs_x);
-        let offset = Vector2F::new(x as f32, (y + 1) as f32);
-        let transform = Transform2F::from_translation(offset) * Transform2F::from_scale(Vector2F::new(1.0, -1.0)) * font.font_matrix();
+        let offset = Vector2F::new(x as f32 + 0.5, (y + 1) as f32);
+        let transform = Transform2F::from_scale(scale) * Transform2F::from_translation(offset) * Transform2F::from_scale(Vector2F::new(1.0, -1.0)) * font.font_matrix();
         canvas.set_current_transform(&transform);
     
         canvas.fill_path(font.glyph(gid)?.path);

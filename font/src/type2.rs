@@ -1,4 +1,4 @@
-use crate::{Context, State, v, Value};
+use crate::{State, v, Value, Context};
 use nom::{IResult,
     bytes::complete::{take},
     number::complete::{be_u8, be_i16, be_i32}
@@ -50,14 +50,38 @@ macro_rules! lines {
     });
 }
 
-pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
+fn alternating_curve(s: &mut State, mut horizontal: bool) {
+    let mut slice = s.stack.as_slice();
+    while slice.len() > 0 {
+        slice = match (slice.len(), horizontal) {
+            (5, false) => bezier!(s, slice, y xy xy),
+            (5, true)  => bezier!(s, slice, x xy yx),
+            (_, false)  => bezier!(s, slice, y xy x),
+            (_, true) => bezier!(s, slice, x xy y),
+        };
+        horizontal = !horizontal;
+    }
+}
+fn maybe_width(state: &mut State) {
+    if state.delta_width.is_none() {
+        if state.stack.len() % 2 == 1 {
+            let w = state.stack.remove(0);
+            state.delta_width = Some(w.to_float());
+        } else {
+            state.delta_width = Some(0.);
+        }
+    }
+}
+pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
     while input.len() > 0 && !s.done {
+        trace!("input: {:?}", &input[0 .. input.len().min(20)]);
         debug!("stack: {:?}", s.stack);
         let (i, b0) = be_u8(input)?;
         let i = match b0 {
             0 => panic!("reserved"),
             1 => { // ⊦ y dy hstem (1) ⊦
                 debug!("hstem");
+                maybe_width(s);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
@@ -65,12 +89,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             2 => panic!("reserved"),
             3 => { // ⊦ x dx vstem (3) ⊦
                 debug!("vstem");
+                maybe_width(s);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
             }
             4 => { // ⊦ dy vmoveto (4) ⊦
                 debug!("vmoveto");
+                maybe_width(s);
                 let p = s.current + v(0., s.stack[0]);
                 s.path.move_to(p);
                 s.stack.clear();
@@ -131,7 +157,8 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             10 => { // subr# callsubr (10) –
                 debug!("callsubr");
                 let subr_nr = s.pop().to_int();
-                let subr = ctx.private_subroutine(subr_nr);
+                
+                let subr = ctx.subr(subr_nr);
                 let (_, _) = charstring(subr, ctx, s)?;
                 i
             }
@@ -281,7 +308,30 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                     }
                     37 => { // |- dx1 dy1 dx2 dy2 dx3 dy3 dx4 dy4 dx5 dy5 d6 flex1 (12 37) |-
                         debug!("flex1");
-                        unimplemented!("flex1")
+                        let slice = s.stack.as_slice();
+                        
+                        // process first bezier
+                        bezier!(s, slice, xy xy xy);
+                        
+                        // figure out the second
+                        let mut iter = slice.iter();
+                        let mut sum = point!(iter, xy);
+                        for _ in 0 ..  4 {
+                            sum = sum + point!(iter, xy);
+                        }
+                        let horizontal = sum.x().abs() > sum.y().abs();
+                        
+                        let mut iter = slice[6..].iter();
+                        let d4 = s.current + point!(iter, xy);
+                        let d5 = d4 + point!(iter, xy);
+                        let d6 = d5 + match horizontal {
+                            true => point!(iter, x),
+                            false => point!(iter, y)
+                        };
+                        s.path.bezier_curve_to(d4, d5, d6);
+                        s.current = d6;
+                        s.stack.clear();
+                        i
                     }
                     38 ..= 255 => panic!("reserved")
                 }
@@ -289,6 +339,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             13 => panic!("reserved"),
             14 => { //– endchar (14) ⊦
                 debug!("endchar");
+                maybe_width(s);
                 s.path.close_path();
                 s.done = true;
                 i
@@ -296,12 +347,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             15 | 16 | 17 => panic!("reserved"),
             18 => { // |- y dy {dya dyb}* hstemhm (18) |-
                 debug!("hstemhm");
+                maybe_width(s);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
             }
             19 => { // |- hintmask (19 + mask) |-
                 debug!("hintmask");
+                maybe_width(s);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 let (i, _) = take((s.stem_hints + 7) / 8)(i)?;
                 s.stack.clear();
@@ -309,6 +362,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             20 => { // cntrmask |- cntrmask (20 + mask) |-
                 debug!("cntrmask");
+                maybe_width(s);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 let (i, _) = take((s.stem_hints + 7) / 8)(i)?;
                 s.stack.clear();
@@ -316,6 +370,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             21 => { // ⊦ dx dy rmoveto (21) ⊦
                 debug!("rmoveto");
+                maybe_width(s);
                 let p = s.current + v(s.stack[0], s.stack[1]);
                 s.path.move_to(p);
                 s.current = p;
@@ -324,6 +379,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             22 => { // ⊦ dx hmoveto (22) ⊦
                 debug!("hmoveto");
+                maybe_width(s);
                 let p = s.current + v(s.stack[0], 0.);
                 s.path.move_to(p);
                 s.current = p;
@@ -332,6 +388,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             23 => { // |- x dx {dxa dyx}* vstemhm (23) |-
                 debug!("vstemhm");
+                maybe_width(s);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
@@ -364,7 +421,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                 if slice.len() % 2 == 1 { // odd 
                     slice = bezier!(s, slice, xy xy y);
                 }
-                while slice.len() > 4 {
+                while slice.len() >= 4 {
                     slice = bezier!(s, slice, y xy y);
                 }
                 s.stack.clear();
@@ -376,38 +433,24 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                 if slice.len() % 2 == 1 { // odd 
                     slice = bezier!(s, slice, yx xy x);
                 }
-                while slice.len() > 4 {
+                while slice.len() >= 4 {
                     slice = bezier!(s, slice, x xy x);
                 }
                 s.stack.clear();
                 i
             }
+            29 => { // globalsubr# callgsubr (29) –
+                let subr_nr = s.pop().to_int();
+                debug!("globalsubr#{}", subr_nr as i32 + ctx.global_subr_bias);
+                
+                let subr = ctx.global_subr(subr_nr);
+                let (_, _) = charstring(subr, ctx, s)?;
+                i
+            }
             30 => { // |- dy1 dx2 dy2 dx3 {dxa dxb dyb dyc dyd dxe dye dxf}* dyf? vhcurveto (30) |-
                     // |- {dya dxb dyb dxc dxd dxe dye dyf}+ dxf? vhcurveto (30) |-
                 debug!("vhcurveto");
-                // figure out which case we have first
-                // first case has 4 + n * 8 (+1)
-                // second case n * 8 (+1)
-                // after integer division by 4 that becomes
-                // 1 + 2n vs. 2n, which means if then take the modulus of 2,
-                // we get 1 for the first cas and 0 for the second one
-                let mut slice = s.stack.as_slice();
-                if (slice.len() / 4) % 2 == 1 { // first case
-                    slice = bezier!(s, slice, y xy x);
-                    while slice.len() > 9 || slice.len() == 8 {
-                        slice = bezier!(s, slice, x xy y y xy x);
-                    }
-                    if slice.len() == 9 {
-                         bezier!(s, slice, x xy y y xy xy);
-                    }
-                } else { // second case
-                    while slice.len() > 9 || slice.len() == 8 {
-                        slice = bezier!(s, slice, y xy x x xy y);
-                    }
-                    if slice.len() == 9 {
-                        bezier!(s, slice, y xy x x xy yx);
-                    }
-                }
+                alternating_curve(s, false);
                 
                 s.stack.clear();
                 i
@@ -415,25 +458,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             31 => { // |- dx1 dx2 dy2 dy3 {dya dxb dyb dxc dxd dxe dye dyf}* dxf? hvcurveto (31) |-
                     // |- {dxa dxb dyb dyc dyd dxe dye dxf}+ dyf? hvcurveto (31) |-
                 debug!("hvcurveto");
-                // see 30 (vhcurveto)
-                let mut slice = s.stack.as_slice();
-                if (slice.len() / 4) % 2 == 1 { // first case
-                    
-                    slice = bezier!(s, slice, x xy y);
-                    while slice.len() > 9 || slice.len() == 8 {
-                        slice = bezier!(s, slice, y xy x x xy y);
-                    }
-                    if slice.len() == 9 {
-                        bezier!(s, slice, y xy x x xy yx);
-                    }
-                } else { // second case
-                    while slice.len() > 9 || slice.len() == 8 {
-                        slice = bezier!(s, slice, x xy y y xy x);
-                    }
-                    if slice.len() == 9 {
-                        bezier!(s, slice, x xy y y xy xy);
-                    }
-                }
+                alternating_curve(s, true);
                 
                 s.stack.clear();
                 i

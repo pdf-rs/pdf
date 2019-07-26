@@ -8,6 +8,7 @@ use std::convert::TryInto;
 use std::path::Path;
 use std::collections::HashMap;
 use std::fs;
+use std::borrow::Cow;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
@@ -15,7 +16,7 @@ use pdf::primitive::Primitive;
 use pdf::backend::Backend;
 use pdf::font::{Font as PdfFont, FontType};
 use pdf::error::{PdfError, Result};
-use pdf::encoding::{Encoding, Decoder};
+use pdf::encoding::{Encoding};
 
 use pathfinder_content::color::ColorU;
 use pathfinder_geometry::{
@@ -23,7 +24,7 @@ use pathfinder_geometry::{
 };
 use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
 use pathfinder_renderer::scene::Scene;
-use font::{Font, CffFont, TrueTypeFont, Type1Font, Glyphs};
+use font::{Font, BorrowedFont, CffFont, TrueTypeFont, Type1Font, Glyphs, parse_opentype};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -38,14 +39,18 @@ macro_rules! ops_p {
 }
 macro_rules! ops {
     ($ops:ident, $($var:ident : $typ:ty),* => $block:block) => ({
-        let mut iter = $ops.iter();
-        $(
-            let $var: $typ = iter.next().ok_or(PdfError::EOF)?.try_into()?;
-        )*
-        $block;
+        || -> Result<()> {
+            let mut iter = $ops.iter();
+            $(
+                let $var: $typ = iter.next().ok_or(PdfError::EOF)?.try_into()?;
+            )*
+            $block;
+            Ok(())
+        }();
     })
 }
 
+type P = Vector2F;
 fn rgb2fill(r: f32, g: f32, b: f32) -> FillStyle {
     let c = |v: f32| (v * 255.) as u8;
     FillStyle::Color(ColorU { r: c(r), g: c(g), b: c(b), a: 255 })
@@ -65,7 +70,7 @@ struct FontEntry {
     glyphs: Glyphs,
     font_matrix: Transform2F,
     cmap: Option<HashMap<u16, u32>>, // codepoint -> glyph id
-    decoder: Decoder,
+    encoding: Encoding,
     is_cid: bool
 }
 enum TextMode {
@@ -96,7 +101,7 @@ impl<'a> TextState<'a> {
             text_matrix: Transform2F::default(),
             line_matrix: Transform2F::default(),
             char_space: 0.,
-            word_space: 0.,
+            word_space: 1.,
             horiz_scale: 1.,
             leading: 0.,
             font: None,
@@ -121,12 +126,18 @@ impl<'a> TextState<'a> {
         self.line_matrix = m;
     }
     fn add_glyphs(&mut self, canvas: &mut CanvasRenderingContext2D, glyphs: impl Iterator<Item=(u32, bool)>) {
-        let base = Transform2F::row_major(self.horiz_scale, 0., 0., -1.0, 0., self.rise);
+        canvas.save();
         let font = self.font.as_ref().unwrap();
+        let base = canvas.current_transform();
+        let font_matrix = Transform2F::row_major(
+            self.horiz_scale * self.font_size, 0., 0.,
+            self.font_size, 0., self.rise) 
+            * font.font_matrix;
+        let mut advance = 0.;
         for (gid, is_space) in glyphs {
             let glyph = font.glyphs.get(gid as u32).unwrap();
             
-            let transform = base * self.text_matrix * font.font_matrix;
+            let transform = base * self.text_matrix * font_matrix;
             
             canvas.set_current_transform(&transform);
             canvas.fill_path(glyph.path.clone());
@@ -135,9 +146,11 @@ impl<'a> TextState<'a> {
                 true => self.word_space,
                 false => self.char_space
             };
-            
-            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(glyph.width + dx, 0.));
+            debug!("glyph {} has width: {}", gid, glyph.width);
+            let width = glyph.width * self.text_matrix.m11() * font_matrix.m11();
+            self.text_matrix = Transform2F::from_translation(Vector2F::new(width + dx, 0.)) * self.text_matrix;
         }
+        canvas.restore();
     }
     fn add_text_cid(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
         self.add_glyphs(canvas, data.chunks_exact(2).map(|s| {
@@ -152,13 +165,23 @@ impl<'a> TextState<'a> {
             }
             
             let cmap = font.cmap.as_ref().expect("no cmap");
-            self.add_glyphs(canvas, data.iter().map(|&b| {
-                (*cmap.get(&(b as u16)).expect("can't decode byte"), b == 0x20)
+            self.add_glyphs(canvas, data.iter().filter_map(|&b| {
+                match cmap.get(&(b as u16)) {
+                    Some(&gid) => {
+                        debug!("byte {} -> gid {}", b, gid);
+                        Some((gid, b == 0x20))
+                    },
+                    None => {
+                        debug!("byte {} has no gid", b);
+                        None
+                    }
+                }
             }));
         }
     }
     fn advance(&mut self, v: Vector2F) {
-        self.text_matrix = self.text_matrix * Transform2F::from_translation(v);
+        let translation = v * Vector2F::new(self.horiz_scale * self.font_size, self.font_size);
+        self.text_matrix = self.text_matrix * Transform2F::from_translation(translation);
     }
 }
 
@@ -166,56 +189,38 @@ pub struct Cache {
     // shared mapping of fontname -> font
     fonts: HashMap<String, FontEntry>
 }
-
-fn truetype(data: &[u8], encoding: &Encoding) -> FontEntry {
-    let font = TrueTypeFont::parse(data)
-        .expect("can't parse TrueType font");
+impl FontEntry {
+    fn build<'a>(font: Box<dyn BorrowedFont<'a> + 'a>, encoding: Encoding) -> FontEntry {
+        let decode = false;
     
-    let decoder = Decoder::new(encoding);
-    // build cmap
-    let cmap = (0 ..= 255)
-        .filter_map(|b| decoder.decode_byte(b).map(|c| (b as u16, font.info.find_glyph_index(c as u32))))
-        .collect();
-    
-    FontEntry {
-        glyphs: font.glyphs(),
-        cmap: Some(cmap),
-        decoder,
-        is_cid: false,
-        font_matrix: font.font_matrix()
-    }
-}
-fn opentype(data: &[u8], encoding: &Encoding) -> FontEntry {
-    let font = CffFont::parse_opentype(data, 0).unwrap();
-    FontEntry {
-        glyphs: font.glyphs(),
-        cmap: None,
-        decoder: Decoder::new(encoding),
-        is_cid: false,
-        font_matrix: font.font_matrix()
-    }
-}
-fn cff(data: &[u8], encoding: &Encoding) -> FontEntry {
-    let font = CffFont::parse(data, 0).unwrap();
-    FontEntry {
-        glyphs: font.glyphs(),
-        cmap: None,
-        decoder: Decoder::new(encoding),
-        is_cid: false,
-        font_matrix: font.font_matrix()
-    }
-}
-fn type1(data: &[u8], encoding: &Encoding) -> FontEntry {
-    let font = Type1Font::parse(data)
-        .expect("can't parse Type1 font");
-    let decoder = Decoder::new(encoding);
-    
-    FontEntry {
-        glyphs: font.glyphs(),
-        cmap: None,
-        decoder,
-        is_cid: false,
-        font_matrix: font.font_matrix()
+        // build cmap
+        let mut cmap = HashMap::new();
+        let decode_one = |b: u8| -> Option<u32> {
+            let cp = match decode {
+                true => encoding.base.decode_byte(b)? as u32,
+                false => b as u32
+            };
+            font.gid_for_codepoint(cp)
+        };
+            
+        for b in 0 ..= 255 {
+            if let Some(gid) = decode_one(b) {
+                cmap.insert(b as u16, gid);
+            }
+        }
+        for (&cp, name) in encoding.differences.iter() {
+            debug!("{} -> {}", cp, name);
+            let gid = font.gid_for_name(&name).expect("no such glyph");
+            cmap.insert(cp as u16, gid);
+        }
+        
+        FontEntry {
+            glyphs: font.glyphs(),
+            cmap: Some(cmap),
+            encoding: encoding.clone(),
+            is_cid: false,
+            font_matrix: font.font_matrix()
+        }
     }
 }
 
@@ -229,11 +234,11 @@ impl Cache {
         if self.fonts.get(&pdf_font.name).is_some() {
             return;
         }
-        dbg!(pdf_font);
         
-        let encoding = pdf_font.encoding();
+        debug!("loading {:?}", pdf_font);
+        let encoding = pdf_font.encoding().clone();
         
-        let mut entry = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
+        let data: Cow<[u8]> = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
             (_, Some(Ok(data))) => {
                 let ext = match pdf_font.subtype {
                     FontType::Type1 | FontType::CIDFontType0 => ".pfb",
@@ -241,25 +246,13 @@ impl Cache {
                     _ => "",
                 };
                 ::std::fs::File::create(&format!("/tmp/fonts/{}{}", pdf_font.name, ext)).unwrap().write_all(data).unwrap();
-                
-                
-                match pdf_font.subtype {
-                    FontType::TrueType | FontType::CIDFontType2 => truetype(data, encoding),
-                    FontType::CIDFontType0 => cff(data, encoding),
-                    t => panic!("Fonttype {:?} not yet implemented", t)
-                }
+                data.into()
             }
             (Some(filename), _) => {
                 let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
                     .join("fonts")
                     .join(filename);
-                let data = fs::read(font_path).unwrap();
-                match filename.rsplit(".").nth(0).unwrap() {
-                    "otf" => opentype(&data, encoding),
-                    "ttf" => truetype(&data, encoding),
-                    "PFB" => type1(&data, encoding),
-                    e => panic!("unknown file extension .{}", e)
-                }
+                fs::read(font_path).unwrap().into()
             }
             (None, Some(Err(e))) => panic!("can't decode font data: {:?}", e),
             (None, None) => {
@@ -268,11 +261,13 @@ impl Cache {
                 return;
             }
         };
-        
+        let mut entry = FontEntry::build(font::parse(&data), encoding);
+                
         match pdf_font.subtype {
             FontType::CIDFontType0 | FontType::CIDFontType2 => entry.is_cid = true,
             _ => {}
         }
+        debug!("is_cid={}", entry.is_cid);
             
         self.fonts.insert(pdf_font.name.clone(), entry);
     }
@@ -312,121 +307,98 @@ impl Cache {
             debug!("{}", op);
             let ref ops = op.operands;
             match op.operator.as_str() {
-                // move x y
-                "m" => ops_p!(ops, p => {
-                    path.move_to(p);
-                    last = p;
-                }),
-                
-                // line x y
-                "l" => ops_p!(ops, p => {
-                    path.line_to(p);
-                    last = p;
-                }),
-                
-                // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
-                "c" => ops_p!(ops, c1, c2, p => {
+                "m" => { // move x y
+                    ops_p!(ops, p => {
+                        path.move_to(p);
+                        last = p;
+                    })
+                }
+                "l" => { // line x y
+                    ops_p!(ops, p => {
+                        path.line_to(p);
+                        last = p;
+                    })
+                }
+                "c" => { // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
+                    ops_p!(ops, c1, c2, p => {
                         path.bezier_curve_to(c1, c2, p);
                         last = p;
-                }),
-                
-                // cubic bezier c2.x c2.y p.x p.y
-                "v" => ops_p!(ops, c2, p => {
-                    path.bezier_curve_to(last, c2, p);
-                    last = p;
-                }),
-                
-                // cubic c1.x c1.y p.x p.y
-                "y" => ops_p!(ops, c1, p => {
-                    path.bezier_curve_to(c1, p, p);
-                    last = p;
-                }),
-                
-                // close
-                "h" => {
+                    })
+                }
+                "v" => { // cubic bezier c2.x c2.y p.x p.y
+                    ops_p!(ops, c2, p => {
+                        path.bezier_curve_to(last, c2, p);
+                        last = p;
+                    })
+                }
+                "y" => { // cubic c1.x c1.y p.x p.y
+                    ops_p!(ops, c1, p => {
+                        path.bezier_curve_to(c1, p, p);
+                        last = p;
+                    })
+                }
+                "h" => { // close
                     path.close_path();
                 }
-                
-                // rect x y width height
-                "re" => ops_p!(ops, origin, size => {
-                    let r = RectF::new(origin, size);
-                    path.rect(r);
-                }),
-                
-                // stroke
-                "S" => {
+                "re" => { // rect x y width height
+                    ops_p!(ops, origin, size => {
+                        let r = RectF::new(origin, size);
+                        path.rect(r);
+                    })
+                }
+                "S" => { // stroke
                     canvas.stroke_path(mem::replace(&mut path, Path2D::new()));
                 }
-                
-                // close and stroke
-                "s" => {
+                "s" => { // close and stroke
                     path.close_path();
                     canvas.stroke_path(mem::replace(&mut path, Path2D::new()));
                 }
-                
-                // close and fill
-                "f" | "F" | "f*" => {
+                "f" | "F" | "f*" => { // close and fill 
                     // TODO: implement windings
                     path.close_path();
                     canvas.fill_path(mem::replace(&mut path, Path2D::new()));
                 }
-                
-                // fill and stroke
-                "B" | "B*" => {
+                "B" | "B*" => { // fill and stroke
                     path.close_path();
                     let path2 = mem::replace(&mut path, Path2D::new());
                     canvas.fill_path(path2.clone());
                     canvas.stroke_path(path2);
                 }
-                
-                // stroke and fill
-                "b" | "b*" => {
+                "b" | "b*" => { // stroke and fill
                     path.close_path();
                     let path2 = mem::replace(&mut path, Path2D::new());
                     canvas.stroke_path(path2.clone());
                     canvas.fill_path(path2);
                 }
-                
-                // clear path
-                "n" => {
+                "n" => { // clear path
                     path = Path2D::new();
                 }
-                
-                // save state
-                "q" => {
+                "q" => { // save state
                     canvas.save();
                 }
-                
-                // restore
-                "Q" => {
+                "Q" => { // restore
                     canvas.restore();
                 }
-                
-                // modify transformation matrix 
-                "cm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => { 
-                    let tr = canvas.current_transform() * Transform2F::row_major(a, b, c, d, e, f);
-                    canvas.set_current_transform(&tr);
-                }),
-                
-                // line width
-                "w" => ops!(ops, width: f32 => {
-                    canvas.set_line_width(width);
-                }),
-                
-                // line cap
-                "J" => {}
-                
-                // line join 
-                "j" => {}
-                
-                // miter limit
-                "M" => {}
-                
-                // line dash [ array phase ]
-                "d" => {}
-                
-                // set from graphic state dictionary
-                "gs" => ops!(ops, gs: &str => {
+                "cm" => { // modify transformation matrix 
+                    ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
+                        let tr = canvas.current_transform() * Transform2F::row_major(a, b, c, d, e, f);
+                        canvas.set_current_transform(&tr);
+                    })
+                }
+                "w" => { // line width
+                    ops!(ops, width: f32 => {
+                        canvas.set_line_width(width);
+                    })
+                }
+                "J" => { // line cap
+                }
+                "j" => { // line join 
+                }
+                "M" => { // miter limit
+                }
+                "d" => { // line dash [ array phase ]
+                }
+                "gs" => ops!(ops, gs: &str => { // set from graphic state dictionary
                     let gs = resources.graphics_states.get(gs)?;
                     
                     if let Some(lw) = gs.line_width {
@@ -442,68 +414,62 @@ impl Cache {
                         }
                     }
                 }),
+                "W" | "W*" => { // clipping path
                 
-                // clipping path
-                "W" | "W*" => {}
-                
-                // stroke color
-                "SC" | "RG" => ops!(ops, r: f32, g: f32, b: f32 => {
-                    canvas.set_stroke_style(rgb2fill(r, g, b));
-                }),
-                
-                // fill color
-                "sc" | "rg" => ops!(ops, r: f32, g: f32, b: f32 => {
-                    canvas.set_fill_style(rgb2fill(r, g, b));
-                }),
-                
-                // stroke gray
-                "G" => ops!(ops, gray: f32 => {
-                    canvas.set_stroke_style(gray2fill(gray));
-                }),
-                
-                // fill gray
-                "g" => ops!(ops, gray: f32 => {
-                    canvas.set_fill_style(gray2fill(gray));
-                }),
-                
-                // fill color
-                "k" => ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
-                    canvas.set_fill_style(cymk2fill(c, y, m, k));
-                }),
-                
-                // color space
-                "cs" => {}
-                
-                // begin text
+                }
+                "SC" | "RG" => { // stroke color
+                    ops!(ops, r: f32, g: f32, b: f32 => {
+                        canvas.set_stroke_style(rgb2fill(r, g, b));
+                    });
+                }
+                "sc" | "rg" => { // fill color
+                    ops!(ops, r: f32, g: f32, b: f32 => {
+                        canvas.set_fill_style(rgb2fill(r, g, b));
+                    });
+                }
+                "G" => { // stroke gray
+                    ops!(ops, gray: f32 => {
+                        canvas.set_stroke_style(gray2fill(gray));
+                    })
+                }
+                "g" => { // stroke gray
+                    ops!(ops, gray: f32 => {
+                        canvas.set_fill_style(gray2fill(gray));
+                    })
+                }
+                "k" => { // fill color
+                    ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
+                        canvas.set_fill_style(cymk2fill(c, y, m, k));
+                    });
+                }
+                "cs" => { // color space
+                }
                 "BT" => {
                     state = TextState::new();
                 }
-                
-                // end text
                 "ET" => {
                     state.font = None;
                 }
-                
-                // ~~ state modifiers ~~
+                // state modifiers
                 
                 // character spacing
                 "Tc" => ops!(ops, char_space: f32 => {
-                    state.char_space = char_space;
+                        state.char_space = char_space;
                 }),
                 
                 // word spacing
                 "Tw" => ops!(ops, word_space: f32 => {
-                    state.word_space = word_space;
+                        state.word_space = word_space;
                 }),
                 
                 // Horizontal scaling (in percent)
                 "Tz" => ops!(ops, scale: f32 => {
-                    state.horiz_scale = 0.01 * scale;
+                        state.horiz_scale = 0.01 * scale;
                 }),
                 
                 // leading
                 "TL" => ops!(ops, leading: f32 => {
-                    state.leading = leading;
+                        state.leading = leading;
                 }),
                 
                 // text font
@@ -578,7 +544,6 @@ impl Cache {
                     state.next_line();
                     state.draw_text(&mut canvas, text);
                 }),
-                
                 "TJ" => ops!(ops, array: &[Primitive] => {
                     if let Some(font) = state.font {
                         let mut text: Vec<u8> = Vec::new();
@@ -594,7 +559,7 @@ impl Cache {
                                 }
                             }
                         }
-                        debug!("Text: {}", font.decoder.decode_bytes(&text));
+                        debug!("Text: {}", font.encoding.base.decode_bytes(&text));
                     }
                 }),
                 _ => {}

@@ -24,9 +24,9 @@ impl Decoder {
         
         return plain;
     }
-    pub fn decode(&mut self, data: &[u8]) -> Vec<u8> {
+    pub fn decode(&mut self, data: &[u8], skip: usize) -> Vec<u8> {
         let mut vec = Vec::with_capacity(data.len());
-        vec.extend(data.iter().map(|&b| self.decode_byte(b)));
+        vec.extend(data.iter().map(|&b| self.decode_byte(b)).skip(skip));
         vec
     }
 }

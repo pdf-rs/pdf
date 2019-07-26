@@ -34,7 +34,12 @@ pub struct Font {
     pub subtype: FontType,
     pub name: String,
     pub data: FontData,
-    //_other: Dictionary
+    
+    encoding: Encoding,
+    
+    to_unicode: Option<Stream>,
+    
+    _other: Dictionary
 }
 
 #[derive(Debug)]
@@ -78,8 +83,16 @@ impl Object for Font {
         dict.expect("Font", "Type", "Font", true)?;
         let base_font = dict.require("Font", "BaseFont")?.to_name()?;
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
-        dbg!(&dict);
-        //let _other = dict.clone();
+        
+        let encoding = match dict.remove("Encoding") {
+            Some(p) => Object::from_primitive(p, resolve)?,
+            None => Encoding::standard()
+        };
+        let to_unicode = match dict.remove("ToUnicode") {
+            Some(p) => Some(Stream::from_primitive(p, resolve)?),
+            None => None
+        };
+        let _other = dict.clone();
         let data = match STANDARD_FONTS.iter().filter(|&(name, _)| *name == base_font).next() {
             Some((_, filename)) => {
                 FontData::Standard(filename)
@@ -94,11 +107,14 @@ impl Object for Font {
             }
         };
         
+        
         Ok(Font {
             subtype,
             name: base_font,
             data,
-            //_other
+            encoding,
+            to_unicode,
+            _other
         })
     }
 }
@@ -119,16 +135,7 @@ impl Font {
         }
     }
     pub fn encoding(&self) -> &Encoding {
-        dbg!(&self.data);
-        if let Some(ref info) = self.info() {
-            match info.encoding {
-                Some(ref encoding) => encoding,
-                _ if info.font_descriptor.flags & flags::Symbolic != 0 => &Encoding::SymbolEncoding,
-                _ => &Encoding::StandardEncoding
-            }
-        } else {
-            &Encoding::StandardEncoding
-        }
+        &self.encoding
     }
     pub fn info(&self) -> Option<&TFont> {
         match self.data {
@@ -187,13 +194,7 @@ pub struct TFont {
     pub widths: Vec<f32>,
     
     #[pdf(key="FontDescriptor")]
-    font_descriptor: FontDescriptor,
-    
-    #[pdf(key="Encoding")]
-    encoding: Option<Encoding>,
-    
-    #[pdf(key="ToUnicode")]
-    to_unicode: Option<Stream>
+    font_descriptor: FontDescriptor
 }
 
 #[derive(Object, Debug)]

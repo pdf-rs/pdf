@@ -1,23 +1,32 @@
 use std::error::Error;
 use std::collections::HashMap;
-use sfnt::{Sfnt};
 use pathfinder_geometry::transform2d::Transform2F;
-use crate::{Font, Glyph, Value, Context, State, type1, type2, IResultExt, R};
+use crate::{Font, BorrowedFont, Glyph, Glyphs, Value, Context, State, type1, type2, IResultExt, R};
 use nom::{
     number::complete::{be_u8, be_i8, be_u16, be_i16, be_u24, be_u32, be_i32},
     bytes::complete::{take},
     multi::{count, many0},
     combinator::map,
+    sequence::tuple,
     error::{make_error, ErrorKind},
     Err::*,
 };
 
+pub struct CffFont<'a> {
+    private_dict: HashMap<Operator, Vec<Value>>,
+    char_strings: Index<'a>,
+    char_string_type: CharstringType,
+    context: Context<'a>,
+    font_matrix: Transform2F,
+    codepoint_map: [u16; 256],  // codepoint -> glyph index
+    name_map: HashMap<&'a str, u16>
+}
+
 impl<'a> CffFont<'a> {
-    pub fn parse(data: &'a [u8], idx: u32) -> Result<Self, Box<dyn Error>> {
+    pub fn parse(data: &'a [u8], idx: u32) -> Self {
         match read_cff(data) {
             Ok((_, cff)) => {
-                let font = cff.parse_font(idx);
-                Ok(font)
+                cff.parse_font(idx)
             },
             Err(Incomplete(_)) => panic!("need more data"),
             Err(Error(v)) | Err(Failure(v)) => {
@@ -27,16 +36,6 @@ impl<'a> CffFont<'a> {
                 panic!()
             }
         }
-    }
-    pub fn parse_opentype(data: &'a [u8], idx: u32) -> Result<Self, Box<dyn Error>> {
-        // Parse the font file and find the CFF table in the font file.
-        let sfnt = Sfnt::parse(&data).unwrap();
-        for (r, _) in sfnt.tables() {
-            println!("{:?}", std::str::from_utf8(&*r.tag));
-        }
-        let (_, data) = sfnt.find(b"CFF ").unwrap();
-        std::fs::write("/tmp/data", data);
-        Self::parse(data, idx)
     }
 }
 impl<'a> Font for CffFont<'a> {
@@ -58,12 +57,39 @@ impl<'a> Font for CffFont<'a> {
                 type2::charstring(data, &self.context, &mut state).expect("faild to parse charstring");
             }
         }
+        let width = match (state.char_width, state.delta_width) {
+            (Some(w), None) => w,
+            (None, None) => {
+                let default = self.private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.);
+                info!("no delta width -> DefaultWidthX ({})", default);
+                default
+            }
+            (None, Some(delta)) => {
+                let nominal = self.private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.);
+                info!("NominalWidthX ({}) + delta ({}) = {}", nominal, delta, nominal + delta);
+                nominal + delta
+            },
+            (Some(_), Some(_)) => panic!("BUG: both char_width and delta_width set")
+        };
         Ok(Glyph {
-            width: 0.3,
+            width,
             path: state.into_path()
         })
     }
+    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+        match self.codepoint_map.get(codepoint as usize) {
+            None => None,
+            Some(&n) => Some(n as u32 + 1)
+        }
+    }
+    fn gid_for_name(&self, name: &str) -> Option<u32> {
+        match self.name_map.get(name) {
+            None  => None,
+            Some(&gid) => Some(gid as u32 + 1)
+        }
+    }
 }
+impl<'a> BorrowedFont<'a> for CffFont<'a> {}
 
 pub fn read_cff(data: &[u8]) -> R<Cff> {
     let i = data;
@@ -95,7 +121,15 @@ pub fn read_cff(data: &[u8]) -> R<Cff> {
         subroutines
     }))
 }
-
+fn bias(num: usize) -> i32 {
+    if num < 1240 {
+        107
+    } else if num < 33900 {
+        1131
+    } else {
+        32768
+    }
+}
 pub struct Cff<'a> {
     data: &'a [u8],
     name_index: Index<'a>,
@@ -108,7 +142,7 @@ impl<'a> Cff<'a> {
     fn parse_font(&self, idx: u32) -> CffFont<'a> {
         let data = self.dict_index.get(idx).expect("font not found");
         let top_dict = dict(data).unwrap().1;
-        println!("{:?}", top_dict);
+        info!("top dict: {:?}", top_dict);
         
         let font_matrix = top_dict.get(&Operator::FontMatrix)
             .map(|arr| Transform2F::row_major(
@@ -134,19 +168,51 @@ impl<'a> Cff<'a> {
             STANDARD_STRINGS.get(sid as usize).cloned().unwrap_or_else(||
                 ::std::str::from_utf8(self.string_index.get(sid as u32 - STANDARD_STRINGS.len() as u32).expect("no such string")).expect("Invalid glyph name")
             );
-                
-        let glyph_map: HashMap<&'a str, u32> = match charset {
-            Charset::Continous(sids) => sids.into_iter()
-                .enumerate()
-                .map(|(gid, sid)| (glyph_name(sid), gid as u32))
-                .collect(),
+        
+        // gid(index) -> sid
+        let sids: Vec<SID> = match charset {
+            Charset::Continous(sids) => sids,
             Charset::Ranges(ranges) => ranges.into_iter()
                 .flat_map(|(sid, num)| (sid .. sid + num + 1))
-                .enumerate()
-                .map(|(gid, sid)| (glyph_name(sid), gid as u32))
                 .collect(),
         };
-        debug!("charset: {:?}", glyph_map);
+        let sid_map: HashMap<SID, u16> = sids.iter().enumerate()
+            .map(|(gid, &sid)| (sid as u16, gid as u16))
+            .collect();
+        
+        let name_map: HashMap<_, _> = sids.iter().enumerate()
+            .map(|(gid, &sid)| (glyph_name(sid), gid as u16))
+            .collect();
+        
+        let mut cmap = [0u16; 256];
+        match top_dict.get(&Operator::Encoding).map(|a| a[0].to_int()) {
+            None | Some(0) => {
+                for (codepoint, sid) in STANDARD_ENCODING.iter().enumerate() {
+                    if let Some(&gid) = sid_map.get(sid) {
+                        cmap[codepoint as usize] = gid;
+                    }
+                }
+            }
+            Some(1) => {
+                for (codepoint, sid) in EXPERT_ENCODING.iter().enumerate() {
+                    if let Some(&gid) = sid_map.get(sid) {
+                        cmap[codepoint as usize] = gid;
+                    }
+                }
+            }
+            Some(offset) => {
+                let (codepoints, supplement) = encoding(self.data.get(offset as _ ..).unwrap()).get();
+                match codepoints {
+                    Encoding::Continous(codepoints) => codepoints.iter()
+                        .enumerate().for_each(|(gid, &codepoint)| cmap[codepoint as usize] = gid as _),
+                    Encoding::Ranges(ranges) => ranges.iter()
+                        .flat_map(|&(first, left)| (first ..).take(left as usize + 1))
+                        .enumerate().for_each(|(gid, codepoint)| cmap[codepoint as usize] = gid as _),
+                }
+                supplement.iter()
+                    .for_each(|&(codepoint, sid)| cmap[codepoint as usize] = sid_map[&sid]);
+            }
+        };
         
         let private_dict_entry = top_dict.get(&Operator::Private)
             .expect("no private dict entry");
@@ -155,49 +221,53 @@ impl<'a> Cff<'a> {
         let private_dict_offset = private_dict_entry[1].to_int() as usize;
         let private_dict_data = &self.data[private_dict_offset .. private_dict_offset + private_dict_size];
         let private_dict = dict(private_dict_data).get();
+        info!("private dict: {:?}", private_dict);
         
-        let private_subroutines_offset = private_dict.get(&Operator::Subrs)
-            .expect("no Subrs entry")[0]
-            .to_int() as usize;
+        let subrs = private_dict.get(&Operator::Subrs).map(|arr| {
+            let private_subroutines_offset = arr[0].to_int() as usize;
+            index(&self.data[(private_dict_offset + private_subroutines_offset) as usize ..])
+                .get().items
+                .into_iter().map(|i| i.into())
+                .collect()
+        }).unwrap_or(vec![]);
         
-        let private_subroutines = index(&self.data[(private_dict_offset + private_subroutines_offset) as usize ..])
-            .get().items;
+        let subr_bias = match char_string_type {
+            CharstringType::Type2 => bias(subrs.len()),
+            CharstringType::Type1 => 0
+        };
+        let global_subrs = self.subroutines.iter()
+            .map(|data| data.into())
+            .collect();
         
+        let global_subr_bias = match char_string_type {
+            CharstringType::Type2 => bias(self.subroutines.len() as usize),
+            CharstringType::Type1 => 0
+        };
+
         let context = Context {
-            private_subroutines: private_subroutines,
-            global_subroutines: vec![]
+            subr_bias,
+            subrs,
+            global_subrs,
+            global_subr_bias
         };
         
         CffFont {
-            top_dict,
+            private_dict,
             char_strings,
             char_string_type,
             context,
             font_matrix,
-            glyph_map
+            codepoint_map: cmap,
+            name_map
         }
     }
-}
-pub struct CffFont<'a> {
-    top_dict: HashMap<Operator, Vec<Value>>,
-    char_strings: Index<'a>,
-    char_string_type: CharstringType,
-    context: Context<'a>,
-    font_matrix: Transform2F,
-    glyph_map: HashMap<&'a str, u32>
 }
 
 fn dict(mut input: &[u8]) -> R<HashMap<Operator, Vec<Value>>> {
     let mut map = HashMap::new();
     while input.len() > 0 {
-        debug!("value: {:?}", &input[.. input.len().min(10)]);
-        
         let (i, args) = many0(value)(input)?;
-        
-        debug!("key: {:?}", &i[.. i.len().min(10)]);
         let (i, key) = operator(i)?;
-        
-        debug!("{:?} = {:?}", key, args);
         map.insert(key, args);
         
         input = i;
@@ -218,7 +288,7 @@ impl<'a> Index<'a> {
     pub fn get(&self, idx: u32) -> Option<&'a [u8]> {
         self.items.get(idx as usize).cloned()
     }
-    pub fn iter(&self) -> impl Iterator<Item=&[u8]> {
+    pub fn iter<'b>(&'b self) -> impl Iterator<Item=&'a [u8]> + 'b {
         self.items.iter().cloned()
     }
     pub fn len(&self) -> u32 {
@@ -228,6 +298,7 @@ impl<'a> Index<'a> {
     
 fn index(i: &[u8]) -> R<Index> {
     let (i, n) = map(be_u16, |n| n as usize)(i)?;
+    debug!("n={}", n);
     if n != 0 {
         let (i, offSize) = be_u8(i)?;
         let (i, offsets) = count(map(offset(offSize), |o| o - 1), n+1)(i)?;
@@ -321,8 +392,8 @@ fn value(input: &[u8]) -> R<Value> {
         30 => map(float, |f| f.into())(i),
         31 => panic!("reserved"),
         b0 @ 32 ..= 246 => Ok((i, (b0 as i32 - 139).into())),
-        b0 @ 247 ..= 250 => map(be_i8, |b1| ((b0 as i32 - 247) * 256 + b1 as i32 + 108).into())(i),
-        b0 @ 251 ..= 254 => map(be_i8, |b1| (-(b0 as i32 - 251) * 256 - b1 as i32 - 108).into())(i),
+        b0 @ 247 ..= 250 => map(be_u8, |b1| ((b0 as i32 - 247) * 256 + b1 as i32 + 108).into())(i),
+        b0 @ 251 ..= 254 => map(be_u8, |b1| (-(b0 as i32 - 251) * 256 - b1 as i32 - 108).into())(i),
         255 => panic!("reserved"),
         _ => Err(Error(make_error(input, ErrorKind::TooLarge))) 
     }
@@ -496,6 +567,35 @@ fn charset(i: &[u8], num_glyphs: usize) -> R<Charset> {
             map(ranges(be_u16, num_glyphs), |r| Charset::Ranges(r))(i)
         },
         _ => panic!("invalid charset format")
+    }
+}
+
+#[derive(Debug)]
+enum Encoding {
+    Continous(Vec<u8>),
+    Ranges(Vec<(u8, u8)>), // start, num-1
+}
+
+fn encoding(i: &[u8]) -> R<(Encoding, Vec<(u8, SID)>)> {
+    let (i, format) = be_u8(i)?;
+    
+    let (i, encoding) = match format & 0x7F {
+        0 => {
+            let (i, num) = be_u8(i)?;
+            map(count(be_u8, num as usize), |a| Encoding::Continous(a))(i)?
+        },
+        1 => {
+            let (i, num) = be_u8(i)?;
+            map(count(tuple((be_u8, be_u8)), num as usize), |a| Encoding::Ranges(a))(i)?
+        }
+        _ => panic!("invalid charset format")
+    };
+    if format & 0x80 != 0 {
+        let (i, n) = be_u8(i)?;
+        let (i, supplement) = count(tuple((be_u8, be_u16)), n as usize)(i)?;
+        Ok((i, (encoding, supplement)))
+    } else {
+        Ok((i, (encoding, vec![])))
     }
 }
 
@@ -892,3 +992,8 @@ static STANDARD_STRINGS: [&'static str; 391] = [
 /* 389 */ "Roman",
 /* 390 */ "Semibold"
 ];
+
+// char -> SID
+static STANDARD_ENCODING: [SID; 256] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 0, 111, 112, 113, 114, 0, 115, 116, 117, 118, 119, 120, 121, 122, 0, 123, 0, 124, 125, 126, 127, 128, 129, 130, 131, 0, 132, 133, 0, 134, 135, 136, 137, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 138, 0, 139, 0, 0, 0, 0, 140, 141, 142, 143, 0, 0, 0, 0, 0, 144, 0, 0, 0, 145, 0, 0, 146, 147, 148, 149, 0, 0, 0, 0];
+
+static EXPERT_ENCODING: [SID; 256] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 229, 230, 0, 231, 232, 233, 234, 235, 236, 237, 238, 13, 14, 15, 99, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 27, 28, 249, 250, 251, 252, 0, 253, 254, 255, 256, 257, 0, 0, 0, 258, 0, 0, 259, 260, 261, 262, 0, 0, 263, 264, 265, 0, 266, 109, 110, 267, 268, 269, 0, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 304, 305, 306, 0, 0, 307, 308, 309, 310, 311, 0, 312, 0, 0, 313, 0, 0, 314, 315, 0, 0, 316, 317, 318, 0, 0, 0, 158, 155, 163, 319, 320, 321, 322, 323, 324, 325, 0, 0, 326, 150, 164, 169, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378];

@@ -1,18 +1,24 @@
 use std::error::Error;
+use std::collections::HashMap;
 use pathfinder_canvas::Path2D;
 use pathfinder_geometry::vector::Vector2F;
 use pathfinder_geometry::transform2d::Transform2F;
 use stb_truetype::FontInfo;
 use stb_truetype::VertexType;
-use crate::{Font, Glyph};
+use crate::{Font, BorrowedFont, Glyph};
 
 pub struct TrueTypeFont<'a> {
-    pub info: FontInfo<&'a [u8]>
+    pub info: FontInfo<&'a [u8]>,
+    name_map: HashMap<String, u32>
 }
 impl<'a> TrueTypeFont<'a> {
-    pub fn parse(data: &'a [u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn parse(data: &'a [u8]) -> Self {
         let info = FontInfo::new(data, 0).expect("can't pase font");
-        Ok(TrueTypeFont { info })
+        
+        let name_map = info.get_font_name_strings().enumerate()
+            .map(|(gid, (name, _, _))| (String::from_utf8(name.into()).unwrap(), gid as u32))
+            .collect();
+        TrueTypeFont { info, name_map }
     }
 }
 impl<'a> Font for TrueTypeFont<'a> {
@@ -41,12 +47,22 @@ impl<'a> Font for TrueTypeFont<'a> {
             }
             path.close_path();
         }
-        let width = self.info.get_glyph_h_metrics(id).advance_width as f32 / self.info.units_per_em() as f32;
+        let width = self.info.get_glyph_h_metrics(id).advance_width as f32;
         
         Ok(Glyph {
             width,
             path
         })
     }
+    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+        match self.info.find_glyph_index(codepoint) {
+            0 => None,
+            n => Some(n)
+        }
+    }
+    fn gid_for_name(&self, name: &str) -> Option<u32> {
+        self.name_map.get(name).cloned()
+    }
 }
 
+impl<'a> BorrowedFont<'a> for TrueTypeFont<'a> {}

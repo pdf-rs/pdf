@@ -1,48 +1,145 @@
-use std::io::{self, Read};
 use std::error::Error;
+use std::collections::HashMap;
 use nom::{IResult,
     number::complete::{be_u8, le_u8, be_i32, le_u32},
 };
-use crate::{Font, Glyph, Context, State, v, R, IResultExt};
-use crate::postscript::{Vm};
+use tuple::{TupleElements};
+use pathfinder_geometry::transform2d::Transform2F;
+use itertools::Itertools;
+use indexmap::IndexMap;
+use crate::{Font, BorrowedFont, Glyph, State, v, R, IResultExt, Context};
+use crate::postscript::{Vm, RefItem};
 use crate::eexec::Decoder;
 
 pub struct Type1Font {
+    vm: Vm,
+    glyphs: IndexMap<u32, Glyph>, // codepoint -> glyph
+    names: HashMap<String, u32>, // name -> glyph id
+    font_matrix: Transform2F
 }
 impl Font for Type1Font {
-    fn num_glyphs(&self) -> u32 { 0 }
-    fn glyph(&self, _id: u32) -> Result<Glyph, Box<dyn Error>> {
-        unimplemented!()
+    fn num_glyphs(&self) -> u32 {
+        self.glyphs.len() as u32
+    }
+    fn font_matrix(&self) -> Transform2F {
+        self.font_matrix
+    }
+    fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
+        match self.glyphs.get_index(id as usize) {
+            Some((_, glyphs)) => Ok(glyphs.clone()),
+            None => Err("out of bounds".into())
+        }
+    }
+    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+        self.glyphs.get_full(&codepoint).map(|(index, _, _)| index as u32)
+    }
+    fn gid_for_name(&self, name: &str) -> Option<u32> {
+        self.names.get(name).cloned()
     }
 }
+impl<'a> BorrowedFont<'a> for Type1Font {}
+
 impl Type1Font {
-    pub fn parse_pfb(data: &[u8]) -> Result<Self, Box<dyn Error>> {
-        Ok(parse_pfb(data).get())
+    pub fn parse_pfb(data: &[u8]) -> Self {
+        let vm = parse_pfb(data).get();
+        
+        let (font_name, font_dict) = vm.fonts().nth(0).unwrap();
+        
+        let private_dict = font_dict.get("Private").unwrap()
+            .as_dict().unwrap();
+        let len_iv = private_dict.get("lenIV")
+            .map(|i| i.as_int().unwrap()).unwrap_or(4) as usize;
+        
+        debug!("FontDict keys: {:?}", font_dict.iter().map(|(k, v)| k).format(", "));
+        debug!("Private keys: {:?}", private_dict.iter().map(|(k, v)| k).format(", "));
+        
+        let char_strings = font_dict.get("CharStrings").unwrap().as_dict().unwrap();
+        
+        let subrs = private_dict.get("Subrs").unwrap()
+            .as_array().unwrap().iter()
+            .map(|item| Decoder::charstring().decode(item.as_bytes().unwrap(), len_iv).into())
+            .collect();
+        
+        let context = Context {
+            subr_bias: 0,
+            subrs,
+            global_subr_bias: 0,
+            global_subrs: vec![]
+        };
+
+        let encoding = font_dict.get("Encoding").unwrap().as_array().unwrap();
+        
+        let mut names = HashMap::new();
+        let mut glyphs = IndexMap::new();
+        let mut codepoint = 0;
+        for item in encoding.iter() {
+            match item {
+                RefItem::Null => {},
+                RefItem::Literal(b".notdef") => {},
+                RefItem::Literal(name) => {
+                    let name = std::str::from_utf8(name).unwrap();
+                    let char_string = char_strings.get(name).unwrap().as_bytes().unwrap();
+                    
+                    let decoded = Decoder::charstring().decode(&char_string, len_iv);
+                    //debug!("{} decoded: {:?}", name, String::from_utf8_lossy(&decoded));
+                    
+                    let mut state = State::new();
+                    charstring(&decoded, &context, &mut state).unwrap();
+                    
+                    let (index, _) = glyphs.insert_full(codepoint, Glyph {
+                        path: state.path,
+                        width: state.char_width.unwrap()
+                    });
+                    names.insert(name.to_owned(), index as u32);
+                }
+                _ => {}
+            }
+            codepoint += 1;
+        }
+        let font_matrix = font_dict.get("FontMatrix").unwrap().as_array().unwrap();
+        assert_eq!(font_matrix.len(), 6);
+        
+        let (a, b, c, d, e, f) = TupleElements::from_iter(
+                font_matrix.iter().map(|item| item.as_f32().unwrap())
+        ).unwrap();
+        
+        Type1Font {
+            font_matrix: Transform2F::row_major(a, b, c, d, e, f),
+            glyphs,
+            names,
+            vm
+        }
     }
 }
 
 fn parse_binary<'a>(vm: &mut Vm, data: &'a [u8]) {
     let mut decoder = Decoder::file();
-    let decoded = decoder.decode(data);
+    let decoded = decoder.decode(data, 4);
     
-    vm.parse_and_exec(&decoded[4 ..])
+    vm.parse_and_exec(&decoded)
 }
 
 #[test]
 fn test_parser() {
+    use crate::IResultExt;
     let mut vm = Vm::new();
-    parse_text(&mut vm, b"/FontBBox{-180 -293 1090 1010}readonly ");
+    vm.parse_and_exec(b"/FontBBox{-180 -293 1090 1010}readonly ");
     vm.print_stack();
     assert_eq!(vm.stack().len(), 2);
 }
-fn parse_pfb(i: &[u8]) -> R<Type1Font> {
+fn parse_pfb(i: &[u8]) -> R<Vm> {
     let mut vm = Vm::new();
     
     let mut input = i;
     while input.len() > 0 {
-    let (i, magic) = le_u8(input)?;
+        let (i, magic) = le_u8(input)?;
         assert_eq!(magic, 0x80);
         let (i, block_type) = le_u8(i)?;
+        match block_type {
+            1 | 2 => {} // continue
+            3 => break,
+            n => panic!("unknown block type {}", n)
+        }
         
         let (i, block_len) = le_u32(i)?;
         info!("block type {}, length: {}", block_type, block_len);
@@ -51,17 +148,16 @@ fn parse_pfb(i: &[u8]) -> R<Type1Font> {
         match block_type {
             1 => vm.parse_and_exec(block),
             2 => parse_binary(&mut vm, block),
-            n => panic!("unknown block type {}", n)
+            _ => unreachable!()
         }
         
         input = &i[block_len as usize ..];
     }
     
-    panic!()
+    Ok((input, vm))
 }
-pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
-    let i = loop {
-        debug!("stack: {:?}", s.stack);
+pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
+    while input.len() > 0 {
         let (i, b0) = be_u8(input)?;
         let i = match b0 {
             1 => { // ⊦ y dy hstem (1) ⊦
@@ -125,20 +221,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             10 => { // subr# callsubr (10) –
                 debug!("callsubr");
                 let subr_nr = s.pop().to_int();
-                let subr = ctx.private_subroutine(subr_nr);
-                let (i, _) = charstring(subr, ctx, s)?;
+                let subr = ctx.subr(subr_nr);
+                charstring(subr, ctx, s)?;
                 i
             }
-            14 => { //– endchar (14) ⊦
-                debug!("endchar");
-                break i;
-            }
-            13 => { // ⊦ sbx wx hsbw (13) ⊦
-                debug!("hsbw");
-                s.lsp = Some(v(s.stack[0], 0.));
-                s.char_width = Some(s.stack[1].into());
-                s.stack.clear();
-                i
+            11 => { // return
+                debug!("return");
+                input = i;
+                break;
             }
             12 => {
                 let (i, b1) = be_u8(i)?;
@@ -164,13 +254,12 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                         i
                     }
                     7 => { // ⊦ sbx sby wx wy sbw (12 7) ⊦
+                        let (sbx, sby, wx, wy, sbw) = s.args();
                         debug!("sbw");
+                        s.char_width = Some(wx.to_float());
+                        s.current = v(sbx, sby);
                         s.stack.clear();
                         i
-                    }
-                    11 => { // – return (11) –
-                        debug!("return");
-                        break i;
                     }
                     12 => { // num1 num2 div (12 12) quotient
                         debug!("div");
@@ -181,15 +270,18 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                     }
                     16 => { //  arg1 . . . argn n othersubr# callothersubr (12 16) –
                         debug!("callothersubr");
-                        unimplemented!()
+                        let subr_nr = s.pop().to_int();
+                        i
                     }
                     17 => { // – pop (12 17) number
                         debug!("pop");
-                        unimplemented!()
+                        s.pop();
+                        i
                     }
                     33 => { // ⊦ x y sets.currentpoint (12 33) ⊦
                         debug!("sets.currentpoint");
-                        let p = v(s.stack[0], s.stack[1]);
+                        let (x, y) = s.args();
+                        let p = v(x, y);
                         s.current = p;
                         s.stack.clear();
                         i
@@ -197,9 +289,25 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
                     _ => panic!("invalid operator")
                 }
             }
+            13 => { // ⊦ sbx wx hsbw (13) ⊦
+                debug!("hsbw");
+                let (sbx, wx) = s.args();
+                let lsb = v(sbx, 0.);
+                s.lsb = Some(lsb);
+                s.current = lsb;
+                s.char_width = Some(wx.to_float());
+                s.stack.clear();
+                i
+            }
+            14 => { //– endchar (14) ⊦
+                debug!("endchar");
+                input = i;
+                break;
+            }
             21 => { // ⊦ dx dy rmoveto (21) ⊦
                 debug!("rmoveto");
-                let p = s.current + v(s.stack[0], s.stack[1]);
+                let (dx, dy) = s.args();
+                let p = s.current + v(dx, dy);
                 s.path.move_to(p);
                 s.current = p;
                 s.stack.clear();
@@ -207,7 +315,8 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             22 => { // ⊦ dx hmoveto (22) ⊦
                 debug!("hmoveto");
-                let p = s.current + v(s.stack[0], 0.);
+                let (dx, ) = s.args();
+                let p = s.current + v(dx, 0.);
                 s.path.move_to(p);
                 s.current = p;
                 s.stack.clear();
@@ -215,9 +324,10 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             30 => { // ⊦ dy1 dx2 dy2 dx3 vhcurveto (30) ⊦
                 debug!("vhcurveto");
-                let c1 = s.current + v(0., s.stack[0]);
-                let c2 = c1 + v(s.stack[1], s.stack[2]);
-                let p = c2 + v(s.stack[3], 0.);
+                let (dy1, dx2, dy2, dx3) = s.args();
+                let c1 = s.current + v(0., dy1);
+                let c2 = c1 + v(dx2, dy2);
+                let p = c2 + v(dx3, 0.);
                 s.path.bezier_curve_to(c1, c2, p);
                 s.stack.clear();
                 s.current = p;
@@ -225,9 +335,10 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
             }
             31 => { // ⊦ dx1 dx2 dy2 dy3 hvcurveto (31) ⊦
                 debug!("hvcurveto");
-                let c1 = s.current + v(s.stack[0], s.stack[1]);
-                let c2 = c1 + v(0., s.stack[2]);
-                let p = c2 + v(0., s.stack[3]);
+                let (dx1, dx2, dy2, dy3) = s.args();
+                let c1 = s.current + v(dx1, 0.);
+                let c2 = c1 + v(dx2, dy2);
+                let p = c2 + v(0., dy3);
                 s.path.bezier_curve_to(c1, c2, p);
                 s.stack.clear();
                 s.current = p;
@@ -258,5 +369,5 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &Context<'a>, s: &'b mut Sta
         input = i;
     };
     
-    Ok((i, ()))
+    Ok((input, ()))
 }

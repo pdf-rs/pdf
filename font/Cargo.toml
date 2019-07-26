@@ -8,10 +8,10 @@ edition = "2018"
 
 [dependencies]
 sfnt = "0.12"
-pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_export = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-stb_truetype = "0.2.2"
+pathfinder_canvas = {git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_export = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
+stb_truetype = { git = "https://github.com/s3bk/stb_truetype" }
 nom = "5.0"
 log = "*"
 env_logger = "*"
@@ -20,5 +20,8 @@ slotmap = { version = "0.3", features = ["unstable"] }
 tuple = "*"
 decorum = "*"
 itertools = "*"
-rental = "0.5"
 indexmap = "1.0"
+
+#pathfinder_canvas = { path = "../../pathfinder/canvas" }
+#pathfinder_export = { path = "../../pathfinder/export" }
+#pathfinder_geometry = { path = "../../pathfinder/geometry" }

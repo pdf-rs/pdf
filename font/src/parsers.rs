@@ -215,6 +215,7 @@ fn procedure(i: &[u8]) -> R<Vec<Token>> {
 }
 #[test]
 fn test_procedure() {
+    use crate::IResultExt;
     assert_eq!(
         procedure("{-180 -293 1090 1010}readonly ".as_bytes()).get(),
         vec![
@@ -239,8 +240,8 @@ fn test_procedure() {
 pub fn token(i: &[u8]) -> R<Token> {
     terminated(
         alt((
-            map(integer, |i| Token::Int(i)),
             map(float, |f| Token::Real(f.into())),
+            map(integer, |i| Token::Int(i)),
             map(literal_name, |s| Token::Literal(s)),
             map(procedure, |v| Token::Procedure(v)),
             map(string, |v| Token::String(v)),

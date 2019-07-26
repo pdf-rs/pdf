@@ -9,13 +9,14 @@ edition = "2018"
 [dependencies]
 pdf = { path = "../pdf" }
 font = { path = "../font" }
-pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_content = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_gl = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_gpu = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
-pathfinder_export = { git = "https://github.com/s3bk/pathfinder/", branch="local-skribo" }
+pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_content = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_export = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_gl = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_gpu = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder/" }
+
 euclid = "0.19"
 log = "*"
 env_logger = "*"
@@ -24,11 +25,14 @@ sdl2 = "0.32"
 sdl2-sys = "0.32"
 freetype = "^0.4.1"
 
-[dependencies.font-kit]
-git = "https://github.com/pcwalton/font-kit/"
 
-[dependencies.skribo]
-git = "https://github.com/s3bk/skribo"
+#pathfinder_canvas = { path = "../../pathfinder/canvas" }
+#pathfinder_content = { path = "../../pathfinder/content" }
+#pathfinder_export = { path = "../../pathfinder/export" }
+#pathfinder_geometry = { path = "../../pathfinder/geometry" }
+#pathfinder_gl = { path = "../../pathfinder/gl" }
+#pathfinder_gpu = { path = "../../pathfinder/gpu" }
+#pathfinder_renderer = { path = "../../pathfinder/renderer" }
 
 [[bin]]
 name = "pdf_view"

@@ -13,7 +13,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let args: Vec<String> = env::args().collect();
     let font = parse_file(&args[1]).unwrap();
-    let gid = args[2].parse().expect("not a number");
+    let gid = args[2].parse().ok().or_else(||
+        font.gid_for_name(&args[2])
+    ).expect("not a number or valid glyph name");
     
     let font_context = CanvasFontContext::from_system_source();
     let mut canvas = CanvasRenderingContext2D::new(font_context, Vector2F::new(1000.0, 1000.0));
