@@ -83,7 +83,7 @@ fn main() -> Result<(), PdfError> {
             Event::KeyDown { keycode: Some(keycode), .. } => {
                 match keycode {
                     Keycode::Left => {
-                        current_page = (0).max(current_page - 1);
+                        current_page = current_page.saturating_sub(1);
                         needs_update = true;
                     }
                     Keycode::Right => {
