@@ -239,15 +239,7 @@ impl Cache {
         let encoding = pdf_font.encoding().clone();
         
         let data: Cow<[u8]> = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
-            (_, Some(Ok(data))) => {
-                let ext = match pdf_font.subtype {
-                    FontType::Type1 | FontType::CIDFontType0 => ".pfb",
-                    FontType::TrueType | FontType::CIDFontType2 => ".ttf",
-                    _ => "",
-                };
-                ::std::fs::File::create(&format!("/tmp/fonts/{}{}", pdf_font.name, ext)).unwrap().write_all(data).unwrap();
-                data.into()
-            }
+            (_, Some(Ok(data))) => data.into(),
             (Some(filename), _) => {
                 let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
                     .join("fonts")

@@ -31,7 +31,7 @@ impl Resolve for NoResolve {
     fn resolve(&self, _: PlainRef) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
-    fn get<T: Object>(&self, _: Ref<T>) -> Result<Rc<T>> {
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
         Err(PdfError::Reference)
     }
 }
@@ -306,6 +306,7 @@ impl<T: Object> Object for Option<T> {
                 Ok(p) => Ok(Some(p)),
                 // References to non-existing objects ought not to be an error
                 Err(PdfError::NullRef {..}) => Ok(None),
+                Err(PdfError::FreeObject {..}) => Ok(None),
                 Err(e) => Err(e),
             }
         }

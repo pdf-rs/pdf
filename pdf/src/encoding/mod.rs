@@ -41,6 +41,8 @@ pub enum BaseEncoding {
     MacRomanEncoding,
     WinAnsiEncoding,
     MacExpertEncoding,
+    #[pdf(name="Identity-H")]
+    IdentityH,
     None
 }
 impl Object for Encoding {

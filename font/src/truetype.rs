@@ -9,14 +9,14 @@ use crate::{Font, BorrowedFont, Glyph};
 
 pub struct TrueTypeFont<'a> {
     pub info: FontInfo<&'a [u8]>,
-    name_map: HashMap<String, u32>
+    name_map: HashMap<Vec<u8>, u32>
 }
 impl<'a> TrueTypeFont<'a> {
     pub fn parse(data: &'a [u8]) -> Self {
         let info = FontInfo::new(data, 0).expect("can't pase font");
         
         let name_map = info.get_font_name_strings().enumerate()
-            .map(|(gid, (name, _, _))| (String::from_utf8(name.into()).unwrap(), gid as u32))
+            .map(|(gid, (name, _, _))| (name.into(), gid as u32))
             .collect();
         TrueTypeFont { info, name_map }
     }
@@ -61,7 +61,7 @@ impl<'a> Font for TrueTypeFont<'a> {
         }
     }
     fn gid_for_name(&self, name: &str) -> Option<u32> {
-        self.name_map.get(name).cloned()
+        self.name_map.get(name.as_bytes()).cloned()
     }
 }
 
