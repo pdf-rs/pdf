@@ -1,7 +1,7 @@
-use err::*;
 use std;
 use std::fmt::{Debug, Formatter};
-use object::*;
+use crate::error::*;
+use crate::object::*;
 
 ///////////////////////////
 // Cross-reference table //
@@ -70,7 +70,7 @@ impl XRefTable {
     pub fn get(&self, id: ObjNr) -> Result<XRef> {
         match self.entries.get(id as usize) {
             Some(&entry) => Ok(entry),
-            None => bail!(ErrorKind::UnspecifiedXRefEntry {id: id}),
+            None => Err(PdfError::UnspecifiedXRefEntry {id: id}),
         }
     }
 
@@ -88,16 +88,16 @@ impl XRefTable {
     }
 
     pub fn add_entries_from(&mut self, section: XRefSection) {
-        for (i, entry) in section.entries.iter().enumerate() {
+        for (i, entry) in section.entries() {
             // Early return if the entry we have has larger or equal generation number
-            let should_be_updated = match self.entries[section.first_id as usize + i] {
+            let should_be_updated = match self.entries[i] {
                 XRef::Raw { gen_nr: gen, .. } | XRef::Free { gen_nr: gen, .. }
                     => entry.get_gen_nr() > gen,
                 XRef::Stream { .. } | XRef::Invalid
                     => true,
                 x => panic!("found {:?}", x)
             };
-            let dst = &mut self.entries[section.first_id as usize + i];
+            let dst = &mut self.entries[i];
             if should_be_updated {
                 *dst = *entry;
             }
@@ -150,6 +150,9 @@ impl XRefSection {
     }
     pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
         self.entries.push(XRef::Raw{pos: pos, gen_nr: gen_nr});
+    }
+    pub fn entries(&self) -> impl Iterator<Item=(usize, &XRef)> {
+        self.entries.iter().enumerate().map(move |(i, e)| (i + self.first_id as usize, e))
     }
 }
 

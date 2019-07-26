@@ -2,8 +2,10 @@
 members = [
     "pdf",
     "pdf_derive",
+    "view",
     "examples/read",
     "examples/text",
+    "font"
 ]
 default-members = [
     "pdf",

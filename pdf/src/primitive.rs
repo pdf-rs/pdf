@@ -1,13 +1,13 @@
-use err::*;
+use crate::error::*;
+use crate::object::{PlainRef, Resolve, Object};
 
 use std::collections::{btree_map, BTreeMap};
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
-use object::{PlainRef, Resolve, Object};
 use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
-
-
+use std::convert::TryInto;
+use itertools::Itertools;
 
 #[derive(Clone, Debug)]
 pub enum Primitive {
@@ -23,6 +23,23 @@ pub enum Primitive {
     Name (String),
 }
 
+impl fmt::Display for Primitive {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Primitive::Null => write!(f, "null"),
+            Primitive::Integer(i) => i.fmt(f),
+            Primitive::Number(n) => n.fmt(f),
+            Primitive::Boolean(b) => b.fmt(f),
+            Primitive::String(ref s) => write!(f, "{:?}", s),
+            Primitive::Stream(_) => write!(f, "stream"),
+            Primitive::Dictionary(ref d) => d.fmt(f),
+            Primitive::Array(ref arr) => write!(f, "[{}]", arr.iter().format(", ")),
+            Primitive::Reference(r) => write!(f, "@{}", r.id),
+            Primitive::Name(ref s) => write!(f, "/{}", s)
+        }
+    }
+}
+
 /// Primitive Dictionary type.
 #[derive(Default, Clone)]
 pub struct Dictionary {
@@ -30,7 +47,7 @@ pub struct Dictionary {
 }
 impl Dictionary {
     pub fn new() -> Dictionary {
-        Dictionary { dict: BTreeMap::new() }
+        Dictionary { dict: BTreeMap::new()}
     }
     pub fn len(&self) -> usize {
         self.dict.len()
@@ -45,7 +62,38 @@ impl Dictionary {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
-        self.dict.remove(key)
+        let v = self.dict.remove(key);
+        debug!("{} -> {:?}", key, v);
+        v
+    }
+    /// like remove, but takes the name of the calling type and returns `PdfError::MissingEntry` if the entry is not found
+    pub fn require(&mut self, typ: &'static str, key: &str) -> Result<Primitive> {
+        self.remove(key).ok_or(
+            PdfError::MissingEntry {
+                typ,
+                field: key.into()
+            }
+        )
+    }
+    /// assert that the given key/value pair is in the dictionary (`required=true`),
+    /// or the key is not present at all (`required=false`)
+    pub fn expect(&self, typ: &'static str, key: &str, value: &str, required: bool) -> Result<()> {
+        match self.dict.get(key) {
+            Some(ty) => {
+                let ty = ty.as_name()?;
+                if ty != value {
+                    Err(PdfError::KeyValueMismatch {
+                        key: key.into(),
+                        value: value.into(),
+                        found: ty.into()
+                    })
+                } else {
+                    Ok(())
+                }
+            },
+            None if required => Err(PdfError::MissingEntry { typ, field: key.into() }),
+            None => Ok(())
+        }
     }
 }
 impl Deref for Dictionary {
@@ -58,9 +106,14 @@ impl fmt::Debug for Dictionary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{{")?;
         for (k, v) in self {
-            writeln!(f, "{:>15}: {:?}", k, v)?;
+            writeln!(f, "{:>15}: {}", k, v)?;
         }
         write!(f, "}}")
+    }
+}
+impl fmt::Display for Dictionary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<{}>", self.iter().format_with(", ", |(k, v), f| f(&format_args!("{}={}", k, v))))
     }
 }
 impl<'a> Index<&'a str> for Dictionary {
@@ -84,7 +137,7 @@ pub struct PdfStream {
     pub data: Vec<u8>,
 }
 impl Object for PdfStream {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()>  {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
         writeln!(out, "<<")?;
         for (k, v) in &self.info {
             write!(out, "  {} ", k)?;
@@ -95,13 +148,14 @@ impl Object for PdfStream {
         
         writeln!(out, "stream")?;
         out.write_all(&self.data)?;
-        writeln!(out, "\nendstream")
+        writeln!(out, "\nendstream")?;
+        Ok(())
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Stream (stream) => Ok(stream),
             Primitive::Reference (r) => PdfStream::from_primitive(resolve.resolve(r)?, resolve),
-            p => bail!(ErrorKind::UnexpectedPrimitive {expected: "Stream", found: p.get_debug_name()})
+            p => Err(PdfError::UnexpectedPrimitive {expected: "Stream", found: p.get_debug_name()})
         }
     }
 }
@@ -110,34 +164,34 @@ impl Object for PdfStream {
 
 macro_rules! unexpected_primitive {
     ($expected:ident, $found:expr) => (
-        Err(ErrorKind::UnexpectedPrimitive {
+        Err(PdfError::UnexpectedPrimitive {
             expected: stringify!($expected),
             found: $found
-        }.into())
+        })
     )
 }
 
 /// Primitive String type.
 #[derive(Clone)]
 pub struct PdfString {
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 impl fmt::Debug for PdfString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "b\"")?;
+        write!(f, "\"")?;
         for &b in &self.data {
             match b {
                 b'"' => write!(f, "\\\"")?,
-                b' ' ... b'~' => write!(f, "{}", b as char)?,
-                o @ 0 ... 7  => write!(f, "\\{}", o)?,
+                b' ' ..= b'~' => write!(f, "{}", b as char)?,
+                o @ 0 ..= 7  => write!(f, "\\{}", o)?,
                 x => write!(f, "\\x{:02x}", x)?
             }
         }
-        write!(f, "b\"")
+        write!(f, "\"")
     }
 }
 impl Object for PdfString {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         write!(out, r"\")?;
         for &b in &self.data {
             match b {
@@ -149,11 +203,16 @@ impl Object for PdfString {
         }
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::String (string) => Ok(string),
             _ => unexpected_primitive!(String, p.get_debug_name()),
         }
+    }
+}
+impl AsRef<[u8]> for PdfString {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 
@@ -197,14 +256,12 @@ impl Primitive {
             Primitive::Name (..) => "Name",
         }
     }
-    /// Doesn't accept a Reference (contrary to i32::from_primitive())
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
     pub fn as_number(&self) -> Result<f32> {
         match *self {
             Primitive::Integer(n) => Ok(n as f32),
@@ -212,11 +269,29 @@ impl Primitive {
             ref p => unexpected_primitive!(Number, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
     pub fn as_bool(&self) -> Result<bool> {
         match *self {
             Primitive::Boolean (b) => Ok(b),
             ref p => unexpected_primitive!(Number, p.get_debug_name())
+        }
+    }
+    pub fn as_name(&self) -> Result<&str> {
+        match self {
+            Primitive::Name(ref name) => Ok(name.as_str()),
+            p => unexpected_primitive!(Name, p.get_debug_name())
+        }
+    }
+    pub fn as_string(&self) -> Result<&PdfString> {
+        match self {
+            Primitive::String(ref data) => Ok(data),
+            p => unexpected_primitive!(String, p.get_debug_name())
+        }
+    }
+    /// Does accept a Reference
+    pub fn as_array(&self) -> Result<&[Primitive]> {
+        match self {
+            Primitive::Array(ref v) => Ok(v),
+            p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
     pub fn to_reference(self) -> Result<PlainRef> {
@@ -226,18 +301,17 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_array(self, _r: &Resolve) -> Result<Vec<Primitive>> {
+    pub fn to_array(self, _r: &impl Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
             // Primitive::Reference(id) => r.resolve(id)?.to_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
-    pub fn to_dictionary(self, _r: &Resolve) -> Result<Dictionary> {
+    pub fn to_dictionary(self, r: &impl Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
-            // Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
+            Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
@@ -256,7 +330,7 @@ impl Primitive {
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_stream(self, _r: &Resolve) -> Result<PdfStream> {
+    pub fn to_stream(self, _r: &impl Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
             // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
@@ -311,25 +385,47 @@ impl From<String> for Primitive {
         Primitive::Name (x)
     }
 }
-
-
-impl<T: Object> Object for Option<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
-        // TODO: the Option here is most often or always about whether the entry exists in a
-        // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
-        // handle Options. 
-        unimplemented!();
+impl<'a> TryInto<f32> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<f32> {
+        self.as_number()
     }
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
-        match p {
-            Primitive::Null => Ok(None),
-            p => match T::from_primitive(p, r) {
-                Ok(p) => Ok(Some(p)),
-                // References to non-existing objects ought not to be an error
-                Err(Error(ErrorKind::NullRef {..}, _)) |
-                Err(Error(ErrorKind::FreeObject { .. }, _)) => Ok(None),
-                Err(e) => bail!(e),
-            }
+}
+impl<'a> TryInto<i32> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<i32> {
+        self.as_integer()
+    }
+}
+impl<'a> TryInto<&'a [Primitive]> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<&'a [Primitive]> {
+        self.as_array()
+    }
+}
+impl<'a> TryInto<&'a [u8]> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<&'a [u8]> {
+        match self {
+            Primitive::Name(ref s) => Ok(s.as_bytes()),
+            Primitive::String(ref s) => Ok(s.as_bytes()),
+            ref p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Name or String",
+                found: p.get_debug_name()
+            })
+        }
+    }
+}
+impl<'a> TryInto<&'a str> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<&'a str> {
+        match self {
+            Primitive::Name(ref s) => Ok(s),
+            Primitive::String(ref s) => Ok(s.as_str()?),
+            ref p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Name or String",
+                found: p.get_debug_name()
+            })
         }
     }
 }
@@ -341,11 +437,11 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
 }
 
 impl Object for DateTime<FixedOffset> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         // TODO: smal/avg amount of work.
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
             Primitive::String (PdfString {data}) => {

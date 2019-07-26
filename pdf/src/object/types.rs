@@ -1,9 +1,15 @@
 //! Models of PDF types
 
 use std::io;
-use object::*;
-use err::*;
-use content::Content;
+use std::rc::Rc;
+use std::ops::Deref;
+
+use crate::object::*;
+use crate::error::*;
+use crate::content::Content;
+use crate::font::Font;
+use crate::file::File;
+use crate::backend::Backend;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
@@ -12,33 +18,44 @@ pub enum PagesNode {
     Leaf (Page),
 }
 impl Object for PagesNode {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         match *self {
             PagesNode::Tree (ref t) => t.serialize(out),
             PagesNode::Leaf (ref l) => l.serialize(out),
         }
     }
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<PagesNode> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<PagesNode> {
         let dict = Dictionary::from_primitive(p, r)?;
-        Ok(
         match dict["Type"].clone().to_name()?.as_str() {
-            "Page" => PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?),
-            "Pages" => PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?),
-            other => bail!(ErrorKind::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
+            "Page" => Ok(PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?)),
+            "Pages" => Ok(PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?)),
+            other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
-        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PageRc(pub Rc<PagesNode>);
+impl Deref for PageRc {
+    type Target = Page;
+    fn deref(&self) -> &Page {
+        match *self.0 {
+            PagesNode::Leaf(ref page) => page,
+            _ => panic!("PageRc that isn't a Page")
+        }
     }
 }
 
 
-#[derive(Object, Default)]
+#[derive(Object, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: PageTree,
+    pub pages: Rc<PagesNode>,
 // PageLabels: number_tree,
     #[pdf(key="Names")]
     pub names: Option<NameDictionary>,
+    
 // Dests: Dict
 // ViewerPreferences: dict
 // PageLayout: name
@@ -70,29 +87,33 @@ pub struct Catalog {
 #[pdf(Type = "Pages")]
 pub struct PageTree {
     #[pdf(key="Parent")]
-    pub parent: Option<Ref<PageTree>>,
+    pub parent: Option<Ref<PagesNode>>,
     #[pdf(key="Kids")]
-    pub kids:   Vec<PagesNode>,
+    pub kids:   Vec<Ref<PagesNode>>,
     #[pdf(key="Count")]
     pub count:  i32,
 
 
     /// Exists to be inherited to a 'Page' object. Note: *Inheritable*.
-    // Note about inheritance... if we wanted to 'inherit' things at the time of reading, we would
+    // Note about inheritance..= if we wanted to 'inherit' things at the time of reading, we would
     // want Option<Ref<Resources>> here most likely.
     #[pdf(key="Resources")]
-    pub resources: Option<Resources>,
+    pub resources: Option<Rc<Resources>>,
+    
+    #[pdf(key="MediaBox")]
+    pub media_box:  Option<Rect>,
+    
+    #[pdf(key="CropBox")]
+    pub crop_box:   Option<Rect>,
 }
-
-
 
 #[derive(Object, Debug)]
 pub struct Page {
     #[pdf(key="Parent")]
-    pub parent: Ref<PageTree>,
+    pub parent: Ref<PagesNode>,
 
     #[pdf(key="Resources")]
-    pub resources: Option<Resources>,
+    pub resources: Option<Rc<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -104,18 +125,54 @@ pub struct Page {
     pub trim_box:   Option<Rect>,
     
     #[pdf(key="Contents")]
-    pub contents:   Vec<Content>
+    pub contents:   Option<Content>
+}
+fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -> Result<Option<T>>
+    where F: Fn(&PageTree) -> Option<T>
+{
+    while let PagesNode::Tree(ref page_tree) = *file.get(parent)? {
+        debug!("parent: {:?}", page_tree);
+        match (page_tree.parent, f(&page_tree)) {
+            (_, Some(t)) => return Ok(Some(t)),
+            (Some(ref p), None) => parent = *p,
+            (None, None) => return Ok(None)
+        }
+    }
+    bail!("bad parent")
 }
 
 impl Page {
-    pub fn new(parent: Ref<PageTree>) -> Page {
+    pub fn new(parent: Ref<PagesNode>) -> Page {
         Page {
             parent:     parent,
             media_box:  None,
             crop_box:   None,
             trim_box:   None,
             resources:  None,
-            contents:   Vec::new(),
+            contents:   None
+        }
+    }
+    pub fn media_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
+        match self.media_box {
+            Some(b) => Ok(b),
+            None => inherit(self.parent, file, |pt| pt.media_box)?
+                .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
+        }
+    }
+    pub fn crop_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
+        match self.crop_box {
+            Some(b) => Ok(b),
+            None => match inherit(self.parent, file, |pt| pt.crop_box)? {
+                Some(b) => Ok(b),
+                None => self.media_box(file)
+            }
+        }
+    }
+    pub fn resources<B: Backend>(&self, file: &File<B>) -> Result<Rc<Resources>> {
+        match self.resources {
+            Some(ref r) => Ok(r.clone()),
+            None => inherit(self.parent, file, |pt| pt.resources.clone())?
+                .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
 }
@@ -135,114 +192,83 @@ pub struct PageLabel {
 #[derive(Object, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
-    pub ext_g_state: Option<GraphicsStateParameters>,
+    pub graphics_states: BTreeMap<String, GraphicsStateParameters>,
     // color_space: Option<ColorSpace>,
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    pub xobjects: Option<BTreeMap<String, XObject>>,
+    pub xobjects: BTreeMap<String, XObject>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: Option<BTreeMap<String, Font>>,
+    pub fonts: BTreeMap<String, Rc<Font>>,
 }
-
-#[derive(Debug)]
-pub enum Font {
-    Type0,
-    Type1,
-    MMType1,
-    Type3,
-    TrueType,
-    CIDFontType0,
-    CIDFontType2,
-}
-impl Object for Font {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> { unimplemented!() }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let dict = Dictionary::from_primitive(p, resolve)?;
-        let ty = dict.get("Type")
-            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Type" }))?.clone()
-            .to_name()?;
-        if ty != "Font" {
-            bail!("Font dictionary: /Type != Font");
-        }
-
-        match dict.get("Subtype") {
-            Some(&Primitive::Name(ref name)) =>
-                Ok(match name.as_str() {
-                    "Type0" => Font::Type0,
-                    "Type1" => Font::Type1,
-                    "MMType1" => Font::MMType1,
-                    "Type3" => Font::Type3,
-                    "TrueType" => Font::TrueType,
-                    "CIDFontType0" => Font::CIDFontType0,
-                    "CIDFontType2" => Font::CIDFontType2,
-                    s => bail!("Wrong /Type {} for font dictionary.", s),
-                }),
-            _ => bail!(ErrorKind::EntryNotFound {key: "Type"}),
-        }
+impl Resources {
+    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Rc<Font>)> {
+        self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
+}
+
+#[derive(Object, Debug)]
+pub enum LineCap {
+    Butt = 0,
+    Round = 1,
+    Square = 2
+}
+#[derive(Object, Debug)]
+pub enum LineJoin {
+    Miter = 0,
+    Round = 1,
+    Bevel = 2
 }
 
 #[derive(Object, Debug)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
-    //TODO
+    #[pdf(key="LW")]
+    pub line_width: Option<f32>,
+    
+    #[pdf(key="LC")]
+    pub line_cap: Option<LineCap>,
+    
+    #[pdf(key="LC")]
+    pub line_join: Option<LineJoin>,
+    
+    #[pdf(key="ML")]
+    pub miter_limit: Option<f32>,
+    
+    // D : dash pattern
+    #[pdf(key="RI")]
+    pub rendering_intent: Option<String>,
+    
+    #[pdf(key="Font")]
+    pub font: Option<(Rc<Font>, f32)>
 }
 
-#[derive(Debug)]
+#[derive(Object, Debug)]
+#[pdf(is_stream)]
 pub enum XObject {
+    #[pdf(name="PS")]
     Postscript (PostScriptXObject),
     Image (ImageXObject),
     Form (FormXObject),
 }
 
-impl Object for XObject {
-    // Subtype==Image => ImageDictionary
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
-        unimplemented!();
-    }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let stream = PdfStream::from_primitive(p, resolve)?;
-
-        match stream.info.get("Type") {
-            Some(ty) => if ty.clone().to_name()? != "XObject" {
-                bail!("XObject: /Type != XObject");
-            }
-            None => {},
-        }
-
-        let subty = stream.info.get("Subtype")
-            .ok_or(Error::from(ErrorKind::EntryNotFound { key: "Subtype"}))?.clone()
-            .to_name()?;
-        Ok(match subty.as_str() {
-            "PS" => XObject::Postscript (PostScriptXObject::from_primitive(Primitive::Stream(stream), resolve)?),
-            "Image" => XObject::Image (ImageXObject::from_primitive(Primitive::Stream(stream), resolve)?),
-            "Form" => XObject::Form (FormXObject::from_primitive(Primitive::Stream(stream), resolve)?),
-            s => bail!("XObject: invalid /Subtype {}", s),
-        })
-    }
-}
-
 /// A variant of XObject
-pub type PostScriptXObject = Stream<PostScriptDict>;
+pub type PostScriptXObject = Rc<Stream<PostScriptDict>>;
 /// A variant of XObject
-pub type ImageXObject = Stream<ImageDict>;
+pub type ImageXObject = Rc<Stream<ImageDict>>;
 /// A variant of XObject
-pub type FormXObject = Stream<FormDict>;
+pub type FormXObject = Rc<Stream<FormDict>>;
 
 #[derive(Object, Debug)]
-#[pdf(Subtype="PS")]
+#[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
 }
 
-
-
-
-#[derive(Object, Debug, Clone)]
-#[pdf(Subtype="Image")]
+#[derive(Object, Debug)]
+#[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
     #[pdf(key="Width")]
@@ -302,7 +328,7 @@ pub enum RenderingIntent {
 
 
 #[derive(Object, Debug)]
-#[pdf(Subtype="Form")]
+#[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     // TODO
 }
@@ -316,7 +342,7 @@ pub enum Counter {
     AlphaLower
 }
 impl Object for Counter {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         let style_code = match *self {
             Counter::Arabic     => "D",
             Counter::RomanLower => "r",
@@ -327,13 +353,12 @@ impl Object for Counter {
         out.write_all(style_code.as_bytes())?;
         Ok(())
     }
-    fn from_primitive(_: Primitive, _: &Resolve) -> Result<Self> {
+    fn from_primitive(_: Primitive, _: &impl Resolve) -> Result<Self> {
         unimplemented!();
     }
 }
 
-
-
+#[derive(Debug)]
 pub enum NameTreeNode<T> {
     ///
     Intermediate (Vec<Ref<NameTree<T>>>),
@@ -342,19 +367,21 @@ pub enum NameTreeNode<T> {
 
 }
 /// Note: The PDF concept of 'root' node is an intermediate or leaf node which has no 'Limits'
-/// entry. Hence, `limits`
+/// entry. Hence, `limits`, 
+#[derive(Debug)]
 pub struct NameTree<T> {
     limits: Option<(PdfString, PdfString)>,
     node: NameTreeNode<T>,
 }
 
 impl<T: Object> Object for NameTree<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let mut dict = p.to_dictionary(resolve).chain_err(|| "NameTree<T>")?;
-        // Quite long function...
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let mut dict = p.to_dictionary(resolve)?;
+        
+        // Quite long function..=
         let limits = match dict.remove("Limits") {
             Some(limits) => {
                 let limits = limits.to_array(resolve)?;
@@ -409,8 +436,10 @@ impl<T: Object> Object for NameTree<T> {
 
 
 /// There is one `NameDictionary` associated with each PDF file.
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub struct NameDictionary {
+    #[pdf(key="Pages")]
+    pages: Option<NameTree<Primitive>>,
     /*
     #[pdf(key="Dests")]
     ap: NameTree<T>,
@@ -418,8 +447,6 @@ pub struct NameDictionary {
     ap: NameTree<T>,
     #[pdf(key="JavaScript")]
     javascript: NameTree<T>,
-    #[pdf(key="Pages")]
-    pages: NameTree<T>,
     #[pdf(key="Templates")]
     templates: NameTree<T>,
     #[pdf(key="IDS")]
@@ -428,7 +455,7 @@ pub struct NameDictionary {
     urls: NameTree<T>,
     */
     #[pdf(key="EmbeddedFiles")]
-    embedded_files: Option<NameTree<FileSpec>>,
+    embedded_files: Option<FileSpec>,
     /*
     #[pdf(key="AlternativePresentations")]
     alternate_presentations: NameTree<AlternatePresentation>,
@@ -502,7 +529,7 @@ pub struct EmbeddedFileParamDict {
 
 
 
-pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
+pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> Result<()>
     where W: io::Write, T: Object, I: Iterator<Item=&'a T>
 {
     write!(out, "[")?;
@@ -516,7 +543,8 @@ pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> io::Result<()>
         }
     }
     
-    write!(out, "]")
+    write!(out, "]")?;
+    Ok(())
 }
 
 #[derive(Object)]
@@ -525,27 +553,28 @@ pub struct Outlines {
     pub count:  usize
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Rect {
     pub left:   f32,
+    pub bottom: f32,
     pub right:  f32,
     pub top:    f32,
-    pub bottom: f32
 }
 impl Object for Rect {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)?;
+        Ok(())
     }
-    fn from_primitive(p: Primitive, r: &Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         let arr = p.to_array(r)?;
         if arr.len() != 4 {
             bail!("len != 4");
         }
         Ok(Rect {
             left:   arr[0].as_number()?,
-            right:  arr[1].as_number()?,
-            top:    arr[2].as_number()?,
-            bottom: arr[3].as_number()?
+            bottom: arr[1].as_number()?,
+            right:  arr[2].as_number()?,
+            top:    arr[3].as_number()?
         })
     }
 }
@@ -553,7 +582,7 @@ impl Object for Rect {
 
 // Stuff from chapter 10 of the PDF 1.7 ref
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub struct MarkInformation { // TODO no /Type
     /// indicating whether the document conforms to Tagged PDF conventions
     #[pdf(key="Marked", default="false")]
@@ -566,13 +595,13 @@ pub struct MarkInformation { // TODO no /Type
     pub suspects: bool,
 }
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 #[pdf(Type = "StructTreeRoot")]
 pub struct StructTreeRoot {
     #[pdf(key="K")]
     pub children: Vec<StructElem>,
 }
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub struct StructElem {
     #[pdf(key="S")]
     /// `S`
@@ -589,7 +618,7 @@ pub struct StructElem {
 }
 
 
-#[derive(Object)]
+#[derive(Object, Debug)]
 pub enum StructType {
     Document,
     Part,

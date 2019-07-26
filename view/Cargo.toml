@@ -1,0 +1,41 @@
+[package]
+name = "view"
+version = "0.1.0"
+authors = ["Sebastian Köln <sebk@rynx.org>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pdf = { path = "../pdf" }
+font = { path = "../font" }
+pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_content = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_export = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_gl = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_gpu = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder/" }
+
+euclid = "0.19"
+log = "*"
+env_logger = "*"
+gl = "0.6"
+sdl2 = "0.32"
+sdl2-sys = "0.32"
+freetype = "^0.4.1"
+
+
+#pathfinder_canvas = { path = "../../pathfinder/canvas" }
+#pathfinder_content = { path = "../../pathfinder/content" }
+#pathfinder_export = { path = "../../pathfinder/export" }
+#pathfinder_geometry = { path = "../../pathfinder/geometry" }
+#pathfinder_gl = { path = "../../pathfinder/gl" }
+#pathfinder_gpu = { path = "../../pathfinder/gpu" }
+#pathfinder_renderer = { path = "../../pathfinder/renderer" }
+
+[[bin]]
+name = "pdf_view"
+
+[[bin]]
+name = "pdf2svg"

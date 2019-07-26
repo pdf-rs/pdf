@@ -1,73 +1,30 @@
-#![recursion_limit="128"]
-//#![feature(collections_range)]
-//#![feature(slice_get_slice)]
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
-    #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
-#[macro_use]
-extern crate pdf_derive;
-#[macro_use]
-extern crate error_chain;
-#[macro_use]
-extern crate log;
-extern crate num_traits;
-extern crate inflate;
-extern crate itertools;
-extern crate memmap;
-extern crate tuple;
-extern crate chrono;
+#![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
+#![feature(custom_attribute)]
+#![feature(termination_trait_lib)]
+#![feature(core_intrinsics)]
+#![feature(try_trait)]
 
-//#[macro_use]
+#[macro_use] extern crate pdf_derive;
+#[macro_use] extern crate snafu;
+#[macro_use] extern crate log;
+
+#[macro_use] pub mod error;
 //mod macros;
-pub mod parser;
 pub mod object;
 pub mod xref;
 pub mod primitive;
 pub mod file;
 pub mod backend;
 pub mod content;
+pub mod parser;
+pub mod font;
+pub mod any;
+pub mod encoding;
 
-mod err;
 // mod content;
 mod enc;
+pub mod crypt;
 
 // pub use content::*;
-pub use err::*;
-
-// hack to use ::pdf::object::Object in the derive
-mod pdf {
-    pub use super::*;
-}
-
-/// Prints the error if it is an Error
-pub fn print_err<T>(err: Error) -> T {
-    use std;
-
-    // Get path of project... kinda silly way.
-    let mut proj_path = std::env::current_exe().unwrap();
-    proj_path.pop(); proj_path.pop(); proj_path.pop(); proj_path.pop();
-    proj_path.push("src");
-
-    println!("PATH: {:?}", proj_path);
-    println!("\n === \nError: {}", err);
-    for e in err.iter().skip(1) {
-        println!("  caused by: {}", e);
-    }
-    println!(" === \n");
-
-    if let Some(backtrace) = err.backtrace() {
-        for frame in backtrace.frames() {
-            for symbol in frame.symbols() {
-                if let Some(path) = symbol.filename() {
-                    if let Some(lineno) = symbol.lineno() {
-                        if proj_path < path {
-                            println!("\tat {:?}:{}", path, lineno);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    println!(" === \nExiting...");
-    panic!("");
-}
+pub use crate::error::PdfError;

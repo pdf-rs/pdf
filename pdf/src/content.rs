@@ -1,29 +1,29 @@
 /// PDF content streams.
 use std;
 use std::fmt::{Display, Formatter};
-use std::mem::swap;
+use std::mem::replace;
 use std::io;
+use itertools::Itertools;
 
-use err::*;
-use object::*;
-use parser::{Lexer, parse_with_lexer};
-use primitive::*;
-use object::decode_fully;
+use crate::error::*;
+use crate::object::*;
+use crate::parser::{Lexer, parse_with_lexer};
+use crate::primitive::*;
 
 /// Operation in a PDF content stream.
 #[derive(Debug, Clone)]
 pub struct Operation {
-	pub operator: String,
-	pub operands: Vec<Primitive>,
+    pub operator: String,
+    pub operands: Vec<Primitive>,
 }
 
 impl Operation {
-	pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
-		Operation{
-			operator: operator,
-			operands: operands,
-		}
-	}
+    pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
+        Operation{
+            operator: operator,
+            operands: operands,
+        }
+    }
 }
 
 
@@ -34,7 +34,18 @@ pub struct Content {
 }
 
 impl Content {
-    fn parse_from(data: &[u8], resolve: &Resolve) -> Result<Content> {
+    fn parse_from(data: &[u8], resolve: &impl Resolve) -> Result<Content> {
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open("/tmp/content.txt")
+                .unwrap();
+            writeln!(f, "\n~~~~~~~~~~~\n")?;
+            f.write_all(data).unwrap();
+        }
         let mut lexer = Lexer::new(data);
 
         let mut content = Content {operations: Vec::new()};
@@ -52,14 +63,13 @@ impl Content {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
                     let operator = lexer.next()?.to_string();
-                    let mut operation = Operation::new(operator, Vec::new());
+                    let operation = Operation::new(operator, replace(&mut buffer, Vec::new()));
                     // Give operands to operation and empty buffer.
-                    swap(&mut buffer, &mut operation.operands);
                     content.operations.push(operation.clone());
                 }
             }
             if lexer.get_pos() > data.len() {
-                bail!(ErrorKind::ContentReadPastBoundary);
+                err!(PdfError::ContentReadPastBoundary);
             } else if lexer.get_pos() == data.len() {
                 break;
             }
@@ -70,13 +80,27 @@ impl Content {
 
 impl Object for Content {
     /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {unimplemented!()}
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
-    fn from_primitive(p: Primitive, resolve: &Resolve) -> Result<Self> {
-        let PdfStream {info, mut data} = PdfStream::from_primitive(p, resolve)?;
-        let mut info = StreamInfo::<()>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        decode_fully(&mut data, &mut info.filters)?;
-        Content::parse_from(&data, resolve)
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        type ContentStream = Stream<()>;
+        
+        match p {
+            Primitive::Array(parts) => {
+                let mut content_data = Vec::new();
+                for p in parts {
+                    content_data.extend(ContentStream::from_primitive(p, resolve)?.data()?);
+                }
+                Content::parse_from(&content_data, resolve)
+            }
+            p => {
+                Content::parse_from(
+                    ContentStream::from_primitive(p, resolve)?
+                        .data()?,
+                    resolve
+                )
+            }
+        }
     }
 }
 
@@ -93,10 +117,6 @@ impl Display for Content {
 
 impl Display for Operation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "Operation: {} (", self.operator)?;
-        for operand in &self.operands {
-            write!(f, "{:?}, ", operand)?;
-        }
-        write!(f, ")\n")
+        write!(f, "{} : {}", self.operator, self.operands.iter().format(", "))
     }
 }

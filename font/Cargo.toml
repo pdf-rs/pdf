@@ -1,0 +1,27 @@
+[package]
+name = "font"
+version = "0.1.0"
+authors = ["Sebastian Köln <sebk@rynx.org>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sfnt = "0.12"
+pathfinder_canvas = {git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_export = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
+stb_truetype = { git = "https://github.com/s3bk/stb_truetype" }
+nom = "5.0"
+log = "*"
+env_logger = "*"
+rand = "*"
+slotmap = { version = "0.3", features = ["unstable"] }
+tuple = "*"
+decorum = "*"
+itertools = "*"
+indexmap = "1.0"
+
+#pathfinder_canvas = { path = "../../pathfinder/canvas" }
+#pathfinder_export = { path = "../../pathfinder/export" }
+#pathfinder_geometry = { path = "../../pathfinder/geometry" }

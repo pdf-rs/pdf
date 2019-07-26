@@ -1,6 +1,5 @@
 use std::iter::Iterator;
-use err::*;
-use num_traits::int::PrimInt;
+use crate::error::*;
 
 /// A lexer for PDF strings. Breaks the string up into single characters (`u8`)
 /// It's also possible to get the number of indices of the original array that was traversed by the
@@ -65,7 +64,7 @@ impl<'a> StringLexer<'a> {
 
                     _ => {
                         self.back()?;
-                        let start = self.get_offset();
+                        let _start = self.get_offset();
                         let mut char_code: u8 = 0;
                         
                         // A character code must follow. 1-3 numbers.
@@ -107,7 +106,7 @@ impl<'a> StringLexer<'a> {
             self.pos += 1;
             Ok(self.buf[self.pos-1])
         } else {
-            bail!(ErrorKind::EOF);
+            Err(PdfError::EOF)
         }
     }
     fn back(&mut self) -> Result<()> {
@@ -115,14 +114,14 @@ impl<'a> StringLexer<'a> {
             self.pos -= 1;
             Ok(())
         } else {
-            bail!(ErrorKind::EOF);
+            Err(PdfError::EOF)
         }
     }
     fn peek_byte(&mut self) -> Result<u8> {
         if self.pos < self.buf.len() {
             Ok(self.buf[self.pos])
         } else {
-            bail!(ErrorKind::EOF);
+            Err(PdfError::EOF)
         }
     }
 }
@@ -175,25 +174,25 @@ impl<'a> HexStringLexer<'a> {
     pub fn next_hex_byte(&mut self) -> Result<Option<u8>> {
         let c1 = self.next_non_whitespace_char()?;
         let high_nibble: u8 = match c1 {
-            b'0'...b'9' => c1 - b'0',
-            b'A'...b'F' => c1 - b'A' + 0xA,
-            b'a'...b'f' => c1 - b'a' + 0xA,
+            b'0' ..= b'9' => c1 - b'0',
+            b'A' ..= b'F' => c1 - b'A' + 0xA,
+            b'a' ..= b'f' => c1 - b'a' + 0xA,
             b'>' => return Ok(None),
-            _ => bail!(ErrorKind::HexDecode {
+            _ => return Err(PdfError::HexDecode {
                 pos: self.pos,
                 bytes: [c1, self.peek_byte().unwrap_or(0)]
             }),
         };
         let c2 = self.next_non_whitespace_char()?;
         let low_nibble: u8 = match c2 {
-            b'0'...b'9' => c2 - b'0',
-            b'A'...b'F' => c2 - b'A' + 0xA,
-            b'a'...b'f' => c2 - b'a' + 0xA,
+            b'0' ..= b'9' => c2 - b'0',
+            b'A' ..= b'F' => c2 - b'A' + 0xA,
+            b'a' ..= b'f' => c2 - b'a' + 0xA,
             b'>' => {
                 self.back()?;
                 0
             }
-            _ => bail!(ErrorKind::HexDecode {
+            _ => return Err(PdfError::HexDecode {
                 pos: self.pos,
                 bytes: [c1, c2]
             }),
@@ -206,7 +205,7 @@ impl<'a> HexStringLexer<'a> {
             self.pos += 1;
             Ok(self.buf[self.pos - 1])
         } else {
-            bail!(ErrorKind::EOF);
+            Err(PdfError::EOF)
         }
     }
 
@@ -215,7 +214,7 @@ impl<'a> HexStringLexer<'a> {
             self.pos -= 1;
             Ok(())
         } else {
-            bail!(ErrorKind::EOF);
+            Err(PdfError::EOF)
         }
     }
 
@@ -223,7 +222,7 @@ impl<'a> HexStringLexer<'a> {
         if self.pos < self.buf.len() {
             Ok(self.buf[self.pos])
         } else {
-            bail!(ErrorKind::EOF)
+            Err(PdfError::EOF)
         }
     }
 }
@@ -246,8 +245,8 @@ impl<'a, 'b> Iterator for HexStringLexerIter<'a, 'b> {
 
 #[cfg(test)]
 mod tests {
-    use crate::Result;
-    use parser::lexer::{HexStringLexer, StringLexer};
+    use crate::error::Result;
+    use crate::parser::lexer::{HexStringLexer, StringLexer};
 
     #[test]
     fn tests() {
