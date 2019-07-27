@@ -1,33 +1,10 @@
-use std::num::NonZeroU32;
 use std::io;
 use std::collections::HashMap;
 use crate as pdf;
 use crate::object::{Object, Resolve};
 use crate::primitive::Primitive;
 use crate::error::{Result};
-
-#[derive(Copy, Clone)]
-struct Entry(NonZeroU32);
-impl Entry {
-    const fn new(c: char) -> Entry {
-        Entry(
-            unsafe {
-                NonZeroU32::new_unchecked(c as u32)
-            }
-        )
-    }
-    fn as_char(&self) -> char {
-        std::char::from_u32(self.0.get()).unwrap()
-    }
-}
-        
-// we rely on the encoding not producing '\0'.
-const fn c(c: char) -> Option<Entry> {
-    Some(Entry::new(c))
-}
-static STANDARD: [Option<Entry>; 256] = include!("stdenc.rs");
-static SYMBOL: [Option<Entry>; 256] = include!("symbol.rs");
-static ZDINGBAT: [Option<Entry>; 256] = include!("zdingbat.rs");
+use encoding::*;
 
 #[derive(Debug, Clone)]
 pub struct Encoding {
@@ -98,6 +75,7 @@ impl BaseEncoding {
         match self {
             BaseEncoding::SymbolEncoding => Some(&SYMBOL),
             BaseEncoding::StandardEncoding => Some(&STANDARD),
+            BaseEncoding::WinAnsiEncoding => Some(&WINANSI),
             _ => None
         }
     }

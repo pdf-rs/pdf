@@ -2,10 +2,9 @@
 #[macro_use] extern crate pdf;
 extern crate env_logger;
 
-use std::io::Write;
 use std::mem;
 use std::convert::TryInto;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::fs;
 use std::borrow::Cow;
@@ -24,7 +23,7 @@ use pathfinder_geometry::{
 };
 use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
 use pathfinder_renderer::scene::Scene;
-use font::{Font, BorrowedFont, CffFont, TrueTypeFont, Type1Font, Glyphs, parse_opentype};
+use font::{Font, BorrowedFont, Glyphs};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -239,7 +238,13 @@ impl Cache {
         let encoding = pdf_font.encoding().clone();
         
         let data: Cow<[u8]> = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
-            (_, Some(Ok(data))) => data.into(),
+            (_, Some(Ok(data))) => {
+                if let Some(path) = std::env::var_os("PDF_FONTS") {
+                    let file = PathBuf::from(path).join(&pdf_font.name);
+                    fs::write(file, data).expect("can't write font");
+                }
+                data.into()
+            }
             (Some(filename), _) => {
                 let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
                     .join("fonts")

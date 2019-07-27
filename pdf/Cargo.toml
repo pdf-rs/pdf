@@ -17,6 +17,8 @@ features = ["unstable"]
 
 [dependencies.pdf_derive]
 path = "../pdf_derive"
+[dependencies.encoding]
+path = "../encoding"
 
 [dependencies]
 snafu = "0.4"
@@ -28,7 +30,6 @@ byteorder = "1.0.0"
 itertools = "0.6.0"
 ordermap = "0.2.9"
 memmap = "0.5.2"
-encoding = "0.2.33"
 lzw = "0.10.0"
 tuple = "0.4.0"
 glob = "0.2.11"

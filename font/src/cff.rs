@@ -59,8 +59,10 @@ impl<'a> Font for CffFont<'a> {
         }
         let width = match (state.char_width, state.delta_width) {
             (Some(w), None) => w,
-            (None, None) => self.private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
-            (None, Some(delta)) => self.private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
+            (None, None) =>
+                self.private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
+            (None, Some(delta)) =>
+                delta + self.private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
             (Some(_), Some(_)) => panic!("BUG: both char_width and delta_width set")
         };
         Ok(Glyph {
@@ -205,6 +207,12 @@ impl<'a> Cff<'a> {
                     .for_each(|&(codepoint, sid)| cmap[codepoint as usize] = sid_map[&sid]);
             }
         };
+        debug!("cmap:");
+        for (i, &gid) in cmap.iter().enumerate() {
+            if gid != 0 {
+                debug!("{} -> {}", i, gid);
+            }
+        }
         
         let private_dict_entry = top_dict.get(&Operator::Private)
             .expect("no private dict entry");

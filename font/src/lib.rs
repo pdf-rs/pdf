@@ -34,6 +34,8 @@ pub trait Font {
     }
     fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32>;
     fn gid_for_name(&self, name: &str) -> Option<u32>;
+    
+    fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32>;
 }
 
 pub struct Glyphs {

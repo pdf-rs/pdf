@@ -181,10 +181,14 @@ macro_rules! unimplemented {
 
 pub fn dump_data(data: &[u8]) {
     use std::io::Write;
-    let (mut file, path) = tempfile::Builder::new()
-        .prefix("")
-        .tempfile_in("/tmp/pdf").unwrap()
-        .keep().unwrap();
-    file.write_all(&data).unwrap();
-    info!("data written to {:?}", path);
+    if let Some(path) = ::std::env::var_os("PDF_OUT") {
+        let (mut file, path) = tempfile::Builder::new()
+            .prefix("")
+            .tempfile_in(path).unwrap()
+            .keep().unwrap();
+        file.write_all(&data).unwrap();
+        info!("data written to {:?}", path);
+    } else {
+        info!("set PDF_OUT to an existing directory to dump stream data");
+    }
 }
