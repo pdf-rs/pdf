@@ -1,5 +1,6 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 
+use crate as pdf;
 use crate::primitive::PdfString;
 use crate::error::{PdfError, Result};
 

@@ -3,6 +3,7 @@ use tuple::*;
 use inflate::inflate_bytes_zlib;
 use std::mem;
 
+use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, Resolve};
 use crate::primitive::{Primitive, Dictionary};

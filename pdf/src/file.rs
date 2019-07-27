@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate as pdf;
 use crate::error::*;
 use crate::object::*;
 use crate::primitive::{Primitive, Dictionary, PdfString};
