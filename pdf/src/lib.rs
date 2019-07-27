@@ -1,16 +1,14 @@
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
 #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
 #![feature(custom_attribute)]
-#![feature(termination_trait_lib)]
 #![feature(core_intrinsics)]
-#![feature(try_trait)]
 
 #[macro_use] extern crate pdf_derive;
 #[macro_use] extern crate snafu;
 #[macro_use] extern crate log;
 
-#[macro_use] pub mod error;
-//mod macros;
+#[macro_use]
+pub mod error;
 pub mod object;
 pub mod xref;
 pub mod primitive;

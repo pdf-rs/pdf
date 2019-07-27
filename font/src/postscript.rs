@@ -278,7 +278,7 @@ const OPERATOR_MAP: &[(&'static str, Operator)] = {
     }
 };
 
-struct Input<'a> {
+pub struct Input<'a> {
     data:   &'a [u8]
 }
 impl<'a> Input<'a> {

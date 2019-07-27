@@ -3,12 +3,8 @@ use std::error::Error;
 use std::convert::TryInto;
 
 pub fn parse_opentype(data: &[u8], idx: u32) -> CffFont {
-    let cff_data = find_table(data, b"CFF ").unwrap();
+    let cff_data = find_table(data, b"CFF ").expect("no CFF table");
     CffFont::parse(cff_data, idx)
-}
-
-pub fn is_opentype(data: &[u8]) -> bool {
-    data.starts_with(b"OTTO")
 }
 
 fn find_table<'a>(data: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {

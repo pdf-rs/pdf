@@ -1,5 +1,5 @@
 #[macro_use] extern crate log;
-extern crate pdf;
+#[macro_use] extern crate pdf;
 extern crate env_logger;
 
 use std::io::Write;
@@ -101,7 +101,7 @@ impl<'a> TextState<'a> {
             text_matrix: Transform2F::default(),
             line_matrix: Transform2F::default(),
             char_space: 0.,
-            word_space: 1.,
+            word_space: 0.,
             horiz_scale: 1.,
             leading: 0.,
             font: None,
@@ -126,18 +126,17 @@ impl<'a> TextState<'a> {
         self.line_matrix = m;
     }
     fn add_glyphs(&mut self, canvas: &mut CanvasRenderingContext2D, glyphs: impl Iterator<Item=(u32, bool)>) {
-        canvas.save();
         let font = self.font.as_ref().unwrap();
         let base = canvas.current_transform();
-        let font_matrix = Transform2F::row_major(
+
+        let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
-            self.font_size, 0., self.rise) 
-            * font.font_matrix;
-        let mut advance = 0.;
+            self.font_size, 0., self.rise) * font.font_matrix;
+        
         for (gid, is_space) in glyphs {
             let glyph = font.glyphs.get(gid as u32).unwrap();
             
-            let transform = base * self.text_matrix * font_matrix;
+            let transform = base * self.text_matrix * tr;
             
             canvas.set_current_transform(&transform);
             canvas.fill_path(glyph.path.clone());
@@ -147,10 +146,11 @@ impl<'a> TextState<'a> {
                 false => self.char_space
             };
             debug!("glyph {} has width: {}", gid, glyph.width);
-            let width = glyph.width * self.text_matrix.m11() * font_matrix.m11();
-            self.text_matrix = Transform2F::from_translation(Vector2F::new(width + dx, 0.)) * self.text_matrix;
+            let advance = dx + tr.m11() * glyph.width;
+            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
-        canvas.restore();
+        
+        canvas.set_current_transform(&base);
     }
     fn add_text_cid(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
         self.add_glyphs(canvas, data.chunks_exact(2).map(|s| {
@@ -179,9 +179,9 @@ impl<'a> TextState<'a> {
             }));
         }
     }
-    fn advance(&mut self, v: Vector2F) {
-        let translation = v * Vector2F::new(self.horiz_scale * self.font_size, self.font_size);
-        self.text_matrix = self.text_matrix * Transform2F::from_translation(translation);
+    fn advance(&mut self, delta: f32) {
+        let advance = delta * self.font_size * self.horiz_scale;
+        self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
     }
 }
 
@@ -294,7 +294,7 @@ impl Cache {
         let mut last = Vector2F::default();
         let mut state = TextState::new();
         
-        let mut iter = page.contents.as_ref()?.operations.iter();
+        let mut iter = try_opt!(page.contents.as_ref()).operations.iter();
         while let Some(op) = iter.next() {
             debug!("{}", op);
             let ref ops = op.operands;
@@ -391,7 +391,7 @@ impl Cache {
                 "d" => { // line dash [ array phase ]
                 }
                 "gs" => ops!(ops, gs: &str => { // set from graphic state dictionary
-                    let gs = resources.graphics_states.get(gs)?;
+                    let gs = try_opt!(resources.graphics_states.get(gs));
                     
                     if let Some(lw) = gs.line_width {
                         canvas.set_line_width(lw);
@@ -466,7 +466,7 @@ impl Cache {
                 
                 // text font
                 "Tf" => ops!(ops, font_name: &str, size: f32 => {
-                    let font = resources.fonts.get(font_name)?;
+                    let font = try_opt!(resources.fonts.get(font_name));
                     if let Some(e) = self.get_font(&font.name) {
                         state.font = Some(e);
                         debug!("new font: {}", font.name);
@@ -547,7 +547,7 @@ impl Cache {
                                 },
                                 p => {
                                     let offset = p.as_number().expect("wrong argument to TJ");
-                                    state.advance(Vector2F::new(-0.001 * offset, 0.)); // because why not PDF…
+                                    state.advance(-0.001 * offset); // because why not PDF…
                                 }
                             }
                         }

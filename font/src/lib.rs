@@ -8,6 +8,7 @@ use pathfinder_geometry::transform2d::Transform2F;
 use std::fmt;
 use std::borrow::Cow;
 use std::path::Path;
+use std::convert::TryInto;
 use nom::{IResult, Err::*, error::VerboseError};
 use tuple::{TupleElements, Map};
 
@@ -242,13 +243,14 @@ pub fn parse_file(path: &Path) -> OwnedFont {
 }
 */
 pub fn parse<'a>(data: &'a [u8]) -> Box<dyn BorrowedFont<'a> + 'a> {
-    let mut magic = [0; 4];
-    magic.copy_from_slice(&data[0 .. 4]);
-    match &magic {
+    let magic: &[u8; 4] = data[0 .. 4].try_into().unwrap();
+    info!("font magic: {:?}", magic);
+    match magic {
         &[1, _, _, _] => Box::new(CffFont::parse(data, 0)) as _,
         &[0x80, 1, _, _] => Box::new(Type1Font::parse_pfb(data)) as _,
-        b"OTTO" => Box::new(parse_opentype(data, 0)) as _,
-        b"ttcf" | b"typ1" | [1,0,0,0] | [0,1,0,0] => Box::new(TrueTypeFont::parse(data)) as _,
+        b"OTTO" | [0,1,0,0] => Box::new(parse_opentype(data, 0)) as _,
+        b"ttcf" | b"typ1" | [1,0,0,0] => Box::new(TrueTypeFont::parse(data)) as _,
+        b"%!PS" => Box::new(Type1Font::parse_postscript(data)) as _,
         magic => panic!("unknown magic {:?}", magic)
     }
 }

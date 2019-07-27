@@ -41,8 +41,17 @@ impl<'a> BorrowedFont<'a> for Type1Font {}
 
 impl Type1Font {
     pub fn parse_pfb(data: &[u8]) -> Self {
-        let vm = parse_pfb(data).get();
+        let mut vm = Vm::new();
+        parse_pfb(&mut vm, data).get();
+        Self::from_vm(vm)
+    }
+    pub fn parse_postscript(data: &[u8]) -> Self {
+        let mut vm = Vm::new();
+        vm.parse_and_exec(data);
+        Self::from_vm(vm)
+    }
         
+    pub fn from_vm(vm: Vm) -> Self {
         let (font_name, font_dict) = vm.fonts().nth(0).unwrap();
         
         let private_dict = font_dict.get("Private").unwrap()
@@ -127,9 +136,7 @@ fn test_parser() {
     vm.print_stack();
     assert_eq!(vm.stack().len(), 2);
 }
-fn parse_pfb(i: &[u8]) -> R<Vm> {
-    let mut vm = Vm::new();
-    
+fn parse_pfb<'a>(mut vm: &mut Vm, i: &'a [u8]) -> R<'a, ()> {
     let mut input = i;
     while input.len() > 0 {
         let (i, magic) = le_u8(input)?;
@@ -154,7 +161,7 @@ fn parse_pfb(i: &[u8]) -> R<Vm> {
         input = &i[block_len as usize ..];
     }
     
-    Ok((input, vm))
+    Ok((input, ()))
 }
 pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
     while input.len() > 0 {

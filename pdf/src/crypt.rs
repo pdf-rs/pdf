@@ -1,6 +1,7 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 
 use crate as pdf;
+use std::fmt;
 use crate::primitive::PdfString;
 use crate::error::{PdfError, Result};
 
@@ -67,6 +68,7 @@ pub struct CryptDict {
     #[pdf(key="Length", default="40")]
     bits: u32,
 }
+
 pub struct Decoder {
     key_size: usize,
     key: [u8; 16] // maximum length
@@ -84,7 +86,7 @@ impl Decoder {
         let level = dict.r;
         let key_size = dict.bits as usize / 8;
         let o = dict.o.as_bytes();
-        let _u = dict.u.as_bytes();
+        let u = dict.u.as_bytes();
         let p = dict.p;
         
         // a) and b)
@@ -176,5 +178,10 @@ impl Decoder {
         
         // d)
         Rc4::encrypt(&key[.. (n+5).min(16)], data);
+    }
+}
+impl fmt::Debug for Decoder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.key())
     }
 }

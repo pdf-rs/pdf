@@ -59,16 +59,8 @@ impl<'a> Font for CffFont<'a> {
         }
         let width = match (state.char_width, state.delta_width) {
             (Some(w), None) => w,
-            (None, None) => {
-                let default = self.private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.);
-                info!("no delta width -> DefaultWidthX ({})", default);
-                default
-            }
-            (None, Some(delta)) => {
-                let nominal = self.private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.);
-                info!("NominalWidthX ({}) + delta ({}) = {}", nominal, delta, nominal + delta);
-                nominal + delta
-            },
+            (None, None) => self.private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
+            (None, Some(delta)) => self.private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
             (Some(_), Some(_)) => panic!("BUG: both char_width and delta_width set")
         };
         Ok(Glyph {

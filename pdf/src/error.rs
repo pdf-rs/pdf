@@ -1,7 +1,6 @@
 use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
-use std::process::Termination;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -109,8 +108,8 @@ pub enum PdfError {
     #[snafu(display("{}", msg))]
     Other { msg: String },
     
-    #[snafu(display("NoneError"))]
-    NoneError
+    #[snafu(display("NoneError at {}:{}:{}", file, line, column))]
+    NoneError { file: &'static str, line: u32, column: u32 }
 }
 impl PdfError {
     pub fn trace(&self) {
@@ -132,22 +131,26 @@ impl From<io::Error> for PdfError {
         PdfError::Io { source }
     }
 }
-impl From<std::option::NoneError> for PdfError {
-    fn from(_: std::option::NoneError) -> PdfError {
-        PdfError::NoneError
-    }
-}
 impl From<String> for PdfError {
     fn from(msg: String) -> PdfError {
         PdfError::Other { msg }
     }
 }
-impl Termination for PdfError {
-    fn report(self) -> i32 {
-        self.trace();
-        1
-    }
+
+#[macro_export]
+macro_rules! try_opt {
+    ($e:expr) => (
+        match $e {
+            Some(v) => v,
+            None => return Err($crate::PdfError::NoneError {
+                file: file!(),
+                line: line!(),
+                column: column!()
+            })
+        }
+    )
 }
+
 macro_rules! err_from {
     ($($st:ty),* => $variant:ident) => (
         $(

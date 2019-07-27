@@ -6,3 +6,4 @@ Cargo.lock
 **/perf.data
 **/perf.data.old
 
+!.travis.yml

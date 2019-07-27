@@ -166,7 +166,7 @@ impl Font {
                             }
                         },
                         Some(&Primitive::Integer(c2)) => {
-                            let w = iter.next()?.as_number()?;
+                            let w = try_opt!(iter.next()).as_number()?;
                             for c in (c1 as usize) ..= (c2 as usize) {
                                 widths[c] = w;
                             }

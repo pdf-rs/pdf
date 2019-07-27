@@ -34,12 +34,10 @@ fn main() -> Result<(), PdfError> {
     println!("read: {}", path);
     let file = PdfFile::<Vec<u8>>::open(&path)?;
     
-    let pages: Vec<_> = file.pages().map(|p| p.unwrap()).collect();
-    let num_pages = pages.len();
     let mut current_page = 0;
     let mut cache = Cache::new();
     // Render the canvas to screen.
-    let scene = cache.render_page(&file, &pages[current_page])?;
+    let scene = cache.render_page(&file, &*file.get_page(current_page)?)?;
     let size = scene.view_box().size();
     
     // Set up SDL2.
@@ -83,12 +81,16 @@ fn main() -> Result<(), PdfError> {
             Event::KeyDown { keycode: Some(keycode), .. } => {
                 match keycode {
                     Keycode::Left => {
-                        current_page = current_page.saturating_sub(1);
-                        needs_update = true;
+                        if current_page > 0 {
+                            current_page -= 1;
+                            needs_update = true;
+                        }
                     }
                     Keycode::Right => {
-                        current_page = (num_pages - 1).min(current_page + 1);
-                        needs_update = true;
+                        if current_page < file.get_num_pages()? - 1 {
+                            current_page += 1;
+                            needs_update = true;
+                        }
                     }
                     _ => {}
                 }
@@ -102,7 +104,8 @@ fn main() -> Result<(), PdfError> {
         }
         if needs_update {
             println!("showing page {}", current_page);
-            let scene = cache.render_page(&file, &pages[current_page])?;
+            let page = file.get_page(current_page)?;
+            let scene = cache.render_page(&file, &page)?;
             proxy.replace_scene(scene);
             proxy.build_and_render(&mut renderer, BuildOptions::default());
             window.gl_swap_window();
