@@ -1,3 +1,4 @@
+use crate as pdf;
 use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;

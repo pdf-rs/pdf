@@ -4,6 +4,7 @@ use std::io;
 use std::rc::Rc;
 use std::ops::Deref;
 
+use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 use crate::content::Content;

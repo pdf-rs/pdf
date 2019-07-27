@@ -267,8 +267,8 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     });
     
     quote! {
-        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> crate::error::Result<()> {
+        impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> pdf::error::Result<()> {
                 writeln!(out, "/{}",
                     match *self {
                         #( #ser_code, )*
@@ -276,15 +276,15 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
                 )?;
                 Ok(())
             }
-            fn from_primitive(p: crate::primitive::Primitive, _resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
+            fn from_primitive(p: pdf::primitive::Primitive, _resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
                 match p {
-                    crate::primitive::Primitive::Name(name) => {
+                    pdf::primitive::Primitive::Name(name) => {
                         match name.as_str() {
                             #( #parts, )*
-                            s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
+                            s => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
                         }
                     }
-                    _ => Err(crate::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
+                    _ => Err(pdf::error::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
                 }
             }
         }
@@ -314,26 +314,26 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
         let name = attrs.name.map(|lit| lit.value()).unwrap_or_else(|| var.ident.to_string());
         let variant_ident = &var.ident;
         quote! {
-            #name => Ok(#id::#variant_ident ( #inner_ty::from_primitive(crate::primitive::Primitive::Stream(stream), resolve)?))
+            #name => Ok(#id::#variant_ident ( #inner_ty::from_primitive(pdf::primitive::Primitive::Stream(stream), resolve)?))
         }
     }).collect();
     
     quote! {
-        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> crate::error::Result<()> {
+        impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> pdf::error::Result<()> {
                 unimplemented!();
             }
-            fn from_primitive(p: crate::primitive::Primitive, resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
+            fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
                 let mut stream = PdfStream::from_primitive(p, resolve)?;
                 #ty_check
                 
                 let subty = stream.info.get("Subtype")
-                    .ok_or(PdfError::MissingEntry { typ: stringify!(#id), field: "Subtype".into()})?
+                    .ok_or(pdf::error::PdfError::MissingEntry { typ: stringify!(#id), field: "Subtype".into()})?
                     .as_name()?;
                 
                 match subty {
                     #( #variants_code, )*
-                    s => Err(crate::PdfError::UnknownVariant { id: stringify!(#id), name: s.into() })
+                    s => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: s.into() })
                 }
             }
         }
@@ -391,11 +391,11 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         if let Some(ref default) = attrs.default() {
             quote! {
                 let #name = {
-                    let primitive: Option<crate::primitive::Primitive>
+                    let primitive: Option<pdf::primitive::Primitive>
                         = dict.remove(#key);
                     let x: #ty = match primitive {
-                        Some(primitive) => <#ty as crate::object::Object>::from_primitive(primitive, resolve).map_err(|e| 
-                            crate::PdfError::FromPrimitive {
+                        Some(primitive) => <#ty as pdf::object::Object>::from_primitive(primitive, resolve).map_err(|e|
+                            pdf::error::PdfError::FromPrimitive {
                                 typ: #typ,
                                 field: stringify!(#name),
                                 source: Box::new(e)
@@ -410,18 +410,18 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
                 let #name = {
                     match dict.remove(#key) {
                         Some(primitive) =>
-                            match <#ty as crate::object::Object>::from_primitive(primitive, resolve) {
+                            match <#ty as pdf::object::Object>::from_primitive(primitive, resolve) {
                                 Ok(obj) => obj,
-                                Err(e) => return Err(crate::PdfError::FromPrimitive {
+                                Err(e) => return Err(pdf::error::PdfError::FromPrimitive {
                                     typ: stringify!(#ty),
                                     field: stringify!(#name),
                                     source: Box::new(e)
                                 })
                             }
                         None =>  // Try to construct T from Primitive::Null
-                            match <#ty as crate::object::Object>::from_primitive(crate::primitive::Primitive::Null, resolve) {
+                            match <#ty as pdf::object::Object>::from_primitive(pdf::primitive::Primitive::Null, resolve) {
                                 Ok(obj) => obj,
-                                Err(_) => return Err(crate::PdfError::MissingEntry {
+                                Err(_) => return Err(pdf::error::PdfError::MissingEntry {
                                     typ: stringify!(#ty),
                                     field: String::from(stringify!(#name)),
                                 })
@@ -454,7 +454,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         
     
     let from_primitive_code = quote! {
-        let mut dict = crate::primitive::Dictionary::from_primitive(p, resolve)?;
+        let mut dict = pdf::primitive::Dictionary::from_primitive(p, resolve)?;
         #ty_check
         #( #checks )*
         #( #let_parts )*
@@ -469,8 +469,8 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     };
     
     quote! {
-        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> crate::error::Result<()> {
+        impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> pdf::error::Result<()> {
                 writeln!(out, "<<")?;
                 #pdf_type
                 #( #checks_code )*
@@ -478,7 +478,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
                 writeln!(out, ">>")?;
                 Ok(())
             }
-            fn from_primitive(p: crate::primitive::Primitive, resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
+            fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
                 #from_primitive_code
             }
         }
@@ -504,8 +504,8 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
     }).next().unwrap();
 
     quote! {
-        impl #impl_generics crate::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> crate::error::Result<()> {
+        impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
+            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> pdf::error::Result<()> {
                 unimplemented!();
                 /*
                 writeln!(out, "<<")?;
@@ -515,12 +515,12 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
                 Ok(())
                 */
             }
-            fn from_primitive(p: crate::primitive::Primitive, resolve: &impl crate::object::Resolve) -> crate::error::Result<Self> {
-                let crate::primitive::PdfStream {info, data}
+            fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
+                let pdf::primitive::PdfStream {info, data}
                     = p.to_stream(resolve)?;
 
                 Ok(#id {
-                    info: <#info_ty as crate::object::Object>::from_primitive(crate::primitive::Primitive::Dictionary (info), resolve)?,
+                    info: <#info_ty as pdf::object::Object>::from_primitive(pdf::primitive::Primitive::Dictionary (info), resolve)?,
                     data: data,
                 })
             }
