@@ -1,7 +1,6 @@
 #![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
 #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
-#![feature(custom_attribute)]
-#![feature(core_intrinsics)]
+#![cfg_attr(feature="nightly", feature(core_intrinsics))]
 
 #[macro_use] extern crate pdf_derive;
 #[macro_use] extern crate snafu;
