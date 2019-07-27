@@ -189,7 +189,7 @@ impl<B: Backend> File<B> {
             stack: vec![(self.get_root().pages.clone(), 0)]
         }
     }
-    pub fn get_num_pages(&self) -> Result<u32> {
+    pub fn num_pages(&self) -> Result<u32> {
         match *self.trailer.root.pages {
             PagesNode::Tree(ref tree) => Ok(tree.count as u32),
             PagesNode::Leaf(_) => Ok(1)
@@ -197,8 +197,8 @@ impl<B: Backend> File<B> {
     }
     
     pub fn get_page(&self, mut n: u32) -> Result<PageRc> {
-        if n >= self.get_num_pages()? {
-            return Err(PdfError::PageOutOfBounds {page_nr: n, max: self.get_num_pages()?});
+        if n >= self.num_pages()? {
+            return Err(PdfError::PageOutOfBounds {page_nr: n, max: self.num_pages()?});
         }
         self.pages().nth(n as usize).unwrap()
     }

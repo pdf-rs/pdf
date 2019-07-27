@@ -87,7 +87,7 @@ fn main() -> Result<(), PdfError> {
                         }
                     }
                     Keycode::Right => {
-                        if current_page < file.get_num_pages()? - 1 {
+                        if current_page < file.num_pages()? - 1 {
                             current_page += 1;
                             needs_update = true;
                         }
