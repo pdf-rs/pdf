@@ -1,4 +1,4 @@
-# pdf-rs
+# pdf-rs [![Build Status](https://travis-ci.com/pdf-rs/pdf.svg?branch=master)](https://travis-ci.com/pdf-rs/pdf)
 Read, alter and write PDF files.
 
 **At the moment, you can only read PDF files.**
