@@ -12,7 +12,7 @@ use crate::error::*;
 use crate::object::*;
 use crate::primitive::{Primitive, Dictionary, PdfString};
 use crate::backend::Backend;
-use crate::any::Any;
+use crate::any::{Any};
 use crate::parser::Lexer;
 use crate::parser::{parse_indirect_object, parse};
 use crate::xref::{XRef, XRefTable};
@@ -127,10 +127,7 @@ impl<B: Backend> Resolve for Storage<B> {
         let key = r.get_inner();
         
         if let Some(any) = self.cache.borrow().get(&key) {
-            match any.clone().downcast() {
-                Some(rc) => return Ok(rc),
-                None => bail!("expected {}, found {}", unsafe { std::intrinsics::type_name::<T>() }, any.type_name())
-            }
+            return any.clone().downcast();
         }
         
         let primitive = self.resolve(r.get_inner())?;

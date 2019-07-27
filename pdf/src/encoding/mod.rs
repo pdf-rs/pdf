@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate as pdf;
 use crate::object::{Object, Resolve};
 use crate::primitive::Primitive;
-use crate::error::{Result, PdfError};
+use crate::error::{Result};
 
 #[derive(Copy, Clone)]
 struct Entry(NonZeroU32);

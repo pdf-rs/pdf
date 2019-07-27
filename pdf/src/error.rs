@@ -172,7 +172,7 @@ macro_rules! err {
 }
 macro_rules! bail {
     ($($t:tt)*) => {
-        err!(PdfError::Other { msg: format!($($t)*) })
+        err!($crate::PdfError::Other { msg: format!($($t)*) })
     }
 }
 macro_rules! unimplemented {

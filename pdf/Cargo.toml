@@ -13,6 +13,7 @@ Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)
 """
 
+features = ["unstable"]
 
 [dependencies.pdf_derive]
 path = "../pdf_derive"
@@ -33,8 +34,8 @@ tuple = "0.4.0"
 glob = "0.2.11"
 chrono = "0.4.0"
 once_cell = "0.2"
-log = "0.3"
-tempfile = "3.1"
+log = "*"
+tempfile = "*"
 md5 = "0.6"
 
 [lib]
