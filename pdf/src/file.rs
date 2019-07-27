@@ -69,7 +69,7 @@ impl<'a, B: Backend> Iterator for PagesIterator<'a, B> {
     }
 }
 
-struct Storage<B: Backend> {
+pub struct Storage<B: Backend> {
     // objects identical to those in the backend
     cache: RefCell<HashMap<PlainRef, Any>>,
     
@@ -83,7 +83,7 @@ struct Storage<B: Backend> {
     backend: B
 }
 impl<B: Backend> Storage<B> {
-    fn new(backend: B, refs: XRefTable) -> Storage<B> {
+    pub fn new(backend: B, refs: XRefTable) -> Storage<B> {
         Storage {
             backend,
             refs,
