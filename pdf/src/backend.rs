@@ -1,10 +1,10 @@
-use memmap::Mmap;
 use crate::error::*;
 use crate::parser::Lexer;
 use crate::parser::{read_xref_and_trailer_at};
 use crate::xref::{XRefTable};
 use crate::primitive::{Dictionary};
 use crate::object::*;
+use std::ops::{Deref};
 
 use std::ops::{
     RangeFull,
@@ -16,7 +16,7 @@ use std::ops::{
 
 pub trait Backend: Sized {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]>;
-    fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]>;
+    //fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]>;
     fn len(&self) -> usize;
 
     /// Returns the value of startxref (currently only used internally!)
@@ -73,40 +73,23 @@ pub trait Backend: Sized {
 }
 
 
-impl Backend for Mmap {
-    fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
+impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
+    fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
         let r = range.to_range(self.len())?;
         Ok(unsafe {
-            &self.as_slice()[r]
+            &self[r]
         })
     }
-    fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
-        let r = range.to_range(self.len())?;
-        Ok(unsafe {
-            &mut self.as_mut_slice()[r]
-        })
-    }
-    fn len(&self) -> usize {
-        self.len()
-    }
-}
-
-
-impl Backend for Vec<u8> {
-    fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
-        let r = range.to_range(self.len())?;
-        Ok(&self[r])
-    }
-    fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]> {
+    /*
+    fn write<R: IndexRange>(&mut self, range: R) -> Result<&mut [u8]> {
         let r = range.to_range(self.len())?;
         Ok(&mut self[r])
     }
+    */
     fn len(&self) -> usize {
-        self.len()
+        (**self).len()
     }
 }
-
-
 
 /// `IndexRange` is implemented by Rust's built-in range types, produced
 /// by range syntax like `..`, `a..`, `..b` or `c..d`.

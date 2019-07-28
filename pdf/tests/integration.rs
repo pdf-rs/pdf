@@ -2,7 +2,7 @@ extern crate pdf;
 extern crate memmap;
 extern crate glob;
 
-use std::str;
+use std::{str, fs};
 use std::rc::Rc;
 use memmap::Mmap;
 use pdf::file::File;
@@ -27,8 +27,12 @@ macro_rules! run {
 
 #[test]
 fn open_file() {
-    let _ = run!(File::<Vec<u8>>::open(file_path!("example.pdf")));
-    let _ = run!(File::<Mmap>::open(file_path!("example.pdf")));
+    let _ = run!(File::open(file_path!("example.pdf")));
+    let _ = run!({
+        let file = fs::File::open(file_path!("example.pdf")).expect("can't open file");
+        let mmap = unsafe { Mmap::map(&file).expect("can't mmap file") };
+        File::from_data(mmap)
+    });
 }
 
 #[test]

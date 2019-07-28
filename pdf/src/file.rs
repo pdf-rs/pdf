@@ -151,17 +151,14 @@ impl<B: Backend> Resolve for File<B> {
         self.storage.get(r)
     }
 }
-
 impl File<Vec<u8>> {
-    pub fn open(path: &str) -> Result<File<Vec<u8>>> {
-        // Read file contents to Vec
-        File::from_data(fs::read(path)?)
+    pub fn open(path: &str) -> Result<Self> {
+        Self::from_data(fs::read(path)?)
     }
 }
-
 impl<B: Backend> File<B> {
     /// Opens the file at `path` and uses Vec<u8> as backend.
-    pub fn from_data(backend: B) -> Result<File<B>> {
+    pub fn from_data(backend: B) -> Result<Self> {
         let (refs, trailer) = backend.read_xref_table_and_trailer()?;
         let mut storage = Storage::new(backend, refs);
 
