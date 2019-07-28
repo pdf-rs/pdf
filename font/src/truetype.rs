@@ -13,8 +13,8 @@ pub struct TrueTypeFont<'a> {
     name_map: HashMap<Vec<u8>, u32>
 }
 impl<'a> TrueTypeFont<'a> {
-    pub fn parse(data: &'a [u8]) -> Self {
-        let info = FontInfo::new(data, 0).expect("can't pase font");
+    pub fn parse(data: &'a [u8], index: u32) -> Self {
+        let info = FontInfo::new(data, index as usize).expect("can't pase font");
         
         let name_map = info.get_font_name_strings().enumerate()
             .map(|(gid, (name, _, _))| (name.into(), gid as u32))
