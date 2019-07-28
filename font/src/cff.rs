@@ -11,6 +11,7 @@ use nom::{
     error::{make_error, ErrorKind},
     Err::*,
 };
+use encoding::{Encoding};
 
 pub struct CffFont<'a> {
     private_dict: HashMap<Operator, Vec<Value>>,
@@ -19,7 +20,8 @@ pub struct CffFont<'a> {
     context: Context<'a>,
     font_matrix: Transform2F,
     codepoint_map: [u16; 256],  // codepoint -> glyph index
-    name_map: HashMap<&'a str, u16>
+    name_map: HashMap<&'a str, u16>,
+    encoding: Option<Encoding>
 }
 
 impl<'a> CffFont<'a> {
@@ -57,6 +59,7 @@ impl<'a> Font for CffFont<'a> {
                 type2::charstring(data, &self.context, &mut state).expect("faild to parse charstring");
             }
         }
+        debug!("glyph {} {:?} {:?}", id, state.char_width, state.delta_width);
         let width = match (state.char_width, state.delta_width) {
             (Some(w), None) => w,
             (None, None) =>
@@ -72,15 +75,18 @@ impl<'a> Font for CffFont<'a> {
     }
     fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
         match self.codepoint_map.get(codepoint as usize) {
-            None => None,
+            None | Some(&0) => None,
             Some(&n) => Some(n as u32 + 1)
         }
     }
     fn gid_for_name(&self, name: &str) -> Option<u32> {
         match self.name_map.get(name) {
-            None  => None,
+            None => None,
             Some(&gid) => Some(gid as u32 + 1)
         }
+    }
+    fn encoding(&self) -> Option<Encoding> {
+        self.encoding
     }
 }
 impl<'a> BorrowedFont<'a> for CffFont<'a> {}
@@ -178,42 +184,47 @@ impl<'a> Cff<'a> {
             .map(|(gid, &sid)| (glyph_name(sid), gid as u16))
             .collect();
         
-        let mut cmap = [0u16; 256];
-        match top_dict.get(&Operator::Encoding).map(|a| a[0].to_int()) {
-            None | Some(0) => {
-                for (codepoint, sid) in STANDARD_ENCODING.iter().enumerate() {
-                    if let Some(&gid) = sid_map.get(sid) {
-                        cmap[codepoint as usize] = gid;
-                    }
+        let build_default = |sids: &[SID; 256]| -> [u16; 256] {
+            let mut cmap = [0u16; 256];
+            for (codepoint, sid) in sids.iter().enumerate() {
+                if let Some(&gid) = sid_map.get(sid) {
+                    cmap[codepoint as usize] = gid;
                 }
             }
-            Some(1) => {
-                for (codepoint, sid) in EXPERT_ENCODING.iter().enumerate() {
-                    if let Some(&gid) = sid_map.get(sid) {
-                        cmap[codepoint as usize] = gid;
-                    }
-                }
-            }
+            cmap
+        };
+        
+        let (cmap, encoding) = match top_dict.get(&Operator::Encoding).map(|a| a[0].to_int()) {
+            None | Some(0)
+                => (build_default(&STANDARD_ENCODING), Some(Encoding::AdobeStandard)),
+            Some(1)
+                => (build_default(&EXPERT_ENCODING), Some(Encoding::AdobeExpert)),
             Some(offset) => {
+                let mut cmap = [0u16; 256];
                 let (codepoints, supplement) = encoding(self.data.get(offset as _ ..).unwrap()).get();
                 match codepoints {
-                    Encoding::Continous(codepoints) => codepoints.iter()
+                    GlyphEncoding::Continous(codepoints) => codepoints.iter()
                         .enumerate().for_each(|(gid, &codepoint)| cmap[codepoint as usize] = gid as _),
-                    Encoding::Ranges(ranges) => ranges.iter()
+                    GlyphEncoding::Ranges(ranges) => ranges.iter()
                         .flat_map(|&(first, left)| (first ..).take(left as usize + 1))
                         .enumerate().for_each(|(gid, codepoint)| cmap[codepoint as usize] = gid as _),
                 }
                 supplement.iter()
                     .for_each(|&(codepoint, sid)| cmap[codepoint as usize] = sid_map[&sid]);
+                    
+                (cmap, None)
             }
         };
         debug!("cmap:");
         for (i, &gid) in cmap.iter().enumerate() {
             if gid != 0 {
-                debug!("{} -> {}", i, gid);
+                let sid = sids[gid as usize];
+                debug!("{} -> gid={}, sid={}, name={}", i, gid, sid, glyph_name(sid));
             }
         }
-        
+        /*
+        let transform = reverse_map(
+        */
         let private_dict_entry = top_dict.get(&Operator::Private)
             .expect("no private dict entry");
         
@@ -258,7 +269,8 @@ impl<'a> Cff<'a> {
             context,
             font_matrix,
             codepoint_map: cmap,
-            name_map
+            name_map,
+            encoding
         }
     }
 }
@@ -571,22 +583,22 @@ fn charset(i: &[u8], num_glyphs: usize) -> R<Charset> {
 }
 
 #[derive(Debug)]
-enum Encoding {
+enum GlyphEncoding {
     Continous(Vec<u8>),
     Ranges(Vec<(u8, u8)>), // start, num-1
 }
 
-fn encoding(i: &[u8]) -> R<(Encoding, Vec<(u8, SID)>)> {
+fn encoding(i: &[u8]) -> R<(GlyphEncoding, Vec<(u8, SID)>)> {
     let (i, format) = be_u8(i)?;
     
     let (i, encoding) = match format & 0x7F {
         0 => {
             let (i, num) = be_u8(i)?;
-            map(count(be_u8, num as usize), |a| Encoding::Continous(a))(i)?
+            map(count(be_u8, num as usize), |a| GlyphEncoding::Continous(a))(i)?
         },
         1 => {
             let (i, num) = be_u8(i)?;
-            map(count(tuple((be_u8, be_u8)), num as usize), |a| Encoding::Ranges(a))(i)?
+            map(count(tuple((be_u8, be_u8)), num as usize), |a| GlyphEncoding::Ranges(a))(i)?
         }
         _ => panic!("invalid charset format")
     };

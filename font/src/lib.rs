@@ -11,6 +11,7 @@ use std::path::Path;
 use std::convert::TryInto;
 use nom::{IResult, Err::*, error::VerboseError};
 use tuple::{TupleElements, Map};
+use encoding::Encoding;
 
 #[derive(Clone)]
 pub struct Glyph {
@@ -32,10 +33,24 @@ pub trait Font {
             glyphs: (0 .. self.num_glyphs()).map(|i| self.glyph(i).unwrap()).collect()
         }
     }
-    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32>;
-    fn gid_for_name(&self, name: &str) -> Option<u32>;
-    
-    fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32>;
+    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+        None
+    }
+    fn gid_for_name(&self, name: &str) -> Option<u32> {
+        None
+    }
+    fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32> {
+        self.encoding()
+            .and_then(|encoding| encoding.reverse_map())
+            .and_then(|reverse| reverse.get(codepoint))
+            .and_then(|cp| self.gid_for_codepoint(cp as u32))
+    }
+    fn encoding(&self) -> Option<Encoding> {
+        None
+    }
+    fn get_notdef_gid(&self) -> u32 {
+        0
+    }
 }
 
 pub struct Glyphs {
@@ -138,6 +153,7 @@ impl<'a> Context<'a> {
         self.global_subrs.get((idx + self.global_subr_bias) as usize).expect("requested global subroutine not found")
     }
 }
+
 pub struct State {
     pub stack: Vec<Value>,
     pub path: Path2D,
@@ -146,7 +162,8 @@ pub struct State {
     pub char_width: Option<f32>,
     pub done: bool,
     pub stem_hints: u32,
-    pub delta_width: Option<f32>
+    pub delta_width: Option<f32>,
+    pub first_stack_clearing_operator: bool
 }
 
 impl State {
@@ -159,7 +176,8 @@ impl State {
             char_width: None,
             done: false,
             stem_hints: 0,
-            delta_width: None
+            delta_width: None,
+            first_stack_clearing_operator: true
         }
     }
     pub fn into_path(self) -> Path2D {

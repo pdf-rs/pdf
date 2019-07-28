@@ -6,6 +6,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies.encoding]
+path = "../encoding"
+
 [dependencies]
 sfnt = "0.12"
 pathfinder_canvas = {git = "https://github.com/s3bk/pathfinder/" }

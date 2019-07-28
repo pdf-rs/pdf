@@ -12,7 +12,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     let args: Vec<String> = env::args().collect();
-    let font = parse(&args[1]).unwrap();
+    let data = fs::read(args.get(1).expect("no filename given")).expect("can't read specified file");
+    let font = parse(&data);
     
     let num_glyphs = font.num_glyphs();
     let scale = Vector2F::new(200., 200.);

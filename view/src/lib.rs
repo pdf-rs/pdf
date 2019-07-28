@@ -15,7 +15,8 @@ use pdf::primitive::Primitive;
 use pdf::backend::Backend;
 use pdf::font::{Font as PdfFont, FontType};
 use pdf::error::{PdfError, Result};
-use pdf::encoding::{Encoding};
+use pdf::encoding::{Encoding as PdfEncoding, BaseEncoding};
+use encoding::{Encoding};
 
 use pathfinder_content::color::ColorU;
 use pathfinder_geometry::{
@@ -68,9 +69,9 @@ fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> FillStyle {
 struct FontEntry {
     glyphs: Glyphs,
     font_matrix: Transform2F,
-    cmap: Option<HashMap<u16, u32>>, // codepoint -> glyph id
-    encoding: Encoding,
-    is_cid: bool
+    cmap: HashMap<u16, u32>, // codepoint -> glyph id
+    is_cid: bool,
+    notdef: u32
 }
 enum TextMode {
     Fill,
@@ -163,18 +164,9 @@ impl<'a> TextState<'a> {
                 return self.add_text_cid(canvas, data);
             }
             
-            let cmap = font.cmap.as_ref().expect("no cmap");
-            self.add_glyphs(canvas, data.iter().filter_map(|&b| {
-                match cmap.get(&(b as u16)) {
-                    Some(&gid) => {
-                        debug!("byte {} -> gid {}", b, gid);
-                        Some((gid, b == 0x20))
-                    },
-                    None => {
-                        debug!("byte {} has no gid", b);
-                        None
-                    }
-                }
+            self.add_glyphs(canvas, data.iter().map(|&b| {
+                let &gid = font.cmap.get(&(b as u16)).unwrap_or(&font.notdef);
+                (gid, b == 0x20)
             }));
         }
     }
@@ -189,22 +181,36 @@ pub struct Cache {
     fonts: HashMap<String, FontEntry>
 }
 impl FontEntry {
-    fn build<'a>(font: Box<dyn BorrowedFont<'a> + 'a>, encoding: Encoding) -> FontEntry {
-        let decode = false;
-    
-        // build cmap
+    fn build<'a>(font: Box<dyn BorrowedFont<'a> + 'a>, encoding: PdfEncoding) -> FontEntry {
+        let mut is_cid = false;
+        
         let mut cmap = HashMap::new();
-        let decode_one = |b: u8| -> Option<u32> {
-            let cp = match decode {
-                true => encoding.base.decode_byte(b)? as u32,
-                false => b as u32
+        if encoding.base == BaseEncoding::IdentityH {
+            is_cid = true;
+        } else {
+            let source_encoding = match encoding.base {
+                BaseEncoding::StandardEncoding => Some(Encoding::AdobeStandard),
+                BaseEncoding::SymbolEncoding => Some(Encoding::AdobeSymbol),
+                BaseEncoding::WinAnsiEncoding => Some(Encoding::WinAnsiEncoding),
+                ref e => {
+                    warn!("unsupported pdf encoding {:?}", e);
+                    None
+                }
             };
-            font.gid_for_codepoint(cp)
-        };
-            
-        for b in 0 ..= 255 {
-            if let Some(gid) = decode_one(b) {
-                cmap.insert(b as u16, gid);
+            let font_encoding = font.encoding();
+            debug!("{:?} -> {:?}", source_encoding, font_encoding);
+            match (source_encoding, font_encoding) {
+                (Some(source), Some(dest)) => {
+                    let transcoder = source.to(dest).expect("can't transcode");
+                    
+                    for b in 0 .. 256 {
+                        if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
+                            cmap.insert(b as u16, gid);
+                            debug!("{} -> {}", b, gid);
+                        }
+                    }
+                },
+                _ => warn!("can't translate from text encoding {:?} to font encoding {:?}", encoding.base, font_encoding)
             }
         }
         for (&cp, name) in encoding.differences.iter() {
@@ -215,10 +221,10 @@ impl FontEntry {
         
         FontEntry {
             glyphs: font.glyphs(),
-            cmap: Some(cmap),
-            encoding: encoding.clone(),
-            is_cid: false,
-            font_matrix: font.font_matrix()
+            cmap,
+            is_cid,
+            font_matrix: font.font_matrix(),
+            notdef: font.get_notdef_gid()
         }
     }
 }
@@ -542,21 +548,16 @@ impl Cache {
                     state.draw_text(&mut canvas, text);
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
-                    if let Some(font) = state.font {
-                        let mut text: Vec<u8> = Vec::new();
-                        for arg in array {
-                            match arg {
-                                Primitive::String(ref data) => {
-                                    state.draw_text(&mut canvas, data.as_bytes());
-                                    text.extend(data.as_bytes());
-                                },
-                                p => {
-                                    let offset = p.as_number().expect("wrong argument to TJ");
-                                    state.advance(-0.001 * offset); // because why not PDF…
-                                }
+                    for arg in array {
+                        match arg {
+                            Primitive::String(ref data) => {
+                                state.draw_text(&mut canvas, data.as_bytes());
+                            },
+                            p => {
+                                let offset = p.as_number().expect("wrong argument to TJ");
+                                state.advance(-0.001 * offset); // because why not PDF…
                             }
                         }
-                        debug!("Text: {}", font.encoding.base.decode_bytes(&text));
                     }
                 }),
                 _ => {}

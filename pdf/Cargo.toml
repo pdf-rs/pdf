@@ -17,8 +17,6 @@ features = ["unstable"]
 
 [dependencies.pdf_derive]
 path = "../pdf_derive"
-[dependencies.encoding]
-path = "../encoding"
 
 [dependencies]
 snafu = "0.4"

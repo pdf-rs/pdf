@@ -4,7 +4,6 @@ use crate as pdf;
 use crate::object::{Object, Resolve};
 use crate::primitive::Primitive;
 use crate::error::{Result};
-use encoding::*;
 
 #[derive(Debug, Clone)]
 pub struct Encoding {
@@ -12,7 +11,7 @@ pub struct Encoding {
     pub differences: HashMap<u32, String>,
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, Eq, PartialEq)]
 pub enum BaseEncoding {
     StandardEncoding,
     SymbolEncoding,
@@ -66,29 +65,6 @@ impl Encoding {
         Encoding {
             base: BaseEncoding::StandardEncoding,
             differences: HashMap::new()
-        }
-    }
-}
-
-impl BaseEncoding {
-    fn map(&self) -> Option<&[Option<Entry>; 256]> {
-        match self {
-            BaseEncoding::SymbolEncoding => Some(&SYMBOL),
-            BaseEncoding::StandardEncoding => Some(&STANDARD),
-            BaseEncoding::WinAnsiEncoding => Some(&WINANSI),
-            _ => None
-        }
-    }
-    pub fn decode_byte(&self, b: u8) -> Option<char> {
-        match self.map() {
-            Some(map) => map[b as usize].map(|e| e.as_char()),
-            None => Some(b as char)
-        }
-    }
-    pub fn decode_bytes(&self, data: &[u8]) -> String {
-        match self.map() {
-            Some(map) => data.iter().flat_map(|&b| map[b as usize].map(|e| e.as_char())).collect(),
-            None => data.iter().map(|&b| b as char).collect()
         }
     }
 }

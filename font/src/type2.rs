@@ -63,12 +63,11 @@ fn alternating_curve(s: &mut State, mut horizontal: bool) {
     }
 }
 fn maybe_width(state: &mut State) {
-    if state.delta_width.is_none() {
+    if state.first_stack_clearing_operator {
+        state.first_stack_clearing_operator = false;
         if state.stack.len() % 2 == 1 {
             let w = state.stack.remove(0);
             state.delta_width = Some(w.to_float());
-        } else {
-            state.delta_width = Some(0.);
         }
     }
 }

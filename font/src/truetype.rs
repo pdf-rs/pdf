@@ -6,6 +6,7 @@ use pathfinder_geometry::transform2d::Transform2F;
 use stb_truetype::FontInfo;
 use stb_truetype::VertexType;
 use crate::{Font, BorrowedFont, Glyph};
+use encoding::Encoding;
 
 pub struct TrueTypeFont<'a> {
     pub info: FontInfo<&'a [u8]>,
@@ -54,14 +55,17 @@ impl<'a> Font for TrueTypeFont<'a> {
             path
         })
     }
-    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+    fn gid_for_name(&self, name: &str) -> Option<u32> {
+        self.name_map.get(name.as_bytes()).cloned()
+    }
+    fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32> {
         match self.info.find_glyph_index(codepoint) {
             0 => None,
             n => Some(n)
         }
     }
-    fn gid_for_name(&self, name: &str) -> Option<u32> {
-        self.name_map.get(name.as_bytes()).cloned()
+    fn encoding(&self) -> Option<Encoding> {
+        Some(Encoding::Unicode)
     }
 }
 
