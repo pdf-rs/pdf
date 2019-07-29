@@ -52,15 +52,15 @@ impl Type1Font {
     }
         
     pub fn from_vm(vm: Vm) -> Self {
-        let (font_name, font_dict) = vm.fonts().nth(0).unwrap();
+        let (_font_name, font_dict) = vm.fonts().nth(0).unwrap();
         
         let private_dict = font_dict.get("Private").unwrap()
             .as_dict().unwrap();
         let len_iv = private_dict.get("lenIV")
             .map(|i| i.as_int().unwrap()).unwrap_or(4) as usize;
         
-        debug!("FontDict keys: {:?}", font_dict.iter().map(|(k, v)| k).format(", "));
-        debug!("Private keys: {:?}", private_dict.iter().map(|(k, v)| k).format(", "));
+        debug!("FontDict keys: {:?}", font_dict.iter().map(|(k, _)| k).format(", "));
+        debug!("Private keys: {:?}", private_dict.iter().map(|(k, _)| k).format(", "));
         
         let char_strings = font_dict.get("CharStrings").unwrap().as_dict().unwrap();
         
@@ -261,7 +261,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
                         i
                     }
                     7 => { // ⊦ sbx sby wx wy sbw (12 7) ⊦
-                        let (sbx, sby, wx, wy, sbw) = s.args();
+                        let (sbx, sby, wx, _wy, _sbw) = s.args();
                         debug!("sbw");
                         s.char_width = Some(wx.to_float());
                         s.current = v(sbx, sby);
@@ -277,7 +277,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
                     }
                     16 => { //  arg1 . . . argn n othersubr# callothersubr (12 16) –
                         debug!("callothersubr");
-                        let subr_nr = s.pop().to_int();
+                        let _subr_nr = s.pop().to_int();
                         i
                     }
                     17 => { // – pop (12 17) number

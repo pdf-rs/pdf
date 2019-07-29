@@ -1,20 +1,21 @@
 use std::convert::TryInto;
+use std::collections::HashMap;
 use crate::{CffFont, TrueTypeFont, BorrowedFont, R, IResultExt};
+use crate::parsers::iter;
 use nom::{
-    number::complete::{be_i16, be_u16, be_i64, be_i32, be_u32},
-    multi::count,
+    number::complete::{be_u8, be_i16, be_u16, be_i64, be_i32, be_u32},
+    multi::{count, length_data},
     combinator::map,
     bytes::complete::take,
     sequence::tuple
 };
+use tuple::T4;
 
 pub fn parse_opentype<'a>(data: &'a [u8], idx: u32) -> Box<dyn BorrowedFont<'a> + 'a> {
     let tables = parse_tables(data).get();
     for &(tag, _) in &tables.entries {
         debug!("tag: {:?} ({:?})", tag, std::str::from_utf8(&tag));
     }
-    let table = |tag: &[u8; 4]| tables.get(tag);
-    
     for &(tag, block) in &tables.entries {
         match &tag {
             b"CFF " => return Box::new(CffFont::parse(block, idx)) as _,
@@ -33,7 +34,7 @@ pub struct Tables<'a> {
 }
 impl<'a> Tables<'a> {
     pub fn get(&self, tag: &[u8; 4]) -> Option<&'a [u8]> {
-        self.entries.iter().find(|&(t, block)| tag == t).map(|&(tag, block)| block)
+        self.entries.iter().find(|&(t, _)| tag == t).map(|&(_, block)| block)
     }
 }
 // (tag, content)
@@ -110,5 +111,145 @@ pub fn parse_loca<'a>(i: &'a [u8], head: &Head, maxp: &Maxp) -> R<'a, Vec<u32>> 
         0 => count(map(be_u16, |n| 2 * n as u32), maxp.num_glyphs as usize + 1)(i),
         1 => count(be_u32, maxp.num_glyphs as usize + 1)(i),
         _ => panic!("invalid index_to_loc_format")
+    }
+}
+pub fn parse_cmap(input: &[u8]) -> R<HashMap<u32, u16>> {
+    let (i, _version) = be_u16(input)?;
+    let (i, num_tables) = be_u16(i)?;
+    
+    let offset = iter(i, tuple((be_u16, be_u16, be_u32))).take(num_tables as usize)
+        .filter_map(|entry| match entry {
+            (0, _, off) | (3, 10, off) | (3, 1, off) => Some(off),
+            _ => None
+        })
+        .next();
+    
+    let mut cmap: HashMap<u32, u16> = HashMap::new();
+    if let Some(table) = offset.and_then(|off| input.get(off as usize ..)) {
+        let (i, format) = be_u16(table)?;
+        debug!("cmap format {}", format);
+        let (i, len) = be_u16(i)?;
+        let (_i, data) = take(len - 4)(i)?; // aleady have 4 header bytes
+        match format {
+            0 => {
+                let (i, _language) = be_u16(data)?;
+                for (code, gid) in iter(i, be_u8).enumerate() {
+                    if code != 0 {
+                        cmap.insert(code as u32, gid as u16);
+                    }
+                }
+            }
+            4 => {
+                let (i, _language) = be_u16(data)?;
+                let (i, segCountX2) = be_u16(i)?;
+                let (i, _searchRange) = be_u16(i)?;
+                let (i, _entrySelector) = be_u16(i)?;
+                let (i, _rangeShift) = be_u16(i)?;
+                let (i, endCode) = take(segCountX2)(i)?;
+                let (i, _reservedPad) = be_u16(i)?;
+                let (i, startCode) = take(segCountX2)(i)?;
+                let (i, idDelta) = take(segCountX2)(i)?;
+                let (glyph_data, idRangeOffset) = take(segCountX2)(i)?;
+                for (n, T4(start, end, delta, offset)) in T4(
+                    iter(startCode, be_u16),
+                    iter(endCode, be_u16),
+                    iter(idDelta, be_u16),
+                    iter(idRangeOffset, be_u16)
+                ).into_iter().enumerate() {
+                    if start == 0xFFFF && end == 0xFFFF {
+                        break;
+                    }
+                    if offset == 0 {
+                        for c in start ..= end {
+                            let gid = delta.wrapping_add(c);
+                            cmap.insert(c as u32, gid);
+                        }
+                    } else {
+                        for c in start ..= end {
+                            let index = 2 * (n as u16 + (c - start)) + offset - segCountX2;
+                            if index as usize > glyph_data.len() - 2 {
+                                break;
+                            }
+                            let (_, gid) = be_u16(&glyph_data[index as usize ..])?;
+                            if gid != 0 {
+                                let gid = gid.wrapping_add(delta);
+                                cmap.insert(c as u32, gid);
+                            }
+                        }
+                    }
+                }
+            }
+            n => unimplemented!("cmap format {}", n),
+        }
+    }
+    Ok((&[], cmap))
+}
+
+pub struct Hhea {
+    line_gap: i16,
+    number_of_hmetrics: u16 
+}
+pub fn parse_hhea(i: &[u8]) -> R<Hhea> {
+    let (i, _majorVersion) = be_u16(i)?;
+    let (i, _minorVersion) = be_u16(i)?;
+    let (i, _ascender) = be_i16(i)?;
+    let (i, _descender) = be_i16(i)?;
+    let (i, line_gap) = be_i16(i)?;
+    let (i, _advanceWidthMax) = be_u16(i)?;
+    let (i, _minLeftSideBearing) = be_i16(i)?;
+    let (i, _minRightSideBearing) = be_i16(i)?;
+    let (i, _xMaxExtent) = be_i16(i)?;
+    let (i, _caretSlopeRise) = be_i16(i)?;
+    let (i, _caretSlopeRun) = be_i16(i)?;
+    let (i, _caretOffset) = be_i16(i)?;
+    let (i, _) = be_i16(i)?;
+    let (i, _) = be_i16(i)?;
+    let (i, _) = be_i16(i)?;
+    let (i, _) = be_i16(i)?;
+    
+    let (i, _metricDataFormat) = be_i16(i)?;
+    let (i, number_of_hmetrics) = be_u16(i)?;
+    
+    Ok((i, Hhea {
+        line_gap,
+        number_of_hmetrics
+    }))
+}
+pub struct Hmtx<'a> {
+    data: &'a [u8],
+    num_metrics: u16,
+    num_glyphs: u16,
+    last_advance: u16
+}
+pub struct HMetrics {
+    pub advance: u16,
+    pub lsb: i16
+}
+impl<'a> Hmtx<'a> {
+    pub fn metrics_for_gid(&self, gid: u16) -> HMetrics {
+        assert!(gid < self.num_glyphs);
+        if gid < self.num_metrics {
+            let index = gid as usize * 4;
+            let (advance, lsb) = tuple((be_u16, be_i16))(&self.data[index ..]).get();
+            HMetrics { advance, lsb }
+        } else {
+            let index = self.num_metrics as usize * 2 + gid as usize * 2;
+            let lsb = be_i16(&self.data[index ..]).get();
+            HMetrics { advance: self.last_advance, lsb }
+        }
+    }
+}
+pub fn parse_hmtx<'a>(data: &'a [u8], hhea: &Hhea, maxp: &Maxp) -> Hmtx<'a> {
+    let num_metrics = hhea.number_of_hmetrics;
+    let last_advance = if num_metrics > 0 {
+        be_u16(&data[num_metrics as usize * 4 - 4 ..]).get()
+    } else {
+        0
+    };
+    Hmtx {
+        data,
+        num_metrics,
+        num_glyphs: maxp.num_glyphs,
+        last_advance
     }
 }

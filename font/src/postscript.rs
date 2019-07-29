@@ -537,7 +537,7 @@ impl Vm {
                     (Item::Literal(lit), Item::Dict(dict_key)) => {
                         let font_name = String::from_utf8(self.get_lit(lit).to_owned())
                             .expect("Font name is not valid UTF-8");
-                        let (ref mut dict, ref mut mode) = self.dicts.get_mut(dict_key).unwrap();
+                        let (_, ref mut mode) = self.dicts.get_mut(dict_key).unwrap();
                         mode.read_only();
                         self.fonts.insert(font_name, dict_key);
                         self.push(Item::Dict(dict_key));
@@ -709,7 +709,7 @@ impl Vm {
             Operator::Eexec => {
                 match self.pop() {
                     Item::File => {},
-                    Item::String(key) => {
+                    Item::String(_) => {
                         unimplemented!()
                         // let mut input = Input::new(self.get_string(key));
                         // self.parse_and_exec(&mut input);

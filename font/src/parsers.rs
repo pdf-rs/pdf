@@ -1,4 +1,5 @@
 use std::fmt;
+use std::marker::PhantomData;
 use nom::{
     bytes::complete::{take_till, take_till1, take_while, tag},
     sequence::{delimited, tuple, preceded, terminated},
@@ -249,4 +250,34 @@ pub fn token(i: &[u8]) -> R<Token> {
         )),
         take_while(word_sep)
     )(i)
+}
+
+pub struct ParserIter<'a, T, F> {
+    parser: F,
+    input: &'a [u8],
+    _m: PhantomData<T>
+}
+pub fn iter<'a, T, F>(input: &'a [u8], parser: F) -> ParserIter<'a, T, F> where
+    F: Fn(&'a [u8]) -> R<'a, T>
+{
+    ParserIter { parser, input, _m: PhantomData }
+}
+impl<'a, T, F> ParserIter<'a, T, F> {
+    pub fn input(&self) -> &'a [u8] {
+        self.input
+    }
+}
+impl<'a, T, F> Iterator for ParserIter<'a, T, F> where
+    F: Fn(&'a [u8]) -> R<'a, T>
+{
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        match (self.parser)(self.input) {
+            Ok((i, t)) => {
+                self.input = i;
+                Some(t)
+            }
+            Err(_) => None
+        }
+    }
 }

@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::iter;
+use std::collections::HashMap;
 use pathfinder_canvas::Path2D;
 use pathfinder_geometry::vector::Vector2F;
 use pathfinder_geometry::transform2d::{Transform2F, Matrix2x2F};
@@ -11,7 +12,7 @@ use nom::{
     sequence::tuple,
     multi::{count},
 };
-use crate::opentype::{parse_head, parse_maxp, parse_loca, Tables};
+use crate::opentype::{parse_head, parse_maxp, parse_loca, parse_cmap, parse_hhea, parse_hmtx, Hmtx, Tables};
 
 #[derive(Clone)]
 enum Shape {
@@ -23,6 +24,8 @@ pub struct TrueTypeFont<'a> {
     data: &'a [u8],
     shapes: Vec<Option<Shape>>,
     loca: Vec<u32>,
+    cmap: Option<HashMap<u32, u16>>,
+    hmtx: Option<Hmtx<'a>>,
     units_per_em: u16
 }
 impl<'a> TrueTypeFont<'a> {
@@ -30,11 +33,19 @@ impl<'a> TrueTypeFont<'a> {
         let head = parse_head(tables.get(b"head").expect("no head")).get();
         let maxp = parse_maxp(tables.get(b"maxp").expect("no maxp")).get();
         let loca = parse_loca(tables.get(b"loca").expect("no loca"), &head, &maxp).get();
+        let cmap = tables.get(b"cmap").map(|data| parse_cmap(data).get());
+        let hhea = tables.get(b"hhea").map(|data| parse_hhea(data).get());
+        let hmtx = match (hhea, tables.get(b"hmtx")) {
+            (Some(hhea), Some(data)) => Some(parse_hmtx(data, &hhea, &maxp)),
+            _ => None
+        };
         let num_glyphs = maxp.num_glyphs;
         TrueTypeFont {
             data,
             shapes: vec![None; num_glyphs as usize],
             loca: loca,
+            cmap,
+            hmtx,
             units_per_em: head.units_per_em
         }
     }
@@ -74,20 +85,23 @@ impl<'a> Font for TrueTypeFont<'a> {
         Transform2F::from_scale(Vector2F::new(scale, scale))
     }
     fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
+        assert!(id <= u16::max_value() as u32);
         let path = self.get_path(id);
+        let width = self.hmtx.as_ref().map(|hmtx| hmtx.metrics_for_gid(id as u16).advance).unwrap_or(0);
+        
         Ok(Glyph {
             path,
-            width: 0.5
+            width: width as f32
         })
     }
-    fn gid_for_name(&self, name: &str) -> Option<u32> {
-        unimplemented!()
-    }
     fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32> {
-        unimplemented!()
+        match self.cmap {
+            Some(ref cmap) => cmap.get(&codepoint).map(|&gid| gid as u32),
+            None => None
+        }
     }
     fn encoding(&self) -> Option<Encoding> {
-        unimplemented!()
+        Some(Encoding::Unicode)
     }
 }
 
@@ -206,7 +220,7 @@ fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape
     
     // let ins = read_u16(&glyph_data[10 + number_of_contours * 2..]) as usize;
     let (i, num_instructions) = be_u16(i)?;
-    let (i, instructions) = take(num_instructions)(i)?;
+    let (i, _instructions) = take(num_instructions)(i)?;
     // 
     // let mut points = &glyph_data[10 + number_of_contours * 2 + 2 + ins ..];
 

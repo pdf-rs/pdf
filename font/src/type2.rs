@@ -486,7 +486,6 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
                 s.push(v as f32 / 65536.);
                 i
             }
-            c => panic!("unknown code {}", c)
         };
         
         input = i;

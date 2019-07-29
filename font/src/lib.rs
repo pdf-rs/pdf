@@ -32,10 +32,10 @@ pub trait Font {
             glyphs: (0 .. self.num_glyphs()).map(|i| self.glyph(i).unwrap()).collect()
         }
     }
-    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+    fn gid_for_codepoint(&self, _codepoint: u32) -> Option<u32> {
         None
     }
-    fn gid_for_name(&self, name: &str) -> Option<u32> {
+    fn gid_for_name(&self, _name: &str) -> Option<u32> {
         None
     }
     fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32> {
