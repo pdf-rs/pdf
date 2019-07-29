@@ -133,7 +133,7 @@ impl<'a> TextState<'a> {
             let glyph = font.glyphs.get(gid as u32).unwrap();
             
             let transform = base * self.text_matrix * tr;
-            
+            debug!("transform: {:?}", transform);
             canvas.set_current_transform(&transform);
             canvas.fill_path(glyph.path.clone());
             
@@ -205,7 +205,15 @@ impl FontEntry {
                         }
                     }
                 },
-                _ => warn!("can't translate from text encoding {:?} to font encoding {:?}", encoding.base, font_encoding)
+                _ => {
+                    warn!("can't translate from text encoding {:?} to font encoding {:?}", encoding.base, font_encoding);
+                    // assuming same encoding
+                    for cp in 0 .. 256 {
+                        if let Some(gid) = font.gid_for_codepoint(cp) {
+                            cmap.insert(cp as u16, gid);
+                        }
+                    }
+                }
             }
         }
         for (&cp, name) in encoding.differences.iter() {
