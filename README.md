@@ -7,5 +7,12 @@ One easy way you can contribute is to add different PDF files to `tests/files` a
 
 Feel free to contribute with ideas, issues or code! You can also [join the discussion](https://webchat.oftc.net/?channels=rust-pdf) on `#rust-pdf` on `irc.oftc.net`.
 
+# Workspace
+This repository uses a Cargo Workspace and default members. This means by default only the `pdf` library is build.
+To build additional parts, pass `--package=read` to build the subcrate you are interested in (here the `read` example).
+
+# Examples
+Currently we only have two very minimal examples `read` and `text`. However the library has grown a lot since they have been written.
+
 # Inspect
 There is a tool for visualizing a PDF file as an interactive hierarchy of primitives at [inspect-prim](https://github.com/pdf-rs/inspect-prim). Just clone and `cargo run`.
