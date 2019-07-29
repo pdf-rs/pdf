@@ -35,17 +35,6 @@ pub struct Content {
 
 impl Content {
     fn parse_from(data: &[u8], resolve: &impl Resolve) -> Result<Content> {
-        {
-            use std::io::Write;
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .append(true)
-                .create(true)
-                .open("/tmp/content.txt")
-                .unwrap();
-            writeln!(f, "\n~~~~~~~~~~~\n")?;
-            f.write_all(data).unwrap();
-        }
         let mut lexer = Lexer::new(data);
 
         let mut content = Content {operations: Vec::new()};

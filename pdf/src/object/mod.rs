@@ -31,7 +31,7 @@ impl Resolve for NoResolve {
     fn resolve(&self, _: PlainRef) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
+    fn get<T: Object>(&self, _r: Ref<T>) -> Result<Rc<T>> {
         Err(PdfError::Reference)
     }
 }

@@ -59,8 +59,8 @@ impl<'a, B: Backend> Iterator for PagesIterator<'a, B> {
                         }
                     };
                     match *rc {
-                        PagesNode::Tree(ref child) => self.stack.push((rc, 0)), // push the child on the stack
-                        PagesNode::Leaf(ref page) => return Some(Ok(PageRc(rc)))
+                        PagesNode::Tree(_) => self.stack.push((rc, 0)), // push the child on the stack
+                        PagesNode::Leaf(_) => return Some(Ok(PageRc(rc)))
                     }
                 }
             }
@@ -99,16 +99,9 @@ impl<B: Backend> Resolve for Storage<B> {
         match self.changes.get(&r.id) {
             Some(ref p) => Ok((*p).clone()),
             None => match self.refs.get(r.id)? {
-                XRef::Raw {pos, gen_nr} => {
+                XRef::Raw {pos, ..} => {
                     let mut lexer = Lexer::new(self.backend.read(pos..)?);
-                    let mut p = parse_indirect_object(&mut lexer, self)?.1;
-                    if let Some(ref decoder) = self.decoder {
-                        match p {
-                            Primitive::Stream(ref mut stream) => decoder.decrypt(r.id, gen_nr, &mut stream.data),
-                            Primitive::String(ref mut s) => decoder.decrypt(r.id, gen_nr, &mut s.data),
-                            _ => {}
-                        }
-                    }
+                    let p = parse_indirect_object(&mut lexer, self, self.decoder.as_ref())?.1;
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
@@ -193,7 +186,7 @@ impl<B: Backend> File<B> {
         }
     }
     
-    pub fn get_page(&self, mut n: u32) -> Result<PageRc> {
+    pub fn get_page(&self, n: u32) -> Result<PageRc> {
         if n >= self.num_pages()? {
             return Err(PdfError::PageOutOfBounds {page_nr: n, max: self.num_pages()?});
         }

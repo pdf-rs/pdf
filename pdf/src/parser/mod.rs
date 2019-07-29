@@ -12,6 +12,20 @@ use crate::error::*;
 use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use self::lexer::{HexStringLexer, StringLexer};
+use crate::crypt::Decoder;
+
+pub struct Context<'a> {
+    pub decoder: Option<&'a Decoder>,
+    pub obj_nr: u64,
+    pub gen_nr: u16
+}
+impl<'a> Context<'a> {
+    pub fn decrypt(&self, mut data: &mut [u8]) {
+        if let Some(ref decoder) = self.decoder {
+            decoder.decrypt(self.obj_nr, self.gen_nr, &mut data);
+        }
+    }
+}
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
@@ -22,6 +36,12 @@ pub fn parse(data: &[u8], r: &impl Resolve) -> Result<Primitive> {
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
 pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive> {
+    parse_with_lexer_ctx(lexer, r, None)
+}
+
+/// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
+/// Use `parse_stream` if this is not sufficient.
+pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>) -> Result<Primitive> {
     let first_lexeme = lexer.next()?;
 
     let obj = if first_lexeme.equals(b"<<") {
@@ -31,7 +51,7 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive
             let delimiter = lexer.next()?;
             if delimiter.equals(b"/") {
                 let key = lexer.next()?.to_string();
-                let obj = parse_with_lexer(lexer, r)?;
+                let obj = parse_with_lexer_ctx(lexer, r, ctx)?;
                 dict.insert(key, obj);
             } else if delimiter.equals(b">>") {
                 break;
@@ -55,9 +75,16 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive
             // Finish
             lexer.next_expect("endstream")?;
 
+            let mut data = stream_substr.to_vec();
+            
+            // decrypt it
+            if let Some(ctx) = ctx {
+                ctx.decrypt(&mut data);
+            }
+            
             Primitive::Stream(PdfStream {
                 info: dict,
-                data: stream_substr.to_vec(),
+                data,
             })
         } else {
             Primitive::Dictionary (dict)
@@ -124,6 +151,10 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive
         // Advance to end of string
         lexer.offset_pos(bytes_traversed as usize);
 
+        // decrypt it
+        if let Some(ctx) = ctx {
+            ctx.decrypt(&mut string);
+        }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
         let mut string: Vec<u8> = Vec::new();
@@ -139,6 +170,10 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive
         // Advance to end of string
         lexer.offset_pos(bytes_traversed);
 
+        // decrypt it
+        if let Some(ctx) = ctx {
+            ctx.decrypt(&mut string);
+        }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"true") {
         Primitive::Boolean (true)

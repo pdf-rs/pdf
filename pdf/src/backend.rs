@@ -76,9 +76,7 @@ pub trait Backend: Sized {
 impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
     fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
         let r = range.to_range(self.len())?;
-        Ok(unsafe {
-            &self[r]
-        })
+        Ok(&self[r])
     }
     /*
     fn write<R: IndexRange>(&mut self, range: R) -> Result<&mut [u8]> {

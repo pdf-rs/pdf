@@ -86,7 +86,7 @@ impl Decoder {
         let level = dict.r;
         let key_size = dict.bits as usize / 8;
         let o = dict.o.as_bytes();
-        let u = dict.u.as_bytes();
+        //let u = dict.u.as_bytes();
         let p = dict.p;
         
         // a) and b)
