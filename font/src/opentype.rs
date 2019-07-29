@@ -1,10 +1,12 @@
+#![allow(non_snake_case)]
+
 use std::convert::TryInto;
 use std::collections::HashMap;
 use crate::{CffFont, TrueTypeFont, BorrowedFont, R, IResultExt};
 use crate::parsers::iter;
 use nom::{
     number::complete::{be_u8, be_i16, be_u16, be_i64, be_i32, be_u32},
-    multi::{count, length_data},
+    multi::{count},
     combinator::map,
     bytes::complete::take,
     sequence::tuple

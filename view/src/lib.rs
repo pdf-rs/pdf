@@ -24,7 +24,7 @@ use pathfinder_geometry::{
 };
 use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
 use pathfinder_renderer::scene::Scene;
-use font::{Font, BorrowedFont, Glyphs};
+use font::{BorrowedFont, Glyphs};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -39,18 +39,14 @@ macro_rules! ops_p {
 }
 macro_rules! ops {
     ($ops:ident, $($var:ident : $typ:ty),* => $block:block) => ({
-        || -> Result<()> {
-            let mut iter = $ops.iter();
-            $(
-                let $var: $typ = iter.next().ok_or(PdfError::EOF)?.try_into()?;
-            )*
-            $block;
-            Ok(())
-        }();
+        let mut iter = $ops.iter();
+        $(
+            let $var: $typ = iter.next().ok_or(PdfError::EOF)?.try_into()?;
+        )*
+        $block;
     })
 }
 
-type P = Vector2F;
 fn rgb2fill(r: f32, g: f32, b: f32) -> FillStyle {
     let c = |v: f32| (v * 255.) as u8;
     FillStyle::Color(ColorU { r: c(r), g: c(g), b: c(b), a: 255 })
@@ -145,7 +141,6 @@ impl<'a> TextState<'a> {
                 true => self.word_space,
                 false => self.char_space
             };
-            debug!("glyph {} has width: {}", gid, glyph.width);
             let advance = dx + tr.m11() * glyph.width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }

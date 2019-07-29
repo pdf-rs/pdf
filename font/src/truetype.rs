@@ -55,7 +55,6 @@ impl<'a> TrueTypeFont<'a> {
         self.data.get(start as usize .. end as usize).unwrap()
     }
     fn get_shape(&self, idx: usize) -> Shape {
-        debug!("get shape for glyph {}", idx);
         let idx = idx as usize;
         let data = self.get_glyph_data(idx);
         parse_glyph_shape(data).get()
@@ -93,6 +92,9 @@ impl<'a> Font for TrueTypeFont<'a> {
             path,
             width: width as f32
         })
+    }
+    fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
+        self.gid_for_unicode_codepoint(codepoint)
     }
     fn gid_for_unicode_codepoint(&self, codepoint: u32) -> Option<u32> {
         match self.cmap {
@@ -138,7 +140,6 @@ fn parse_glyph_shape(data: &[u8]) -> R<Shape> {
         return Ok((data, Shape::Empty));
     }
     let (i, number_of_contours) = be_i16(data)?;
-    dbg!(number_of_contours);
     
     let (i, _) = take(8usize)(i)?;
     match number_of_contours {
@@ -207,14 +208,10 @@ struct FlagData {
 }
 
 fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape> {
-    let delta2 = move |j: &[u8]| j.as_ptr() as usize - i.as_ptr() as usize;
-    let delta = move |j: &[u8], msg: &'static str| debug!("{} @ {}", msg, j.as_ptr() as usize - i.as_ptr() as usize);
-    
     let mut path = Path2D::new();
     let mut start_off = false;
     let mut was_off = false;
     
-    delta(i, "point_indices");
     // let end_points_of_contours = &glyph_data[10..];
     let (i, point_indices) = count(be_u16, number_of_contours)(i)?;
     
@@ -226,7 +223,6 @@ fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape
 
     // let n = 1 + read_u16(&end_points_of_contours[number_of_contours * 2 - 2..]) as usize;
     let n = 1 + *point_indices.last().unwrap() as usize;
-    debug!("n={}", n);
 
     let mut flag_data = Vec::with_capacity(n);
 
@@ -234,7 +230,6 @@ fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape
     // in first pass, we load uninterpreted data into the allocated array above
 
     // first load flags
-    delta(i, "flags");
     let mut input = i;
     while flag_data.len() < n {
         let (i, flags) = be_u8(input)?;
@@ -270,7 +265,6 @@ fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape
         }
     }
     
-    delta(input, "flag x data");
     // now load x coordinates
     let mut x_coord = 0;
     for (j, &mut FlagData { flags, ref mut p }) in flag_data.iter_mut().enumerate() {
@@ -278,10 +272,8 @@ fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape
         x_coord += dx;
         p.set_x(x_coord as f32);
         input = i;
-        debug!("{}: flags={} {:?} @ {}", j, flags, p, delta2(input));
     }
 
-    delta(input, "flag y data");
     // now load y coordinates
     let mut y_coord = 0;
     for (j, &mut FlagData { flags, ref mut p }) in flag_data.iter_mut().enumerate() {
@@ -289,7 +281,6 @@ fn glyph_shape_positive_contours(i: &[u8], number_of_contours: usize) -> R<Shape
         y_coord += dy;
         p.set_y(y_coord as f32);
         input = i;
-        debug!("{}: flags={} {:?} @ {}", j, flags, p, delta2(input));
     }
 
     // now convert them to our format

@@ -434,10 +434,6 @@ impl Vm {
     fn pop_dict(&mut self) {
         self.dict_stack.pop();
     }
-    fn current_dict(&self) -> &Dictionary {
-        let &key = self.dict_stack.last().expect("no current dict");
-        self.get_dict(key)
-    }
     fn current_dict_mut(&mut self) -> &mut Dictionary {
         let &key = self.dict_stack.last().expect("no current dict");
         self.get_dict_mut(key)

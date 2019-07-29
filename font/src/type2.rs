@@ -73,8 +73,6 @@ fn maybe_width(state: &mut State) {
 }
 pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut State) -> IResult<&'a [u8], ()> {
     while input.len() > 0 && !s.done {
-        trace!("input: {:?}", &input[0 .. input.len().min(20)]);
-        debug!("stack: {:?}", s.stack);
         let (i, b0) = be_u8(input)?;
         let i = match b0 {
             0 => panic!("reserved"),

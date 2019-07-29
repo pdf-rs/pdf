@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use std::error::Error;
 use std::collections::HashMap;
 use pathfinder_geometry::transform2d::Transform2F;
@@ -101,21 +103,13 @@ pub fn read_cff(data: &[u8]) -> R<Cff> {
     let (i, _offSize) = be_u8(i)?;
     let (i, _) = take(hdrSize - 4)(i)?;
     
-    println!("name_index");
-    let (i, name_index) = index(i)?;
-    
-    println!("dict_index");
+    let (i, _name_index) = index(i)?;
     let (i, dict_index) = index(i)?;
-    
-    println!("string_index");
     let (i, string_index) = index(i)?;
-    
-    println!("subroutines");
     let (i, subroutines) = index(i)?;
     
     Ok((i, Cff {
         data,
-        name_index,
         dict_index,
         string_index,
         subroutines
@@ -132,7 +126,6 @@ fn bias(num: usize) -> i32 {
 }
 pub struct Cff<'a> {
     data: &'a [u8],
-    name_index: Index<'a>,
     dict_index: Index<'a>,
     string_index: Index<'a>,
     subroutines: Index<'a>,
@@ -533,9 +526,6 @@ fn operator(input: &[u8]) -> R<Operator> {
     Ok((i, v))
 }
 
-type Card8 = u8;
-type Card16 = u16;
-type OffSize = u8;
 type SID = u16;
 
 #[derive(Debug)]

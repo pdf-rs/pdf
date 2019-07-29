@@ -62,9 +62,7 @@ impl Dictionary {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
-        let v = self.dict.remove(key);
-        debug!("{} -> {:?}", key, v);
-        v
+        self.dict.remove(key)
     }
     /// like remove, but takes the name of the calling type and returns `PdfError::MissingEntry` if the entry is not found
     pub fn require(&mut self, typ: &'static str, key: &str) -> Result<Primitive> {

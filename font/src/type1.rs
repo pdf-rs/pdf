@@ -12,7 +12,6 @@ use crate::postscript::{Vm, RefItem};
 use crate::eexec::Decoder;
 
 pub struct Type1Font {
-    vm: Vm,
     glyphs: IndexMap<u32, Glyph>, // codepoint -> glyph
     names: HashMap<String, u32>, // name -> glyph id
     font_matrix: Transform2F
@@ -115,8 +114,7 @@ impl Type1Font {
         Type1Font {
             font_matrix: Transform2F::row_major(a, b, c, d, e, f),
             glyphs,
-            names,
-            vm
+            names
         }
     }
 }
