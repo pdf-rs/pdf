@@ -1,9 +1,9 @@
 use std::error::Error;
 use std::collections::HashMap;
 use pathfinder_geometry::transform2d::Transform2F;
-use crate::{Font, BorrowedFont, Glyph, Glyphs, Value, Context, State, type1, type2, IResultExt, R};
+use crate::{Font, BorrowedFont, Glyph, Value, Context, State, type1, type2, IResultExt, R};
 use nom::{
-    number::complete::{be_u8, be_i8, be_u16, be_i16, be_u24, be_u32, be_i32},
+    number::complete::{be_u8, be_u16, be_i16, be_u24, be_u32, be_i32},
     bytes::complete::{take},
     multi::{count, many0},
     combinator::map,

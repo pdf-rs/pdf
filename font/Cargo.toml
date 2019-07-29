@@ -10,11 +10,9 @@ edition = "2018"
 path = "../encoding"
 
 [dependencies]
-sfnt = "0.12"
 pathfinder_canvas = {git = "https://github.com/s3bk/pathfinder/" }
 pathfinder_export = { git = "https://github.com/s3bk/pathfinder/" }
 pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
-stb_truetype = { git = "https://github.com/s3bk/stb_truetype" }
 nom = "5.0"
 log = "*"
 env_logger = "*"

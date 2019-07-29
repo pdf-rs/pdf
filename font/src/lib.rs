@@ -7,10 +7,9 @@ use pathfinder_geometry::vector::Vector2F;
 use pathfinder_geometry::transform2d::Transform2F;
 use std::fmt;
 use std::borrow::Cow;
-use std::path::Path;
 use std::convert::TryInto;
 use nom::{IResult, Err::*, error::VerboseError};
-use tuple::{TupleElements, Map};
+use tuple::{TupleElements};
 use encoding::Encoding;
 
 #[derive(Clone)]
@@ -267,8 +266,8 @@ pub fn parse<'a>(data: &'a [u8]) -> Box<dyn BorrowedFont<'a> + 'a> {
     info!("font magic: {:?}", magic);
     match magic {
         &[0x80, 1, _, _] => Box::new(Type1Font::parse_pfb(data)) as _,
-        b"OTTO" | [0,1,0,0] | [1,0,0,0] => parse_opentype(data, 0),
-        b"ttcf" | b"typ1" => Box::new(TrueTypeFont::parse(data, 0)) as _,
+        b"OTTO" | [0,1,0,0] => parse_opentype(data, 0),
+        b"ttcf" | b"typ1" => unimplemented!(), // Box::new(TrueTypeFont::parse(data, 0)) as _,
         b"%!PS" => Box::new(Type1Font::parse_postscript(data)) as _,
         &[1, _, _, _] => Box::new(CffFont::parse(data, 0)) as _,
         magic => panic!("unknown magic {:?}", magic)
