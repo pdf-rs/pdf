@@ -133,7 +133,6 @@ impl<'a> TextState<'a> {
             let glyph = font.glyphs.get(gid as u32).unwrap();
             
             let transform = base * self.text_matrix * tr;
-            debug!("transform: {:?}", transform);
             canvas.set_current_transform(&transform);
             canvas.fill_path(glyph.path.clone());
             
@@ -292,7 +291,6 @@ impl Cache {
         canvas.stroke_rect(RectF::new(Vector2F::default(), rect.size()));
         let root_tansformation = Transform2F::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
         canvas.set_current_transform(&root_tansformation);
-        debug!("transform: {:?}", canvas.current_transform());
         
         // make sure all fonts are in the cache, so we can reference them
         for font in resources.fonts.values() {

@@ -3,7 +3,7 @@
 use std::convert::TryInto;
 use std::collections::HashMap;
 use crate::{CffFont, TrueTypeFont, BorrowedFont, R, IResultExt};
-use crate::parsers::iter;
+use crate::parsers::iterator;
 use nom::{
     number::complete::{be_u8, be_i16, be_u16, be_i64, be_i32, be_u32},
     multi::{count},
@@ -119,7 +119,7 @@ pub fn parse_cmap(input: &[u8]) -> R<HashMap<u32, u16>> {
     let (i, _version) = be_u16(input)?;
     let (i, num_tables) = be_u16(i)?;
     
-    let offset = iter(i, tuple((be_u16, be_u16, be_u32))).take(num_tables as usize)
+    let offset = iterator(i, tuple((be_u16, be_u16, be_u32))).take(num_tables as usize)
         .filter_map(|entry| match entry {
             (0, _, off) | (3, 10, off) | (3, 1, off) => Some(off),
             _ => None
@@ -135,7 +135,7 @@ pub fn parse_cmap(input: &[u8]) -> R<HashMap<u32, u16>> {
         match format {
             0 => {
                 let (i, _language) = be_u16(data)?;
-                for (code, gid) in iter(i, be_u8).enumerate() {
+                for (code, gid) in iterator(i, be_u8).enumerate() {
                     if code != 0 {
                         cmap.insert(code as u32, gid as u16);
                     }
@@ -153,10 +153,10 @@ pub fn parse_cmap(input: &[u8]) -> R<HashMap<u32, u16>> {
                 let (i, idDelta) = take(segCountX2)(i)?;
                 let (glyph_data, idRangeOffset) = take(segCountX2)(i)?;
                 for (n, T4(start, end, delta, offset)) in T4(
-                    iter(startCode, be_u16),
-                    iter(endCode, be_u16),
-                    iter(idDelta, be_u16),
-                    iter(idRangeOffset, be_u16)
+                    iterator(startCode, be_u16),
+                    iterator(endCode, be_u16),
+                    iterator(idDelta, be_u16),
+                    iterator(idRangeOffset, be_u16)
                 ).into_iter().enumerate() {
                     if start == 0xFFFF && end == 0xFFFF {
                         break;

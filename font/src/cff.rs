@@ -77,7 +77,7 @@ impl<'a> Font for CffFont<'a> {
     }
     fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
         match self.codepoint_map.get(codepoint as usize) {
-            None | Some(&0) => None,
+            None => None,
             Some(&n) => Some(n as u32 + 1)
         }
     }

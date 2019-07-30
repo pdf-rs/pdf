@@ -1,11 +1,10 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
-use std;
 use std::fs;
-use std::{str};
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::path::Path;
 
 use crate as pdf;
 use crate::error::*;
@@ -145,7 +144,7 @@ impl<B: Backend> Resolve for File<B> {
     }
 }
 impl File<Vec<u8>> {
-    pub fn open(path: &str) -> Result<Self> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::from_data(fs::read(path)?)
     }
 }

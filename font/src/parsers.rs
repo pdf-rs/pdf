@@ -252,22 +252,22 @@ pub fn token(i: &[u8]) -> R<Token> {
     )(i)
 }
 
-pub struct ParserIter<'a, T, F> {
+pub struct ParserIterator<'a, T, F> {
     parser: F,
     input: &'a [u8],
     _m: PhantomData<T>
 }
-pub fn iter<'a, T, F>(input: &'a [u8], parser: F) -> ParserIter<'a, T, F> where
+pub fn iterator<'a, T, F>(input: &'a [u8], parser: F) -> ParserIterator<'a, T, F> where
     F: Fn(&'a [u8]) -> R<'a, T>
 {
-    ParserIter { parser, input, _m: PhantomData }
+    ParserIterator { parser, input, _m: PhantomData }
 }
-impl<'a, T, F> ParserIter<'a, T, F> {
+impl<'a, T, F> ParserIterator<'a, T, F> {
     pub fn input(&self) -> &'a [u8] {
         self.input
     }
 }
-impl<'a, T, F> Iterator for ParserIter<'a, T, F> where
+impl<'a, T, F> Iterator for ParserIterator<'a, T, F> where
     F: Fn(&'a [u8]) -> R<'a, T>
 {
     type Item = T;
