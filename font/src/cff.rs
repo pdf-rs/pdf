@@ -2,7 +2,9 @@
 
 use std::error::Error;
 use std::collections::HashMap;
+use std::iter::once;
 use pathfinder_geometry::transform2d::Transform2F;
+use pathfinder_canvas::Path2D;
 use crate::{Font, BorrowedFont, Glyph, Value, Context, State, type1, type2, IResultExt, R};
 use nom::{
     number::complete::{be_u8, be_u16, be_i16, be_u24, be_u32, be_i32},
@@ -16,14 +18,15 @@ use nom::{
 use encoding::{Encoding};
 
 pub struct CffFont<'a> {
-    private_dict: HashMap<Operator, Vec<Value>>,
     char_strings: Index<'a>,
     char_string_type: CharstringType,
     context: Context<'a>,
     font_matrix: Transform2F,
     codepoint_map: [u16; 256],  // codepoint -> glyph index
     name_map: HashMap<&'a str, u16>,
-    encoding: Option<Encoding>
+    encoding: Option<Encoding>,
+    default_width: f32,
+    nominal_width: f32
 }
 
 impl<'a> CffFont<'a> {
@@ -50,6 +53,13 @@ impl<'a> Font for CffFont<'a> {
         self.font_matrix
     }
     fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
+        if id == 0 {
+            return Ok(Glyph {
+                width: self.default_width,
+                path: Path2D::new()
+            });
+        }
+    
         let mut state = State::new();
         debug!("charstring for glyph {}", id);
         let data = self.char_strings.get(id).expect("no charstring for glyph");
@@ -64,10 +74,8 @@ impl<'a> Font for CffFont<'a> {
         debug!("glyph {} {:?} {:?}", id, state.char_width, state.delta_width);
         let width = match (state.char_width, state.delta_width) {
             (Some(w), None) => w,
-            (None, None) =>
-                self.private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
-            (None, Some(delta)) =>
-                delta + self.private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.),
+            (None, None) => self.default_width,
+            (None, Some(delta)) => delta + self.nominal_width,
             (Some(_), Some(_)) => panic!("BUG: both char_width and delta_width set")
         };
         Ok(Glyph {
@@ -77,18 +85,21 @@ impl<'a> Font for CffFont<'a> {
     }
     fn gid_for_codepoint(&self, codepoint: u32) -> Option<u32> {
         match self.codepoint_map.get(codepoint as usize) {
-            None => None,
-            Some(&n) => Some(n as u32 + 1)
+            None | Some(&0) => None,
+            Some(&n) => Some(n as u32)
         }
     }
     fn gid_for_name(&self, name: &str) -> Option<u32> {
         match self.name_map.get(name) {
             None => None,
-            Some(&gid) => Some(gid as u32 + 1)
+            Some(&gid) => Some(gid as u32)
         }
     }
     fn encoding(&self) -> Option<Encoding> {
         self.encoding
+    }
+    fn get_notdef_gid(&self) -> u32 {
+        0
     }
 }
 impl<'a> BorrowedFont<'a> for CffFont<'a> {}
@@ -145,6 +156,8 @@ impl<'a> Cff<'a> {
         
         let offset = top_dict[&Operator::CharStrings][0].to_int() as usize;
         let char_strings = index(self.data.get(offset ..).unwrap()).get();
+        
+        // num glyphs includes glyph 0 (.notdef)
         let num_glyphs = char_strings.len() as usize;
         
         let n = top_dict.get(&Operator::CharstringType).map(|v| v[0].to_int()).unwrap_or(2);
@@ -162,24 +175,25 @@ impl<'a> Cff<'a> {
                 ::std::str::from_utf8(self.string_index.get(sid as u32 - STANDARD_STRINGS.len() as u32).expect("no such string")).expect("Invalid glyph name")
             );
         
-        // gid(index) -> sid
+        // index = gid - 1 -> sid
         let sids: Vec<SID> = match charset {
             Charset::Continous(sids) => sids,
             Charset::Ranges(ranges) => ranges.into_iter()
                 .flat_map(|(sid, num)| (sid .. sid + num + 1))
                 .collect(),
         };
-        let sid_map: HashMap<SID, u16> = sids.iter().enumerate()
-            .map(|(gid, &sid)| (sid as u16, gid as u16))
+        // sid -> gid
+        let sid_map: HashMap<SID, u16> = once(0).chain(sids.iter().cloned()).enumerate()
+            .map(|(gid, sid)| (sid as u16, gid as u16))
+            .inspect(|&(sid, gid)| debug!("sid {} ({}) -> gid {}", sid, glyph_name(sid), gid))
+            .collect();
+        let name_map: HashMap<_, _> = once(0).chain(sids.iter().cloned()).enumerate()
+            .map(|(gid, sid)| (glyph_name(sid), gid as u16))
             .collect();
         
-        let name_map: HashMap<_, _> = sids.iter().enumerate()
-            .map(|(gid, &sid)| (glyph_name(sid), gid as u16))
-            .collect();
-        
-        let build_default = |sids: &[SID; 256]| -> [u16; 256] {
+        let build_default = |encoding: &[SID; 256]| -> [u16; 256] {
             let mut cmap = [0u16; 256];
-            for (codepoint, sid) in sids.iter().enumerate() {
+            for (codepoint, sid) in encoding.iter().enumerate() {
                 if let Some(&gid) = sid_map.get(sid) {
                     cmap[codepoint as usize] = gid;
                 }
@@ -194,13 +208,14 @@ impl<'a> Cff<'a> {
                 => (build_default(&EXPERT_ENCODING), Some(Encoding::AdobeExpert)),
             Some(offset) => {
                 let mut cmap = [0u16; 256];
-                let (codepoints, supplement) = encoding(self.data.get(offset as _ ..).unwrap()).get();
+                let (codepoints, supplement) = parse_encoding(self.data.get(offset as _ ..).unwrap()).get();
+                // encodings start at gid 1
                 match codepoints {
                     GlyphEncoding::Continous(codepoints) => codepoints.iter()
-                        .enumerate().for_each(|(gid, &codepoint)| cmap[codepoint as usize] = gid as _),
+                        .enumerate().for_each(|(gid, &codepoint)| cmap[codepoint as usize] = gid as u16 + 1),
                     GlyphEncoding::Ranges(ranges) => ranges.iter()
                         .flat_map(|&(first, left)| (first ..).take(left as usize + 1))
-                        .enumerate().for_each(|(gid, codepoint)| cmap[codepoint as usize] = gid as _),
+                        .enumerate().for_each(|(gid, codepoint)| cmap[codepoint as usize] = gid as u16 + 1),
                 }
                 supplement.iter()
                     .for_each(|&(codepoint, sid)| cmap[codepoint as usize] = sid_map[&sid]);
@@ -211,7 +226,7 @@ impl<'a> Cff<'a> {
         debug!("cmap:");
         for (i, &gid) in cmap.iter().enumerate() {
             if gid != 0 {
-                let sid = sids[gid as usize];
+                let sid = sids[gid as usize - 1];
                 debug!("{} -> gid={}, sid={}, name={}", i, gid, sid, glyph_name(sid));
             }
         }
@@ -255,15 +270,19 @@ impl<'a> Cff<'a> {
             global_subr_bias
         };
         
+        let default_width = private_dict.get(&Operator::DefaultWidthX).map(|a| a[0].to_float()).unwrap_or(0.);
+        let nominal_width = private_dict.get(&Operator::NominalWidthX).map(|a| a[0].to_float()).unwrap_or(0.);
+        
         CffFont {
-            private_dict,
             char_strings,
             char_string_type,
             context,
             font_matrix,
             codepoint_map: cmap,
             name_map,
-            encoding
+            encoding,
+            default_width,
+            nominal_width
         }
     }
 }
@@ -578,7 +597,7 @@ enum GlyphEncoding {
     Ranges(Vec<(u8, u8)>), // start, num-1
 }
 
-fn encoding(i: &[u8]) -> R<(GlyphEncoding, Vec<(u8, SID)>)> {
+fn parse_encoding(i: &[u8]) -> R<(GlyphEncoding, Vec<(u8, SID)>)> {
     let (i, format) = be_u8(i)?;
     
     let (i, encoding) = match format & 0x7F {
