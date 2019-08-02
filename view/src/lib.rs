@@ -107,6 +107,9 @@ impl<'a> TextState<'a> {
             knockout: 0.
         }
     }
+    fn reset_matrix(&mut self) {
+        self.set_matrix(Transform2F::default());
+    }
     fn translate(&mut self, v: Vector2F) {
         let m = self.line_matrix * Transform2F::from_translation(v);
         self.set_matrix(m);
@@ -133,6 +136,7 @@ impl<'a> TextState<'a> {
             let glyph = font.glyphs.get(gid as u32).unwrap();
             
             let transform = base * self.text_matrix * tr;
+            //debug!("transform for glyph {} (width={}): {:?}", gid, glyph.width, transform);
             canvas.set_current_transform(&transform);
             canvas.fill_path(glyph.path.clone());
             
@@ -140,7 +144,7 @@ impl<'a> TextState<'a> {
                 true => self.word_space,
                 false => self.char_space
             };
-            let advance = dx + tr.m11() * glyph.width;
+            let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
         
@@ -165,6 +169,7 @@ impl<'a> TextState<'a> {
         }
     }
     fn advance(&mut self, delta: f32) {
+        //debug!("advance by {}", delta);
         let advance = delta * self.font_size * self.horiz_scale;
         self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
     }
@@ -449,7 +454,7 @@ impl Cache {
                 "cs" => { // color space
                 }
                 "BT" => {
-                    state = TextState::new();
+                    state.reset_matrix();
                 }
                 "ET" => {
                     state.font = None;

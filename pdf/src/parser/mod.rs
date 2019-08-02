@@ -215,7 +215,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<PdfStr
         }
         // It might just be the dictionary in front of a stream.
         if lexer.peek()?.equals(b"stream") {
-            lexer.next()?;
+            lexer.next_stream()?;
 
             // Get length - look up in `resolve_fn` if necessary
             let length = match dict.get("Length") {
@@ -226,7 +226,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<PdfStr
             };
 
             
-            let stream_substr = lexer.offset_pos(length as usize);
+            let stream_substr = lexer.read_n(length as usize);
             // Finish
             lexer.next_expect("endstream")?;
 

@@ -53,13 +53,6 @@ impl<'a> Font for CffFont<'a> {
         self.font_matrix
     }
     fn glyph(&self, id: u32) -> Result<Glyph, Box<dyn Error>> {
-        if id == 0 {
-            return Ok(Glyph {
-                width: self.default_width,
-                path: Path2D::new()
-            });
-        }
-    
         let mut state = State::new();
         debug!("charstring for glyph {}", id);
         let data = self.char_strings.get(id).expect("no charstring for glyph");
@@ -167,21 +160,25 @@ impl<'a> Cff<'a> {
             _ => panic!("invalid charstring type")
         };
         
-        let charset_offset = top_dict[&Operator::Charset][0].to_int() as usize;
-        let charset = charset(self.data.get(charset_offset ..).unwrap(), num_glyphs).get();
-        
         let glyph_name = |sid: SID|
             STANDARD_STRINGS.get(sid as usize).cloned().unwrap_or_else(||
                 ::std::str::from_utf8(self.string_index.get(sid as u32 - STANDARD_STRINGS.len() as u32).expect("no such string")).expect("Invalid glyph name")
             );
-        
-        // index = gid - 1 -> sid
-        let sids: Vec<SID> = match charset {
-            Charset::Continous(sids) => sids,
-            Charset::Ranges(ranges) => ranges.into_iter()
-                .flat_map(|(sid, num)| (sid .. sid + num + 1))
-                .collect(),
+        let charset_offset = top_dict.get(&Operator::Charset).map(|v| v[0].to_int() as usize).unwrap_or(0);
+        let sids: Vec<SID> = if charset_offset != 0 {
+            let charset = charset(self.data.get(charset_offset ..).unwrap(), num_glyphs).get();
+            
+            // index = gid - 1 -> sid
+            match charset {
+                Charset::Continous(sids) => sids,
+                Charset::Ranges(ranges) => ranges.into_iter()
+                    .flat_map(|(sid, num)| (sid .. sid + num + 1))
+                    .collect(),
+            }
+        } else {
+            Vec::new()
         };
+        
         // sid -> gid
         let sid_map: HashMap<SID, u16> = once(0).chain(sids.iter().cloned()).enumerate()
             .map(|(gid, sid)| (sid as u16, gid as u16))
@@ -190,7 +187,7 @@ impl<'a> Cff<'a> {
         let name_map: HashMap<_, _> = once(0).chain(sids.iter().cloned()).enumerate()
             .map(|(gid, sid)| (glyph_name(sid), gid as u16))
             .collect();
-        
+    
         let build_default = |encoding: &[SID; 256]| -> [u16; 256] {
             let mut cmap = [0u16; 256];
             for (codepoint, sid) in encoding.iter().enumerate() {
