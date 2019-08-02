@@ -9,6 +9,8 @@
 // except according to those terms.
 
 use pathfinder_geometry::vector::{Vector2F};
+use pathfinder_geometry::rect::{RectF};
+use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_content::color::ColorF;
 use pathfinder_gl::{GLDevice, GLVersion};
 use pathfinder_gpu::resources::{EmbeddedResourceLoader};
@@ -16,7 +18,7 @@ use pathfinder_renderer::concurrent::rayon::RayonExecutor;
 use pathfinder_renderer::concurrent::scene_proxy::SceneProxy;
 use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererOptions};
 use pathfinder_renderer::gpu::renderer::Renderer;
-use pathfinder_renderer::options::BuildOptions;
+use pathfinder_renderer::options::{BuildOptions, RenderTransform};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
@@ -49,9 +51,9 @@ fn main() -> Result<(), PdfError> {
     gl_attributes.set_context_profile(GLProfile::Core);
     gl_attributes.set_context_version(3, 3);
 
-    let scale = Vector2F::splat(1.0);
+    let mut scale = Vector2F::splat(2.0);
     // Open a window.
-    let window_size = (size * scale).to_i32();
+    let mut window_size = (size * scale).to_i32();
     let window = video.window("Probably Distorted File", window_size.x() as u32, window_size.y() as u32)
                       .opengl()
                       .build()
@@ -69,7 +71,15 @@ fn main() -> Result<(), PdfError> {
                                      RendererOptions { background_color: Some(ColorF::white()) });
 
     let proxy = SceneProxy::from_scene(scene, RayonExecutor);
-    proxy.build_and_render(&mut renderer, BuildOptions::default());
+    proxy.set_view_box(
+        RectF::new(Vector2F::default(), window_size.to_f32())
+    );
+    let mut options = BuildOptions {
+        transform: RenderTransform::Transform2D(Transform2F::from_scale(scale)),
+        dilation: Vector2F::default(),
+        subpixel_aa_enabled: false
+    };
+    proxy.build_and_render(&mut renderer, options.clone());
     window.gl_swap_window();
 
     // Wait for a keypress.
@@ -92,14 +102,31 @@ fn main() -> Result<(), PdfError> {
                             needs_update = true;
                         }
                     }
+                    Keycode::Plus => {
+                        scale = scale * Vector2F::splat(2.0f32.sqrt());
+                        needs_update = true;
+                    }
+                    Keycode::Minus => {
+                        scale = scale * Vector2F::splat(0.5f32.sqrt());
+                        needs_update = true;
+                    }
                     _ => {}
                 }
             }
             Event::KeyUp { .. } => {}
             Event::Window { win_event: WindowEvent::Exposed, .. } => {
-                proxy.build_and_render(&mut renderer, BuildOptions::default());
+                proxy.build_and_render(&mut renderer, options.clone());
                 window.gl_swap_window();
             }
+            /*
+            Event::WindowResized(new_size) => {
+                window_size = new_size;
+                proxy.set_view_box(
+                    RectF::new(Vector2F::default(), window_size.to_f32())
+                );
+                renderer.set_main_framebuffer_size(window_size.device_size());
+                needs_update = true;
+            }*/
             e => println!("{:?}", e)
         }
         if needs_update {
@@ -107,7 +134,11 @@ fn main() -> Result<(), PdfError> {
             let page = file.get_page(current_page)?;
             let scene = cache.render_page(&file, &page)?;
             proxy.replace_scene(scene);
-            proxy.build_and_render(&mut renderer, BuildOptions::default());
+            proxy.set_view_box(
+                RectF::new(Vector2F::default(), window_size.to_f32())
+            );
+            options.transform = RenderTransform::Transform2D(Transform2F::from_scale(scale));
+            proxy.build_and_render(&mut renderer, options.clone());
             window.gl_swap_window();
         }
     }

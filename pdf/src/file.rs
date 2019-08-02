@@ -33,42 +33,6 @@ impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
     }
 }
 
-pub struct PagesIterator<'a, B: Backend> {
-    file: &'a File<B>,
-    stack: Vec<(Rc<PagesNode>, usize)>, // points to nodes that have not been processed yet,
-    error: bool
-}
-impl<'a, B: Backend> Iterator for PagesIterator<'a, B> {
-    type Item = Result<PageRc>;
-    fn next(&mut self) -> Option<Result<PageRc>> {
-        if self.error {
-            return None;
-        }
-        while let Some((node, pos)) = self.stack.pop() {
-            if let PagesNode::Tree(ref tree) = *node {
-                if pos < tree.kids.len() {
-                    // push the next index on the stack ...
-                    self.stack.push((node.clone(), pos+1));
-                    
-                    let rc = match self.file.get(tree.kids[pos]) {
-                        Ok(rc) => rc,
-                        Err(e) => {
-                            self.error = true;
-                            return Some(Err(e));
-                        }
-                    };
-                    match *rc {
-                        PagesNode::Tree(_) => self.stack.push((rc, 0)), // push the child on the stack
-                        PagesNode::Leaf(_) => return Some(Ok(PageRc(rc)))
-                    }
-                }
-            }
-        }
-        
-        None
-    }
-}
-
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
     cache: RefCell<HashMap<PlainRef, Any>>,
@@ -157,7 +121,6 @@ impl<B: Backend> File<B> {
         let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &storage)?;
         if let Some(ref dict) = trailer.encrypt_dict {
             storage.decoder = Some(Decoder::default(&dict, trailer.id[0].as_bytes())?);
-            info!("decrypting using {:?}", storage.decoder);
         }
         
         Ok(File {
@@ -171,25 +134,24 @@ impl<B: Backend> File<B> {
         &self.trailer.root
     }
     
-    pub fn pages(&self) -> PagesIterator<B> {
-        PagesIterator {
-            error: false,
-            file: self,
-            stack: vec![(self.get_root().pages.clone(), 0)]
-        }
+    pub fn pages<'a>(&'a self) -> impl Iterator<Item=Result<PageRc>> + 'a {
+        (0 .. self.num_pages()).map(move |n| self.get_page(n))
     }
-    pub fn num_pages(&self) -> Result<u32> {
-        match *self.trailer.root.pages {
-            PagesNode::Tree(ref tree) => Ok(tree.count as u32),
-            PagesNode::Leaf(_) => Ok(1)
+    pub fn num_pages(&self) -> u32 {
+        match self.trailer.root.pages {
+            PagesNode::Tree(ref tree) => tree.count,
+            PagesNode::Leaf(_) => 1
         }
     }
     
     pub fn get_page(&self, n: u32) -> Result<PageRc> {
-        if n >= self.num_pages()? {
-            return Err(PdfError::PageOutOfBounds {page_nr: n, max: self.num_pages()?});
+        match self.trailer.root.pages {
+            PagesNode::Tree(ref tree) => {
+                tree.page(self, n)
+            }
+            PagesNode::Leaf(ref page) if n == 0 => Ok(page.clone()),
+            _ => Err(PdfError::PageOutOfBounds {page_nr: n, max: 1})
         }
-        self.pages().nth(n as usize).unwrap()
     }
 
     /*

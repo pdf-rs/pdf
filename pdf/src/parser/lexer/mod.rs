@@ -20,6 +20,48 @@ pub struct Lexer<'a> {
     buf: &'a [u8],
 }
 
+// find the position where condition(data[pos-1]) == false and condition(data[pos]) == true
+#[inline]
+fn boundary_rev(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usize {
+    match data[.. pos].iter().rposition(|&b| !condition(b)) {
+        Some(start) => start + 1,
+        None => 0
+    }
+}
+#[test]
+fn test_boundary_rev() {
+    assert_eq!(boundary_rev(&*b" hello", 3, not(is_whitespace)), 1);
+    assert_eq!(boundary_rev(&*b" hello", 3, is_whitespace), 3);
+}
+
+// find the position where condition(data[pos-1]) == true and condition(data[pos]) == false
+#[inline]
+fn boundary(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usize {
+    match data[pos ..].iter().position(|&b| !condition(b)) {
+        Some(start) => pos + start,
+        None => data.len()
+    }
+}
+#[test]
+fn test_boundary() {
+    assert_eq!(boundary(&*b" hello ", 3, not(is_whitespace)), 6);
+    assert_eq!(boundary(&*b" hello ", 3, is_whitespace), 3);
+    assert_eq!(boundary(&*b"01234  7orld", 5, is_whitespace), 7);
+    assert_eq!(boundary(&*b"01234  7orld", 7, is_whitespace), 7);
+    assert_eq!(boundary(&*b"q\n", 1, is_whitespace), 2);
+}
+
+#[inline]
+fn is_whitespace(b: u8) -> bool {
+    match b {
+        b' ' | b'\r' | b'\n' | b'\t' => true,
+        _ => false
+    }
+}
+#[inline]
+fn not<T>(f: impl Fn(T) -> bool) -> impl Fn(T) -> bool {
+    move |t| !f(t)
+}
 impl<'a> Lexer<'a> {
     pub fn new(buf: &'a [u8]) -> Lexer<'a> {
         Lexer {
@@ -30,31 +72,53 @@ impl<'a> Lexer<'a> {
 
     /// Returns next lexeme. Lexer moves to the next byte after the lexeme. (needs to be tested)
     pub fn next(&mut self) -> Result<Substr<'a>> {
-        let (lexeme, pos) = self.next_word(true)?;
+        let (lexeme, pos) = self.next_word()?;
         self.pos = pos;
         Ok(lexeme)
     }
 
+    /// consume the whitespace sequence following the stream start
+    pub fn next_stream(&mut self) -> Result<()> {
+        let pos = self.skip_whitespace(self.pos)?;
+        if !self.buf[pos ..].starts_with(b"stream") {
+            // bail!("next token isn't 'stream'");
+        }
+        
+        let b0 = self.buf[pos + 6];
+        if b0 == b'\n' {
+            self.pos = pos + 7;
+        } else if b0 == b'\r' {
+            let b1 = self.buf[pos + 7];
+            if b1 != b'\n' {
+                panic!("invalid whitespace following 'stream'");
+                // bail!("invalid whitespace following 'stream'");
+            }
+            self.pos = pos + 8;
+        } else {
+            panic!("invalid whitespace");
+        }
+        Ok(())
+    }
     /// Gives previous lexeme. Lexer moves to the first byte of this lexeme. (needs to be tested)
     pub fn back(&mut self) -> Result<Substr<'a>> {
-        let (lexeme, pos) = self.next_word(false)?;
-        self.pos = pos;
-        Ok(lexeme)
+        //println!("back: {:?}", String::from_utf8_lossy(&self.buf[self.pos.saturating_sub(20) .. self.pos]));
+        
+        // first reverse until we find non-whitespace
+        let end_pos = boundary_rev(self.buf, self.pos, is_whitespace);
+        let start_pos = boundary_rev(self.buf, end_pos, not(is_whitespace));
+        self.pos = start_pos;
+        
+        Ok(self.new_substr(start_pos .. end_pos))
     }
 
     /// Look at the next lexeme. Will return empty substr if the next character is EOF.
     pub fn peek(&self) -> Result<Substr<'a>> {
-        match self.next_word(true) {
+        match self.next_word() {
             Ok((substr, _)) => Ok(substr),
             Err(PdfError::EOF) => Ok(self.new_substr(self.pos..self.pos)),
             Err(e) => Err(e),
         }
 
-    }
-
-    /// Returns previous lexeme without advancing position.
-    pub fn peek_back(&self) -> Result<Substr<'a>> {
-        Ok(self.next_word(false)?.0)
     }
 
     /// Returns `Ok` if the next lexeme matches `expected` - else `Err`.
@@ -63,32 +127,42 @@ impl<'a> Lexer<'a> {
         if word.equals(expected.as_bytes()) {
             Ok(())
         } else {
-            Err(PdfError::UnexpectedLexeme {pos: self.pos, lexeme: word.to_string(), expected: expected})
+            Err(PdfError::UnexpectedLexeme {
+                pos: self.pos,
+                lexeme: word.to_string(),
+                expected: expected
+            })
         }
     }
 
+    /// skip whitespaces and return the position of the first non-whitespace character
+    #[inline]
+    fn skip_whitespace(&self, pos: usize) -> Result<usize> {
+        // Move away from eventual whitespace
+        let pos = boundary(self.buf, pos, is_whitespace);
+        if pos >= self.buf.len() {
+            Err(PdfError::EOF)
+        } else {
+            Ok(pos)
+        }
+    }
 
     /// Used by next, peek and back - returns substring and new position
     /// If forward, places pointer at the next non-whitespace character.
     /// If backward, places pointer at the start of the current word.
     // TODO ^ backward case is actually not tested or.. thought about that well.
-    fn next_word(&self, forward: bool) -> Result<(Substr<'a>, usize)> {
-        let mut pos = self.pos;
-        
-        // Move away from eventual whitespace
-        while self.is_whitespace(pos) {
-            pos = self.advance_pos(pos, forward)?;
+    fn next_word(&self) -> Result<(Substr<'a>, usize)> {
+        if self.pos == self.buf.len() {
+            return Err(PdfError::EOF);
         }
-        
+        let mut pos = self.skip_whitespace(self.pos)?;
         while self.buf.get(pos) == Some(&b'%') {
             if let Some(off) = self.buf[pos+1..].iter().position(|&b| b == b'\n') {
                 pos += off+2;
             }
             
             // Move away from eventual whitespace
-            while self.is_whitespace(pos) {
-                pos = self.advance_pos(pos, forward)?;
-            }
+            pos = self.skip_whitespace(pos)?;
         }
         
         let start_pos = pos;
@@ -99,57 +173,47 @@ impl<'a> Lexer<'a> {
             // TODO +- 1
             if self.buf[pos] == b'<' && self.buf[pos+1] == b'<'
                 || self.buf[pos] == b'>' && self.buf[pos+1] == b'>' {
-                pos = self.advance_pos(pos, forward)?;
+                pos = self.advance_pos(pos)?;
 
             }
-            pos = self.advance_pos(pos, forward)?;
+            pos = self.advance_pos(pos)?;
             return Ok((self.new_substr(start_pos..pos), pos));
         }
 
         // Read to past the end of lexeme
         while !self.is_whitespace(pos) && !self.is_delimiter(pos) {
-            let new_pos = self.advance_pos(pos, forward)?;
-            if new_pos == pos {
-                break;
-            } else {
-                pos = new_pos;
-            }
+            pos = self.advance_pos(pos)?;
         }
-
         let result = self.new_substr(start_pos..pos);
 
         // Move away from whitespace again
-        while self.is_whitespace(pos) {
-            pos = self.advance_pos(pos, forward)?;
-        }
+        //pos = self.skip_whitespace(pos)?;
         Ok((result, pos))
     }
 
     /// Just a helper for next_word.
-    fn advance_pos(&self, pos: usize, forward: bool) -> Result<usize> {
-        if forward {
-            if pos < self.buf.len() {
-                Ok(pos + 1)
-            } else {
-                Err(PdfError::EOF)
-            }
-        } else if pos > 0 {
-            Ok(pos - 1)
+    #[inline]
+    fn advance_pos(&self, pos: usize) -> Result<usize> {
+        if pos < self.buf.len() {
+            Ok(pos + 1)
         } else {
             Err(PdfError::EOF)
         }
     }
 
+    #[inline]
     pub fn next_as<T>(&mut self) -> Result<T>
         where T: FromStr, T::Err: std::error::Error + 'static
     {
         self.next().and_then(|word| word.to::<T>())
     }
 
+    #[inline]
     pub fn get_pos(&self) -> usize {
         self.pos
     }
 
+    #[inline]
     pub fn new_substr(&self, mut range: Range<usize>) -> Substr<'a> {
         // if the range is backward, fix it
         // start is inclusive, end is exclusive. keep that in mind
@@ -166,6 +230,7 @@ impl<'a> Lexer<'a> {
 
 
     /// Just a helper function for set_pos, set_pos_from_end and offset_pos.
+    #[inline]
     fn seek(&mut self, new_pos: SeekFrom) -> Substr<'a> {
         let wanted_pos;
         match new_pos {
@@ -184,14 +249,17 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns the substr between the old and new positions
+    #[inline]
     pub fn set_pos(&mut self, new_pos: usize) -> Substr<'a> {
         self.seek(SeekFrom::Start(new_pos as u64))
     }
     /// Returns the substr between the old and new positions
+    #[inline]
     pub fn set_pos_from_end(&mut self, new_pos: usize) -> Substr<'a> {
         self.seek(SeekFrom::End(new_pos as i64))
     }
     /// Returns the substr between the old and new positions
+    #[inline]
     pub fn offset_pos(&mut self, offset: usize) -> Substr<'a> {
         self.seek(SeekFrom::Current(offset as i64))
     }
@@ -274,10 +342,12 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns slice from current position to end.
+    #[inline]
     pub fn get_remaining_slice(&self) -> &[u8] {
         &self.buf[self.pos..]
     }
 
+    #[inline]
     fn incr_pos(&mut self) -> bool {
         if self.pos >= self.buf.len() - 1 {
             false
@@ -286,17 +356,12 @@ impl<'a> Lexer<'a> {
             true
         }
     }
+    #[inline]
     fn is_whitespace(&self, pos: usize) -> bool {
-        if pos >= self.buf.len() {
-            false
-        } else {
-            self.buf[pos] == b' ' ||
-            self.buf[pos] == b'\r' ||
-            self.buf[pos] == b'\n' ||
-            self.buf[pos] == b'\t'
-        }
+        self.buf.get(pos).map(|&b| is_whitespace(b)).unwrap_or(false)
     }
 
+    #[inline]
     fn is_delimiter(&self, pos: usize) -> bool {
         self.buf.get(pos).map(|b| b"()<>[]{}/%".contains(&b)).unwrap_or(false)
     }
@@ -314,7 +379,7 @@ impl<'a> Substr<'a> {
     // into: S -> U. Cheap ownership transfer conversion.
 
     pub fn to_string(&self) -> String {
-        String::from(self.as_str())
+        String::from_utf8_lossy(self.as_slice()).into()
     }
     pub fn to_vec(&self) -> Vec<u8> {
         self.slice.to_vec()
@@ -337,13 +402,6 @@ impl<'a> Substr<'a> {
         }
     }
 
-    
-    pub fn as_str(&self) -> &str {
-        // TODO use from_utf8_lossy - it's safe
-        unsafe {
-            std::str::from_utf8_unchecked(self.slice)
-        }
-    }
     pub fn as_slice(&self) -> &'a [u8] {
         self.slice
     }

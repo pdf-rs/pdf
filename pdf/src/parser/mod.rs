@@ -61,7 +61,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         }
         // It might just be the dictionary in front of a stream.
         if lexer.peek()?.equals(b"stream") {
-            lexer.next()?;
+            lexer.next_stream()?;
 
             let length = match dict.get("Length") {
                 Some(&Primitive::Integer (n)) => n,
@@ -70,8 +70,8 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
             };
 
             
-            let stream_substr = lexer.offset_pos(length as usize);
-
+            let stream_substr = lexer.read_n(length as usize);
+            
             // Finish
             lexer.next_expect("endstream")?;
 
@@ -150,7 +150,6 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         };
         // Advance to end of string
         lexer.offset_pos(bytes_traversed as usize);
-
         // decrypt it
         if let Some(ctx) = ctx {
             ctx.decrypt(&mut string);

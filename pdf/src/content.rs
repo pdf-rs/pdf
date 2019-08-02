@@ -48,6 +48,7 @@ impl Content {
                     // Operand
                     buffer.push(obj)
                 }
+                Err(PdfError::EOF) => break,
                 Err(_) => {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);

@@ -23,6 +23,7 @@ pub struct Stream<I: Object=()> {
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn data(&self) -> Result<&[u8]> {
         self.decoded.get_or_try_init(|| {
+            debug!("compressed: {:?}...", &self.raw_data[.. self.raw_data.len().min(20)]);
             let mut data = Cow::Borrowed(&*self.raw_data);
             for filter in &self.info.filters {
                 data = match decode(&*data, filter) {
@@ -220,6 +221,7 @@ impl Object for ObjectStream {
 
         let mut offsets = Vec::new();
         {
+            debug!("parsing stream");
             let mut lexer = Lexer::new(stream.data()?);
             for _ in 0..(stream.info.num_objects as ObjNr) {
                 let _obj_nr = lexer.next()?.to::<ObjNr>()?;

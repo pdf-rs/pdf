@@ -2,7 +2,6 @@
 
 use std::io;
 use std::rc::Rc;
-use std::ops::Deref;
 
 use crate as pdf;
 use crate::object::*;
@@ -15,8 +14,8 @@ use crate::backend::Backend;
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
 pub enum PagesNode {
-    Tree (PageTree),
-    Leaf (Page),
+    Tree(Rc<PageTree>),
+    Leaf(Rc<Page>),
 }
 impl Object for PagesNode {
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
@@ -28,31 +27,34 @@ impl Object for PagesNode {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<PagesNode> {
         let dict = Dictionary::from_primitive(p, r)?;
         match dict["Type"].clone().to_name()?.as_str() {
-            "Page" => Ok(PagesNode::Leaf (Page::from_primitive(Primitive::Dictionary(dict), r)?)),
-            "Pages" => Ok(PagesNode::Tree (PageTree::from_primitive(Primitive::Dictionary(dict), r)?)),
+            "Page" => Ok(PagesNode::Leaf (Object::from_primitive(Primitive::Dictionary(dict), r)?)),
+            "Pages" => Ok(PagesNode::Tree (Object::from_primitive(Primitive::Dictionary(dict), r)?)),
             other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct PageRc(pub Rc<PagesNode>);
-impl Deref for PageRc {
-    type Target = Page;
-    fn deref(&self) -> &Page {
-        match *self.0 {
-            PagesNode::Leaf(ref page) => page,
-            _ => panic!("PageRc that isn't a Page")
+/*
+use std::iter::once;
+use itertools::Either;
+// needs recursive types
+impl PagesNode {
+    pub fn pages<'a>(&'a self, resolve: &'a impl Resolve) -> impl Iterator<Item=Result<PageRc>> + 'a {
+        match self {
+            PagesNode::Tree(ref tree) => Either::Left(Box::new(tree.pages(resolve))),
+            PagesNode::Leaf(ref page) => Either::Right(once(Ok(PageRc(page.clone()))))
         }
     }
 }
+*/
+
+pub type PageRc = Rc<Page>;
 
 
 #[derive(Object, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: Rc<PagesNode>,
+    pub pages: PagesNode,
 // PageLabels: number_tree,
     #[pdf(key="Names")]
     pub names: Option<NameDictionary>,
@@ -92,8 +94,7 @@ pub struct PageTree {
     #[pdf(key="Kids")]
     pub kids:   Vec<Ref<PagesNode>>,
     #[pdf(key="Count")]
-    pub count:  i32,
-
+    pub count:  u32,
 
     /// Exists to be inherited to a 'Page' object. Note: *Inheritable*.
     // Note about inheritance..= if we wanted to 'inherit' things at the time of reading, we would
@@ -107,7 +108,39 @@ pub struct PageTree {
     #[pdf(key="CropBox")]
     pub crop_box:   Option<Rect>,
 }
-
+impl PageTree {
+    pub fn page(&self, resolve: &impl Resolve, page_nr: u32) -> Result<PageRc> {
+        let mut pos = 0;
+        for &kid in &self.kids {
+            let rc = resolve.get(kid)?;
+            match *rc {
+                PagesNode::Tree(ref tree) => {
+                    if (pos .. pos + tree.count).contains(&page_nr) {
+                        return tree.page(resolve, page_nr - pos);
+                    }
+                    pos += tree.count;
+                }
+                PagesNode::Leaf(ref page) => {
+                    if pos == page_nr {
+                        return Ok(page.clone());
+                    }
+                    pos += 1;
+                }
+            }
+        }
+        Err(PdfError::PageOutOfBounds {page_nr, max: pos})
+    }
+    /*
+    pub fn pages<'a>(&'a self, resolve: &'a impl Resolve) -> impl Iterator<Item=Result<PageRc>> + 'a {
+        self.kids.iter().flat_map(move |&r| {
+            match resolve.get(r) {
+                Ok(node) => Either::Left(node.pages(resolve)),
+                Err(e) => Either::Right(once(Err(e)))
+            }
+        })
+    }
+    */
+}
 #[derive(Object, Debug)]
 pub struct Page {
     #[pdf(key="Parent")]

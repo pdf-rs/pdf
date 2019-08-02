@@ -44,7 +44,7 @@ fn read_pages() {
 
                 let path = path.to_str().unwrap();
                 let file = run!(File::<Vec<u8>>::open(path));
-                for i in 0 .. file.num_pages().unwrap() {
+                for i in 0 .. file.num_pages() {
                     println!("\nRead page {}", i);
                     let _ = file.get_page(i);
                 }
