@@ -16,3 +16,8 @@ Currently we only have two very minimal examples `read` and `text`. However the 
 
 # Inspect
 There is a tool for visualizing a PDF file as an interactive hierarchy of primitives at [inspect-prim](https://github.com/pdf-rs/inspect-prim). Just clone and `cargo run`.
+
+# Viewer
+run it:
+  `cargo run -p view --release --bin pdf_view YOUR_FILE.pdf`
+Right now you can change pages with left and right arrow keys and zoom with '+' and '-'. Works for some files.
