@@ -38,6 +38,9 @@ impl<'a> Tables<'a> {
     pub fn get(&self, tag: &[u8; 4]) -> Option<&'a [u8]> {
         self.entries.iter().find(|&(t, _)| tag == t).map(|&(_, block)| block)
     }
+    pub fn entries<'b>(&'b self) -> impl Iterator<Item=([u8; 4], &'a [u8])> + 'b {
+        self.entries.iter().cloned()
+    }
 }
 // (tag, content)
 pub fn parse_tables(data: &[u8]) -> R<Tables> {

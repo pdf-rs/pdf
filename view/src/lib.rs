@@ -163,7 +163,7 @@ impl<'a> TextState<'a> {
             }
             
             self.add_glyphs(canvas, data.iter().map(|&b| {
-                let &gid = font.cmap.get(&(b as u16)).unwrap_or(&font.notdef);
+                let gid = font.cmap.get(&(b as u16)).cloned().unwrap_or(b as u32);
                 (gid, b == 0x20)
             }));
         }

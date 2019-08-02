@@ -211,7 +211,6 @@ impl<'a> Cff<'a> {
                 let mut cmap = [0u16; 256];
                 let (codepoints, supplement) = parse_encoding(self.data.get(offset as _ ..).unwrap()).get();
                 // encodings start at gid 1
-                dbg!(&codepoints, &supplement);
                 match codepoints {
                     GlyphEncoding::Continous(codepoints) => codepoints.iter()
                         .enumerate().for_each(|(gid, &codepoint)| cmap[codepoint as usize] = gid as u16 + 1),

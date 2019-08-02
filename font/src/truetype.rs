@@ -12,7 +12,7 @@ use nom::{
     sequence::tuple,
     multi::{count},
 };
-use crate::opentype::{parse_head, parse_maxp, parse_loca, parse_cmap, parse_hhea, parse_hmtx, Hmtx, Tables};
+use crate::opentype::{parse_tables, parse_head, parse_maxp, parse_loca, parse_cmap, parse_hhea, parse_hmtx, Hmtx, Tables};
 
 #[derive(Clone)]
 enum Shape {
@@ -29,6 +29,14 @@ pub struct TrueTypeFont<'a> {
     units_per_em: u16
 }
 impl<'a> TrueTypeFont<'a> {
+    pub fn parse(data: &'a [u8], idx: u32) -> TrueTypeFont<'a> {
+        let tables = parse_tables(data).get();
+        for (tag, _) in tables.entries() {
+            debug!("tag: {:?} ({:?})", tag, std::str::from_utf8(&tag));
+        }
+        let block = tables.get(b"glyf").expect("no glyph table in TrueType font");
+        TrueTypeFont::parse_glyf(block, tables)
+    }
     pub fn parse_glyf(data: &'a [u8], tables: Tables<'a>) -> Self {
         let head = parse_head(tables.get(b"head").expect("no head")).get();
         let maxp = parse_maxp(tables.get(b"maxp").expect("no maxp")).get();

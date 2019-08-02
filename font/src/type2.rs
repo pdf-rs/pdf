@@ -62,10 +62,10 @@ fn alternating_curve(s: &mut State, mut horizontal: bool) {
         horizontal = !horizontal;
     }
 }
-fn maybe_width(state: &mut State) {
+fn maybe_width(state: &mut State, cond: impl Fn(usize) -> bool) {
     if state.first_stack_clearing_operator {
         state.first_stack_clearing_operator = false;
-        if state.stack.len() % 2 == 1 {
+        if !cond(state.stack.len()) {
             let w = state.stack.remove(0);
             state.delta_width = Some(w.to_float());
         }
@@ -78,7 +78,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             0 => panic!("reserved"),
             1 => { // ⊦ y dy hstem (1) ⊦
                 debug!("hstem");
-                maybe_width(s);
+                maybe_width(s, |n| n == 2);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
@@ -86,14 +86,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             2 => panic!("reserved"),
             3 => { // ⊦ x dx vstem (3) ⊦
                 debug!("vstem");
-                maybe_width(s);
+                maybe_width(s, |n| n == 2);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
             }
             4 => { // ⊦ dy vmoveto (4) ⊦
                 debug!("vmoveto");
-                maybe_width(s);
+                maybe_width(s, |n| n == 1);
                 let p = s.current + v(0., s.stack[0]);
                 s.path.move_to(p);
                 s.stack.clear();
@@ -336,7 +336,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             13 => panic!("reserved"),
             14 => { //– endchar (14) ⊦
                 debug!("endchar");
-                maybe_width(s);
+                maybe_width(s, |n| n == 0);
                 s.path.close_path();
                 s.done = true;
                 i
@@ -344,14 +344,14 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             15 | 16 | 17 => panic!("reserved"),
             18 => { // |- y dy {dya dyb}* hstemhm (18) |-
                 debug!("hstemhm");
-                maybe_width(s);
+                maybe_width(s, |n| n % 2 == 0);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i
             }
             19 => { // |- hintmask (19 + mask) |-
                 debug!("hintmask");
-                maybe_width(s);
+                maybe_width(s, |n| n == 0);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 let (i, _) = take((s.stem_hints + 7) / 8)(i)?;
                 s.stack.clear();
@@ -359,7 +359,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             }
             20 => { // cntrmask |- cntrmask (20 + mask) |-
                 debug!("cntrmask");
-                maybe_width(s);
+                maybe_width(s, |n| n == 0);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 let (i, _) = take((s.stem_hints + 7) / 8)(i)?;
                 s.stack.clear();
@@ -367,7 +367,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             }
             21 => { // ⊦ dx dy rmoveto (21) ⊦
                 debug!("rmoveto");
-                maybe_width(s);
+                maybe_width(s, |n| n == 2);
                 let p = s.current + v(s.stack[0], s.stack[1]);
                 s.path.move_to(p);
                 s.current = p;
@@ -376,7 +376,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             }
             22 => { // ⊦ dx hmoveto (22) ⊦
                 debug!("hmoveto");
-                maybe_width(s);
+                maybe_width(s, |n| n == 1);
                 let p = s.current + v(s.stack[0], 0.);
                 s.path.move_to(p);
                 s.current = p;
@@ -385,7 +385,7 @@ pub fn charstring<'a, 'b>(mut input: &'a [u8], ctx: &'a Context<'a>, s: &'b mut 
             }
             23 => { // |- x dx {dxa dyx}* vstemhm (23) |-
                 debug!("vstemhm");
-                maybe_width(s);
+                maybe_width(s, |n| n % 2 == 0);
                 s.stem_hints += (s.stack.len() / 2) as u32;
                 s.stack.clear();
                 i

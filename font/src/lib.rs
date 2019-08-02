@@ -268,6 +268,7 @@ pub fn parse<'a>(data: &'a [u8]) -> Box<dyn BorrowedFont<'a> + 'a> {
         &[0x80, 1, _, _] => Box::new(Type1Font::parse_pfb(data)) as _,
         b"OTTO" | [0,1,0,0] => parse_opentype(data, 0),
         b"ttcf" | b"typ1" => unimplemented!(), // Box::new(TrueTypeFont::parse(data, 0)) as _,
+        b"true" => Box::new(TrueTypeFont::parse(data, 0)) as _,
         b"%!PS" => Box::new(Type1Font::parse_postscript(data)) as _,
         &[1, _, _, _] => Box::new(CffFont::parse(data, 0)) as _,
         magic => panic!("unknown magic {:?}", magic)
