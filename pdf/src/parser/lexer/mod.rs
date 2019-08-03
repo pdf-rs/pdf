@@ -306,24 +306,14 @@ impl<'a> Lexer<'a> {
     /// Searches for string backward. Moves to after the found `substr`, returns the traversed
     /// Substr if found.
     pub fn seek_substr_back(&mut self, substr: &[u8]) -> Result<Substr<'a>> {
-        let start = self.pos;
-        let mut matched = substr.len();
-        loop {
-            if self.buf[self.pos] == substr[matched - 1] {
-                matched -= 1;
-            } else {
-                matched = substr.len();
+        let end = self.pos;
+        match self.buf[.. end].windows(substr.len()).rposition(|w| w == substr) {
+            Some(start) => {
+                self.pos = start + substr.len();
+                Ok(self.new_substr(self.pos .. end))
             }
-            if matched == 0 {
-                break;
-            }
-            if self.pos == 0 {
-                err!(PdfError::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())});
-            }
-            self.pos -= 1;
+            None => Err(PdfError::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())})
         }
-        self.pos += substr.len();
-        Ok(self.new_substr(self.pos..start))
     }
 
     /// Read and return slice of at most n bytes.

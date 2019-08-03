@@ -133,6 +133,7 @@ impl<'a> TextState<'a> {
             self.font_size, 0., self.rise) * font.font_matrix;
         
         for (gid, is_space) in glyphs {
+            debug!("gid: {}", gid);
             let glyph = font.glyphs.get(gid as u32).unwrap();
             
             let transform = base * self.text_matrix * tr;
@@ -151,12 +152,14 @@ impl<'a> TextState<'a> {
         canvas.set_current_transform(&base);
     }
     fn add_text_cid(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
+        debug!("CID text: {:?}", data);
         self.add_glyphs(canvas, data.chunks_exact(2).map(|s| {
             let sid = u16::from_be_bytes(s.try_into().unwrap());
             (sid as u32, sid == 0x20)
         }));
     }
     fn draw_text(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
+        debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(font) = self.font {
             if font.is_cid {
                 return self.add_text_cid(canvas, data);
@@ -222,7 +225,7 @@ impl FontEntry {
         }
         for (&cp, name) in encoding.differences.iter() {
             debug!("{} -> {}", cp, name);
-            let gid = font.gid_for_name(&name).expect("no such glyph");
+            let gid = font.gid_for_name(&name).unwrap_or(cp);
             cmap.insert(cp as u16, gid);
         }
         

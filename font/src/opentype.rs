@@ -235,13 +235,20 @@ impl<'a> Hmtx<'a> {
         assert!(gid < self.num_glyphs);
         if gid < self.num_metrics {
             let index = gid as usize * 4;
-            let (advance, lsb) = tuple((be_u16, be_i16))(&self.data[index ..]).get();
-            HMetrics { advance, lsb }
+            self.data.get(index .. index + 4).map(|i| {
+                let (advance, lsb) = tuple((be_u16, be_i16))(i).get();
+                HMetrics { advance, lsb }
+            })
         } else {
             let index = self.num_metrics as usize * 2 + gid as usize * 2;
-            let lsb = be_i16(&self.data[index ..]).get();
-            HMetrics { advance: self.last_advance, lsb }
-        }
+            self.data.get(index .. index + 2).map(|i| {
+                let lsb = be_i16(i).get();
+                HMetrics { advance: self.last_advance, lsb }
+            })
+        }.unwrap_or(HMetrics { // fallback
+            advance: self.last_advance,
+            lsb: 0
+        })
     }
 }
 pub fn parse_hmtx<'a>(data: &'a [u8], hhea: &Hhea, maxp: &Maxp) -> Hmtx<'a> {

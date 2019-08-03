@@ -35,3 +35,4 @@ bench_file!("libreoffice.pdf", libreoffice);
 bench_file!("pdf-sample.pdf", pdf_sample);
 bench_file!("xelatex-drawboard.pdf", xelatex_drawboard);
 bench_file!("xelatex.pdf", xelatex);
+bench_file!("PDF32000_2008.pdf", pdf32000);

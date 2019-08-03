@@ -1,6 +1,7 @@
 use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
+use std::borrow::Cow;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -115,6 +116,17 @@ impl PdfError {
     pub fn trace(&self) {
         trace(self, 0);
     }
+}
+pub struct Context {
+    file: &'static str,
+    line: u32,
+    column: u32
+}
+pub struct VerboseError {
+    context: Context,
+    message: Cow<'static, str>,
+    error: PdfError,
+    source: Option<Box<VerboseError>>
 }
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);
