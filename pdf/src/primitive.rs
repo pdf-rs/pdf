@@ -260,6 +260,13 @@ impl Primitive {
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
+    pub fn as_u32(&self) -> Result<u32> {
+        match *self {
+            Primitive::Integer(n) if n >= 0 => Ok(n as u32),
+            Primitive::Integer(n) => bail!("negative integer"),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name())
+        }
+    }
     pub fn as_number(&self) -> Result<f32> {
         match *self {
             Primitive::Integer(n) => Ok(n as f32),
@@ -285,7 +292,7 @@ impl Primitive {
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
-    /// Does accept a Reference
+    /// Does not accept a Reference
     pub fn as_array(&self) -> Result<&[Primitive]> {
         match self {
             Primitive::Array(ref v) => Ok(v),
@@ -298,11 +305,11 @@ impl Primitive {
             p => unexpected_primitive!(Reference, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
-    pub fn to_array(self, _r: &impl Resolve) -> Result<Vec<Primitive>> {
+    /// Does accept a Reference
+    pub fn to_array(self, r: &impl Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
-            // Primitive::Reference(id) => r.resolve(id)?.to_array(r),
+            Primitive::Reference(id) => r.resolve(id)?.to_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }

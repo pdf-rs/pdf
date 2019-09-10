@@ -131,11 +131,10 @@ impl Object for i32 {
         write!(out, "{}", self)?;
         Ok(())
     }
-    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
-            Primitive::Integer (n) => Ok(n),
-            Primitive::Reference (r) => Ok(i32::from_primitive(resolve.resolve(r)?, resolve)?),
-            p => Err(PdfError::UnexpectedPrimitive {expected: "Integer", found: p.get_debug_name()})
+            Primitive::Reference(id) => r.resolve(id)?.as_integer(),
+            p => p.as_integer()
         }
     }
 }
@@ -144,11 +143,10 @@ impl Object for u32 {
         write!(out, "{}", self)?;
         Ok(())
     }
-    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
-            Primitive::Integer (n) => Ok(n as u32),
-            Primitive::Reference (r) => Ok(u32::from_primitive(resolve.resolve(r)?, resolve)?),
-            p => Err(PdfError::UnexpectedPrimitive {expected: "Integer", found: p.get_debug_name()})
+            Primitive::Reference(id) => r.resolve(id)?.as_u32(),
+            p => p.as_u32()
         }
     }
 }
@@ -158,7 +156,10 @@ impl Object for usize {
         Ok(())
     }
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        Ok(i32::from_primitive(p, r)? as usize)
+        match p {
+            Primitive::Reference(id) => Ok(r.resolve(id)?.as_u32()? as usize),
+            p => Ok(p.as_u32()? as usize)
+        }
     }
 }
 impl Object for f32 {
@@ -166,8 +167,11 @@ impl Object for f32 {
         write!(out, "{}", self)?;
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        p.as_number()
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Reference(id) => r.resolve(id)?.as_number(),
+            p => p.as_number()
+        }
     }
 }
 impl Object for bool {
@@ -175,8 +179,11 @@ impl Object for bool {
         write!(out, "{}", self)?;
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        p.as_bool()
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Reference(id) => r.resolve(id)?.as_bool(),
+            p => p.as_bool()
+        }
     }
 }
 impl Object for Dictionary {
