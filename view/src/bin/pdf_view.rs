@@ -14,6 +14,7 @@ use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_content::color::ColorF;
 use pathfinder_gl::{GLDevice, GLVersion};
 use pathfinder_gpu::resources::{EmbeddedResourceLoader};
+use pathfinder_renderer::scene::Scene;
 use pathfinder_renderer::concurrent::rayon::RayonExecutor;
 use pathfinder_renderer::concurrent::scene_proxy::SceneProxy;
 use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererOptions};
@@ -39,7 +40,7 @@ fn main() -> Result<(), PdfError> {
     let mut current_page = 0;
     let mut cache = Cache::new();
     // Render the canvas to screen.
-    let scene = cache.render_page(&file, &*file.get_page(current_page)?)?;
+    let scene: Scene = cache.render_page(&file, &*file.get_page(current_page)?)?;
     let size = scene.view_box().size();
     
     // Set up SDL2.

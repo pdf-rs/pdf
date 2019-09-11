@@ -4,9 +4,8 @@ use pdf::object::*;
 use pdf::error::PdfError;
 use std::env;
 use std::fs;
-use std::io::BufWriter;
 use view::Cache;
-use pathfinder_export::{Export, FileFormat};
+use vector::Svg;
 
 fn main() -> Result<(), PdfError> {
     env_logger::init();
@@ -23,8 +22,8 @@ fn main() -> Result<(), PdfError> {
     for (i, page) in file.pages().enumerate().skip(first_page).take(last_page + 1 - first_page) {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
-        let out = fs::File::create(format!("{}_{}.svg", path, i)).expect("can't create output file");
-        cache.render_page(&file, p)?.export(&mut BufWriter::new(out), FileFormat::SVG)?;
+        let svg: Svg = cache.render_page(&file, p)?;
+        fs::write(format!("{}_{}.svg", path, i), svg.finish())?;
     }
     Ok(())
 }

@@ -2,7 +2,6 @@
 #[macro_use] extern crate pdf;
 extern crate env_logger;
 
-use std::mem;
 use std::convert::TryInto;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -18,13 +17,11 @@ use pdf::error::{PdfError, Result};
 use pdf::encoding::{Encoding as PdfEncoding, BaseEncoding};
 use encoding::{Encoding};
 
-use pathfinder_content::color::ColorU;
 use pathfinder_geometry::{
     vector::Vector2F, rect::RectF, transform2d::Transform2F
 };
-use pathfinder_canvas::{CanvasRenderingContext2D, CanvasFontContext, Path2D, FillStyle};
-use pathfinder_renderer::scene::Scene;
-use font::{BorrowedFont, Glyphs};
+use font::{self, Font, GlyphId};
+use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -47,14 +44,14 @@ macro_rules! ops {
     })
 }
 
-fn rgb2fill(r: f32, g: f32, b: f32) -> FillStyle {
+fn rgb2fill(r: f32, g: f32, b: f32) -> Rgba8 {
     let c = |v: f32| (v * 255.) as u8;
-    FillStyle::Color(ColorU { r: c(r), g: c(g), b: c(b), a: 255 })
+    (c(r), c(g), c(b), 255)
 }
-fn gray2fill(g: f32) -> FillStyle {
+fn gray2fill(g: f32) -> Rgba8 {
     rgb2fill(g, g, g)
 }
-fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> FillStyle {
+fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> Rgba8 {
     rgb2fill(
         (1.0 - c) * (1.0 - k),
         (1.0 - m) * (1.0 - k),
@@ -62,13 +59,12 @@ fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> FillStyle {
     )
 }
 
-struct FontEntry {
-    glyphs: Glyphs,
-    font_matrix: Transform2F,
-    cmap: HashMap<u16, u32>, // codepoint -> glyph id
+struct FontEntry<S: Surface> {
+    font: Box<dyn Font<S::Outline>>,
+    cmap: HashMap<u16, GlyphId>,
     is_cid: bool,
-    notdef: u32
 }
+#[derive(Copy, Clone)]
 enum TextMode {
     Fill,
     Stroke,
@@ -78,29 +74,71 @@ enum TextMode {
     StrokeAndClip
 }
 
-struct TextState<'a> {
+#[derive(Copy, Clone)]
+struct GraphicsState {
+    transform: Transform2F,
+    stroke_width: f32,
+    fill_color: Rgba8,
+    stroke_color: Rgba8
+}
+impl GraphicsState {
+    fn get_text_style(&self, mode: TextMode) -> PathStyle {
+        match mode {
+            TextMode::Fill => self.fill_style(),
+            TextMode::Stroke => self.stroke_style(),
+            TextMode::FillThenStroke => self.fill_and_stroke_style(),
+            _ => PathStyle {
+                fill: None,
+                stroke: None
+            }
+        }
+    }
+    fn fill_style(&self) -> PathStyle {
+        PathStyle {
+            fill: Some(self.fill_color),
+            stroke: None
+        }
+    }
+    fn stroke_style(&self) -> PathStyle {
+        PathStyle {
+            fill: None,
+            stroke: Some((self.stroke_color, self.stroke_width))
+        }
+    }
+    fn fill_and_stroke_style(&self) -> PathStyle {
+        PathStyle {
+            fill: Some(self.fill_color),
+            stroke: Some((self.stroke_color, self.stroke_width))
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct TextState<'a, S: Surface> {
+    root_transform: Transform2F,
     text_matrix: Transform2F, // tracks current glyph
     line_matrix: Transform2F, // tracks current line
     char_space: f32, // Character spacing
     word_space: f32, // Word spacing
     horiz_scale: f32, // Horizontal scaling
     leading: f32, // Leading
-    font: Option<&'a FontEntry>, // Text font
+    font_entry: Option<&'a FontEntry<S>>, // Text font
     font_size: f32, // Text font size
     mode: TextMode, // Text rendering mode
     rise: f32, // Text rise
-    knockout: f32 //Text knockout
+    knockout: f32, //Text knockout
 }
-impl<'a> TextState<'a> {
-    fn new() -> TextState<'a> {
+impl<'a, S: Surface> TextState<'a, S> {
+    fn new(root_transform: Transform2F) -> TextState<'a, S> {
         TextState {
+            root_transform,
             text_matrix: Transform2F::default(),
             line_matrix: Transform2F::default(),
             char_space: 0.,
             word_space: 0.,
             horiz_scale: 1.,
             leading: 0.,
-            font: None,
+            font_entry: None,
             font_size: 0.,
             mode: TextMode::Fill,
             rise: 0.,
@@ -124,51 +162,47 @@ impl<'a> TextState<'a> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, canvas: &mut CanvasRenderingContext2D, glyphs: impl Iterator<Item=(u32, bool)>) {
-        let font = self.font.as_ref().unwrap();
-        let base = canvas.current_transform();
+    fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(GlyphId, bool)>, style: &S::Style) {
+        let e = self.font_entry.as_ref().unwrap();
 
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
-            self.font_size, 0., self.rise) * font.font_matrix;
+            self.font_size, 0., self.rise) * e.font.font_matrix();
         
         for (gid, is_space) in glyphs {
-            debug!("gid: {}", gid);
-            let glyph = font.glyphs.get(gid as u32).unwrap();
+            debug!("gid: {:?}", gid);
+            let glyph = e.font.glyph(gid).unwrap();
             
-            let transform = base * self.text_matrix * tr;
-            //debug!("transform for glyph {} (width={}): {:?}", gid, glyph.width, transform);
-            canvas.set_current_transform(&transform);
-            canvas.fill_path(glyph.path.clone());
+            let transform = self.root_transform * self.text_matrix * tr;
+            let path = glyph.path.transform(transform);
+            surface.draw_path(path, &style);
             
             let dx = match is_space {
                 true => self.word_space,
                 false => self.char_space
             };
-            let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.width;
+            let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.metrics.advance.x();
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
-        
-        canvas.set_current_transform(&base);
     }
-    fn add_text_cid(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
+    fn add_text_cid(&mut self, surface: &mut S, data: &[u8], style: &S::Style) {
         debug!("CID text: {:?}", data);
-        self.add_glyphs(canvas, data.chunks_exact(2).map(|s| {
+        self.add_glyphs(surface, data.chunks_exact(2).map(|s| {
             let sid = u16::from_be_bytes(s.try_into().unwrap());
-            (sid as u32, sid == 0x20)
-        }));
+            (GlyphId(sid as u32), sid == 0x20)
+        }), style);
     }
-    fn draw_text(&mut self, canvas: &mut CanvasRenderingContext2D, data: &[u8]) {
+    fn draw_text(&mut self, surface: &mut S, data: &[u8], style: &S::Style) {
         debug!("text: {:?}", String::from_utf8_lossy(data));
-        if let Some(font) = self.font {
-            if font.is_cid {
-                return self.add_text_cid(canvas, data);
+        if let Some(e) = self.font_entry {
+            if e.is_cid {
+                return self.add_text_cid(surface, data, style);
             }
             
-            self.add_glyphs(canvas, data.iter().map(|&b| {
-                let gid = font.cmap.get(&(b as u16)).cloned().unwrap_or(b as u32);
+            self.add_glyphs(surface, data.iter().map(|&b| {
+                let gid = e.font.gid_for_codepoint(b as u32).unwrap_or(GlyphId(b as u32));
                 (gid, b == 0x20)
-            }));
+            }), style);
         }
     }
     fn advance(&mut self, delta: f32) {
@@ -178,12 +212,12 @@ impl<'a> TextState<'a> {
     }
 }
 
-pub struct Cache {
+pub struct Cache<S: Surface> {
     // shared mapping of fontname -> font
-    fonts: HashMap<String, FontEntry>
+    fonts: HashMap<String, FontEntry<S>>
 }
-impl FontEntry {
-    fn build<'a>(font: Box<dyn BorrowedFont<'a> + 'a>, encoding: PdfEncoding) -> FontEntry {
+impl<S: Surface> FontEntry<S> {
+    fn build(font: Box<dyn Font<S::Outline>>, encoding: PdfEncoding) -> FontEntry<S> {
         let mut is_cid = false;
         
         let mut cmap = HashMap::new();
@@ -208,7 +242,7 @@ impl FontEntry {
                     for b in 0 .. 256 {
                         if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
                             cmap.insert(b as u16, gid);
-                            debug!("{} -> {}", b, gid);
+                            debug!("{} -> {:?}", b, gid);
                         }
                     }
                 },
@@ -225,22 +259,21 @@ impl FontEntry {
         }
         for (&cp, name) in encoding.differences.iter() {
             debug!("{} -> {}", cp, name);
-            let gid = font.gid_for_name(&name).unwrap_or(cp);
+            let gid = font.gid_for_name(&name).unwrap_or(GlyphId(cp));
             cmap.insert(cp as u16, gid);
         }
         
         FontEntry {
-            glyphs: font.glyphs(),
+            font: font,
             cmap,
-            is_cid,
-            font_matrix: font.font_matrix(),
-            notdef: font.get_notdef_gid()
+            is_cid
         }
     }
 }
 
-impl Cache {
-    pub fn new() -> Cache {
+
+impl<S: Surface + 'static> Cache<S> {
+    pub fn new() -> Cache<S> {
         Cache {
             fonts: HashMap::new()
         }
@@ -284,21 +317,19 @@ impl Cache {
             
         self.fonts.insert(pdf_font.name.clone(), entry);
     }
-    fn get_font(&self, font_name: &str) -> Option<&FontEntry> {
+    fn get_font(&self, font_name: &str) -> Option<&FontEntry<S>> {
         self.fonts.get(font_name)
     }
     
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<Scene> {
+    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<S> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
         
         let resources = page.resources(file)?;
         
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
-        let mut canvas = CanvasRenderingContext2D::new(CanvasFontContext::from_system_source(), rect.size());
-        canvas.stroke_rect(RectF::new(Vector2F::default(), rect.size()));
+        let mut surface = S::new(rect.size());
         let root_tansformation = Transform2F::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
-        canvas.set_current_transform(&root_tansformation);
         
         // make sure all fonts are in the cache, so we can reference them
         for font in resources.fonts.values() {
@@ -310,9 +341,16 @@ impl Cache {
             }
         }
         
-        let mut path = Path2D::new();
+        let mut path_builder = PathBuilder::<S::Outline>::new();
         let mut last = Vector2F::default();
-        let mut state = TextState::new();
+        let mut text_state = TextState::new(root_tansformation);
+        let mut stack = vec![];
+        let mut graphics_state = GraphicsState {
+            transform: Transform2F::default(),
+            stroke_width: 0.0,
+            fill_color: (0,0,0,255),
+            stroke_color: (0,0,0,255),
+        };
         
         let mut iter = try_opt!(page.contents.as_ref()).operations.iter();
         while let Some(op) = iter.next() {
@@ -321,85 +359,90 @@ impl Cache {
             match op.operator.as_str() {
                 "m" => { // move x y
                     ops_p!(ops, p => {
-                        path.move_to(p);
+                        path_builder.move_to(p);
                         last = p;
                     })
                 }
                 "l" => { // line x y
                     ops_p!(ops, p => {
-                        path.line_to(p);
+                        path_builder.line_to(p);
                         last = p;
                     })
                 }
                 "c" => { // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
                     ops_p!(ops, c1, c2, p => {
-                        path.bezier_curve_to(c1, c2, p);
+                        path_builder.cubic_curve_to(c1, c2, p);
                         last = p;
                     })
                 }
                 "v" => { // cubic bezier c2.x c2.y p.x p.y
                     ops_p!(ops, c2, p => {
-                        path.bezier_curve_to(last, c2, p);
+                        path_builder.cubic_curve_to(last, c2, p);
                         last = p;
                     })
                 }
                 "y" => { // cubic c1.x c1.y p.x p.y
                     ops_p!(ops, c1, p => {
-                        path.bezier_curve_to(c1, p, p);
+                        path_builder.cubic_curve_to(c1, p, p);
                         last = p;
                     })
                 }
                 "h" => { // close
-                    path.close_path();
+                    path_builder.close();
                 }
                 "re" => { // rect x y width height
                     ops_p!(ops, origin, size => {
                         let r = RectF::new(origin, size);
-                        path.rect(r);
+                        path_builder.rect(r);
                     })
                 }
                 "S" => { // stroke
-                    canvas.stroke_path(mem::replace(&mut path, Path2D::new()));
+                    let style = surface.build_style(graphics_state.stroke_style());
+                    let path = path_builder.take().transform(graphics_state.transform);
+                    surface.draw_path(path, &style);
                 }
                 "s" => { // close and stroke
-                    path.close_path();
-                    canvas.stroke_path(mem::replace(&mut path, Path2D::new()));
+                    path_builder.close();
+                    let style = surface.build_style(graphics_state.stroke_style());
+                    let path = path_builder.take().transform(graphics_state.transform);
+                    surface.draw_path(path, &style);
                 }
                 "f" | "F" | "f*" => { // close and fill 
                     // TODO: implement windings
-                    path.close_path();
-                    canvas.fill_path(mem::replace(&mut path, Path2D::new()));
+                    path_builder.close();
+                    let path = path_builder.take().transform(graphics_state.transform);
+                    let style = surface.build_style(graphics_state.stroke_style());
+                    surface.draw_path(path, &style);
                 }
                 "B" | "B*" => { // fill and stroke
-                    path.close_path();
-                    let path2 = mem::replace(&mut path, Path2D::new());
-                    canvas.fill_path(path2.clone());
-                    canvas.stroke_path(path2);
+                    path_builder.close();
+                    let path = path_builder.take().transform(graphics_state.transform);
+                    let style = surface.build_style(graphics_state.fill_and_stroke_style());
+                    surface.draw_path(path, &style);
                 }
                 "b" | "b*" => { // stroke and fill
-                    path.close_path();
-                    let path2 = mem::replace(&mut path, Path2D::new());
-                    canvas.stroke_path(path2.clone());
-                    canvas.fill_path(path2);
+                    path_builder.close();
+                    let path = path_builder.take().transform(graphics_state.transform);
+                    let style = surface.build_style(graphics_state.fill_and_stroke_style());
+                    surface.draw_path(path, &style);
                 }
                 "n" => { // clear path
-                    path = Path2D::new();
+                    path_builder.clear();
                 }
                 "q" => { // save state
-                    canvas.save();
+                    stack.push(graphics_state);
                 }
                 "Q" => { // restore
-                    canvas.restore();
+                    graphics_state = stack.pop().unwrap();
                 }
                 "cm" => { // modify transformation matrix 
                     ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                        let tr = canvas.current_transform() * Transform2F::row_major(a, b, c, d, e, f);
-                        canvas.set_current_transform(&tr);
+                        graphics_state.transform = graphics_state.transform * Transform2F::row_major(a, b, c, d, e, f);
                     })
                 }
                 "w" => { // line width
                     ops!(ops, width: f32 => {
-                        canvas.set_line_width(width);
+                        graphics_state.stroke_width = width;
                     })
                 }
                 "J" => { // line cap
@@ -414,15 +457,15 @@ impl Cache {
                     let gs = try_opt!(resources.graphics_states.get(gs));
                     
                     if let Some(lw) = gs.line_width {
-                        canvas.set_line_width(lw);
+                        graphics_state.stroke_width = lw;
                     }
                     if let Some((ref font, size)) = gs.font {
                         if let Some(e) = self.get_font(&font.name) {
-                            state.font = Some(e);
-                            state.font_size = size;
+                            text_state.font_entry = Some(e);
+                            text_state.font_size = size;
                             debug!("new font: {} at size {}", font.name, size);
                         } else {
-                            state.font = None;
+                            text_state.font_entry = None;
                         }
                     }
                 }),
@@ -431,75 +474,75 @@ impl Cache {
                 }
                 "SC" | "RG" => { // stroke color
                     ops!(ops, r: f32, g: f32, b: f32 => {
-                        canvas.set_stroke_style(rgb2fill(r, g, b));
+                        graphics_state.stroke_color = rgb2fill(r, g, b);
                     });
                 }
                 "sc" | "rg" => { // fill color
                     ops!(ops, r: f32, g: f32, b: f32 => {
-                        canvas.set_fill_style(rgb2fill(r, g, b));
+                        graphics_state.fill_color = rgb2fill(r, g, b);
                     });
                 }
                 "G" => { // stroke gray
                     ops!(ops, gray: f32 => {
-                        canvas.set_stroke_style(gray2fill(gray));
+                        graphics_state.stroke_color = gray2fill(gray);
                     })
                 }
-                "g" => { // stroke gray
+                "g" => { // fill gray
                     ops!(ops, gray: f32 => {
-                        canvas.set_fill_style(gray2fill(gray));
+                        graphics_state.fill_color = gray2fill(gray);
                     })
                 }
                 "k" => { // fill color
                     ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
-                        canvas.set_fill_style(cymk2fill(c, y, m, k));
+                        graphics_state.fill_color = cymk2fill(c, y, m, k);
                     });
                 }
                 "cs" => { // color space
                 }
                 "BT" => {
-                    state.reset_matrix();
+                    text_state.reset_matrix();
                 }
                 "ET" => {
-                    state.font = None;
+                    text_state.font_entry = None;
                 }
                 // state modifiers
                 
                 // character spacing
                 "Tc" => ops!(ops, char_space: f32 => {
-                        state.char_space = char_space;
+                        text_state.char_space = char_space;
                 }),
                 
                 // word spacing
                 "Tw" => ops!(ops, word_space: f32 => {
-                        state.word_space = word_space;
+                        text_state.word_space = word_space;
                 }),
                 
                 // Horizontal scaling (in percent)
                 "Tz" => ops!(ops, scale: f32 => {
-                        state.horiz_scale = 0.01 * scale;
+                        text_state.horiz_scale = 0.01 * scale;
                 }),
                 
                 // leading
                 "TL" => ops!(ops, leading: f32 => {
-                        state.leading = leading;
+                        text_state.leading = leading;
                 }),
                 
                 // text font
                 "Tf" => ops!(ops, font_name: &str, size: f32 => {
                     let font = try_opt!(resources.fonts.get(font_name));
                     if let Some(e) = self.get_font(&font.name) {
-                        state.font = Some(e);
+                        text_state.font_entry = Some(e);
                         debug!("new font: {}", font.name);
-                        state.font_size = size;
+                        text_state.font_size = size;
                     } else {
-                        state.font = None;
+                        text_state.font_entry = None;
                     }
                 }),
                 
                 // render mode
                 "Tr" => ops!(ops, mode: i32 => {
                     use TextMode::*;
-                    state.mode = match mode {
+                    text_state.mode = match mode {
                         0 => Fill,
                         1 => Stroke,
                         2 => FillThenStroke,
@@ -514,57 +557,61 @@ impl Cache {
                 
                 // text rise
                 "Ts" => ops!(ops, rise: f32 => {
-                    state.rise = rise;
+                    text_state.rise = rise;
                 }),
                 
                 // positioning operators
                 // Move to the start of the next line
                 "Td" => ops_p!(ops, t => {
-                    state.translate(t);
+                    text_state.translate(t);
                 }),
                 
                 "TD" => ops_p!(ops, t => {
-                    state.leading = -t.y();
-                    state.translate(t);
+                    text_state.leading = -t.y();
+                    text_state.translate(t);
                 }),
                 
                 // Set the text matrix and the text line matrix
                 "Tm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                    state.set_matrix(Transform2F::row_major(a, b, c, d, e, f));
+                    text_state.set_matrix(Transform2F::row_major(a, b, c, d, e, f));
                 }),
                 
                 // Move to the start of the next line
                 "T*" => {
-                    state.next_line();
+                    text_state.next_line();
                 },
                 
                 // draw text
                 "Tj" => ops!(ops, text: &[u8] => {
-                    state.draw_text(&mut canvas, text);
+                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    text_state.draw_text(&mut surface, text, &style);
                 }),
                 
                 // move to the next line and draw text
                 "'" => ops!(ops, text: &[u8] => {
-                    state.next_line();
-                    state.draw_text(&mut canvas, text);
+                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    text_state.next_line();
+                    text_state.draw_text(&mut surface, text, &style);
                 }),
                 
                 // set word and charactr spacing, move to the next line and draw text
                 "\"" => ops!(ops, word_space: f32, char_space: f32, text: &[u8] => {
-                    state.word_space = word_space;
-                    state.char_space = char_space;
-                    state.next_line();
-                    state.draw_text(&mut canvas, text);
+                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    text_state.word_space = word_space;
+                    text_state.char_space = char_space;
+                    text_state.next_line();
+                    text_state.draw_text(&mut surface, text, &style);
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
+                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
                     for arg in array {
                         match arg {
                             Primitive::String(ref data) => {
-                                state.draw_text(&mut canvas, data.as_bytes());
+                                text_state.draw_text(&mut surface, data.as_bytes(), &style);
                             },
                             p => {
                                 let offset = p.as_number().expect("wrong argument to TJ");
-                                state.advance(-0.001 * offset); // because why not PDF…
+                                text_state.advance(-0.001 * offset); // because why not PDF…
                             }
                         }
                     }
@@ -573,6 +620,6 @@ impl Cache {
             }
         }
         
-        Ok(canvas.into_scene())
+        Ok(surface)
     }
 }

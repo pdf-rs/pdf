@@ -1,15 +1,13 @@
 [workspace]
 members = [
-    "encoding",
     "pdf",
     "pdf_derive",
     "view",
     "examples/read",
     "examples/text",
-    "font"
 ]
 default-members = [
-    "encoding",
     "pdf",
     "pdf_derive",
+    "view"
 ]
