@@ -28,10 +28,11 @@ fn main() -> Result<(), PdfError> {
     }
 
     for (i,img) in images.iter().enumerate() {
-        let fname = format!("extracted_image{}.jpeg", i);
-        let mut f = fs::File::create(fname.as_str()).unwrap();
-        f.write(&img.data().unwrap()).unwrap();
-        println!("Wrote file {}.", fname);
+        let fname = format!("extracted_image_{}.jpeg", i);
+        if let Some(data) = img.as_jpeg() {
+            fs::write(fname.as_str(), data).unwrap();
+            println!("Wrote file {}", fname);
+        }
     }
     println!("Found {} image(s).", images.len());
 

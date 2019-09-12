@@ -215,7 +215,7 @@ pub struct CIDFont {
     #[pdf(key="FontDescriptor")]
     font_descriptor: FontDescriptor,
     
-    #[pdf(key="DW")]
+    #[pdf(key="DW", default="0.")]
     default_width: f32,
     
     #[pdf(key="W")]

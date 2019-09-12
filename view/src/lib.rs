@@ -145,7 +145,8 @@ impl<'a, S: Surface> TextState<'a, S> {
             knockout: 0.
         }
     }
-    fn reset_matrix(&mut self) {
+    fn reset_matrix(&mut self, root_tansformation: Transform2F) {
+        self.root_transform = root_tansformation;
         self.set_matrix(Transform2F::default());
     }
     fn translate(&mut self, v: Vector2F) {
@@ -346,10 +347,10 @@ impl<S: Surface + 'static> Cache<S> {
         let mut text_state = TextState::new(root_tansformation);
         let mut stack = vec![];
         let mut graphics_state = GraphicsState {
-            transform: Transform2F::default(),
+            transform: root_tansformation,
             stroke_width: 0.0,
-            fill_color: (0,0,0,255),
-            stroke_color: (0,0,0,255),
+            fill_color: (255,0,255,127),
+            stroke_color: (255,0,255,127),
         };
         
         let mut iter = try_opt!(page.contents.as_ref()).operations.iter();
@@ -411,7 +412,7 @@ impl<S: Surface + 'static> Cache<S> {
                     // TODO: implement windings
                     path_builder.close();
                     let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.stroke_style());
+                    let style = surface.build_style(graphics_state.fill_style());
                     surface.draw_path(path, &style);
                 }
                 "B" | "B*" => { // fill and stroke
@@ -428,6 +429,8 @@ impl<S: Surface + 'static> Cache<S> {
                 }
                 "n" => { // clear path
                     path_builder.clear();
+                }
+                "W" | "W*" => { // clipping path
                 }
                 "q" => { // save state
                     stack.push(graphics_state);
@@ -500,7 +503,7 @@ impl<S: Surface + 'static> Cache<S> {
                 "cs" => { // color space
                 }
                 "BT" => {
-                    text_state.reset_matrix();
+                    text_state.reset_matrix(graphics_state.transform);
                 }
                 "ET" => {
                     text_state.font_entry = None;

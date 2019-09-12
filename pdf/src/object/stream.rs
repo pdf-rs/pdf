@@ -37,6 +37,14 @@ impl<I: Object + fmt::Debug> Stream<I> {
             Ok(data.into_owned())
         }).map(|v| v.as_slice())
     }
+
+    /// If this is contains DCT encoded data, return the compressed data as is
+    pub fn as_jpeg(&self) -> Option<&[u8]> {
+        match self.info.filters.as_slice() {
+            &[StreamFilter::DCTDecode(_)] => Some(self.raw_data.as_slice()),
+            _ => None
+        }
+    }
 }
         
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {

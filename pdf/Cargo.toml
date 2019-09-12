@@ -19,7 +19,7 @@ features = ["unstable"]
 path = "../pdf_derive"
 
 [dependencies.encoding]
-path = "../../encoding"
+git = "https://github.com/pdf-rs/encoding/"
 
 [dependencies]
 snafu = "0.4"

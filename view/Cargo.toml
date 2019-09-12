@@ -4,11 +4,9 @@ version = "0.1.0"
 authors = ["Sebastian Köln <sebk@rynx.org>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 pdf = { path = "../pdf" }
-font = { path = "../../font" }
+font = { git = "https://github.com/pdf-rs/font/" }
 encoding = { git = "https://github.com/pdf-rs/encoding/" }
 
 pathfinder_canvas = { git = "https://github.com/s3bk/pathfinder/" }
@@ -21,20 +19,11 @@ pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder/" }
 vector = { git = "https://github.com/s3bk/vector/" }
 
 euclid = "0.19"
-log = "*"
+log = "0.4.8"
 env_logger = "*"
 gl = "0.6"
 sdl2 = "0.32"
 sdl2-sys = "0.32"
-freetype = "^0.4.1"
-
-#pathfinder_canvas = { path = "../../pathfinder/canvas" }
-#pathfinder_content = { path = "../../pathfinder/content" }
-#pathfinder_export = { path = "../../pathfinder/export" }
-#pathfinder_geometry = { path = "../../pathfinder/geometry" }
-#pathfinder_gl = { path = "../../pathfinder/gl" }
-#pathfinder_gpu = { path = "../../pathfinder/gpu" }
-#pathfinder_renderer = { path = "../../pathfinder/renderer" }
 
 [[bin]]
 name = "pdf_view"
