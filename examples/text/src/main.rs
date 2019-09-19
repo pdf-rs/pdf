@@ -170,6 +170,9 @@ fn main() {
                         operands.iter().for_each(|p| add_primitive(p, &mut out, font));
                     }
                 }
+                "Td" | "TD" | "T*" => {
+                    out.push('\n');
+                }
                 _ => {}
             }
         }
