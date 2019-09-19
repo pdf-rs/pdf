@@ -3,6 +3,7 @@ use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
+use crate::parser::parse_with_lexer;
 use std::io;
 use std::rc::Rc;
 
@@ -178,6 +179,9 @@ impl Font {
             },
             _ => Ok(None)
         }
+    }
+    pub fn to_unicode(&self) -> Option<&Stream> {
+        self.to_unicode.as_ref()
     }
 }
 #[derive(Object, Debug)]

@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Sebastian Köln <sebk@rynx.org>"]
 edition = "2018"
 
+[features]
+unstable = ["font/unstable"]
+
 [dependencies]
 pdf = { path = "../pdf" }
 font = { git = "https://github.com/pdf-rs/font/" }

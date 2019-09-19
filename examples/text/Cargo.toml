@@ -8,3 +8,5 @@ edition = "2018"
 
 [dependencies]
 pdf = { path = "../../pdf" }
+utf16-ext = "0.1.0"
+byteorder = "1.2"
