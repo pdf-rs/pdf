@@ -90,8 +90,10 @@ impl<'a> Cache <'a> {
     }
     fn add_font(&mut self, name: &'a str, font: &'a Font) {
         dbg!(font);
-        let cmap = parse_cmap(font.to_unicode().unwrap().data().unwrap());
-        self.fonts.insert(name, FontInfo { font, cmap });
+        if let Some(to_unicode) = font.to_unicode() {
+            let cmap = parse_cmap(to_unicode.data().unwrap());
+            self.fonts.insert(name, FontInfo { font, cmap });
+        }
     }
     fn get_font<'b>(&self, name: &'b str) -> Option<&FontInfo<'a>> {
         self.fonts.get(&*name)
@@ -153,7 +155,7 @@ fn main() {
             // println!("{} {:?}", operator, operands);
             match operator.as_str() {
                 "gs" => {
-                    let gs = resources.graphics_states.get(operands[0].as_string().unwrap().as_str().unwrap()).unwrap();
+                    let gs = resources.graphics_states.get(operands[0].as_name().unwrap()).unwrap();
                     
                     if let Some((ref font, _)) = gs.font {
                         current_font = cache.get_font(&font.name);
