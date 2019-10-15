@@ -349,8 +349,8 @@ impl<S: Surface + 'static> Cache<S> {
         let mut graphics_state = GraphicsState {
             transform: root_tansformation,
             stroke_width: 0.0,
-            fill_color: (255,0,255,127),
-            stroke_color: (255,0,255,127),
+            fill_color: (0, 0, 0, 255),
+            stroke_color: (0, 0, 0, 255),
         };
         
         let mut iter = try_opt!(page.contents.as_ref()).operations.iter();
