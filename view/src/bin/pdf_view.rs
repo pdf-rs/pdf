@@ -111,6 +111,14 @@ fn main() -> Result<(), PdfError> {
                         scale = scale * Vector2F::splat(0.5f32.sqrt());
                         needs_update = true;
                     }
+                    Keycode::KpPlus => {
+                            scale = scale * Vector2F::splat(2.0f32.sqrt());
+                            needs_update = true;
+                    }
+                    Keycode::KpMinus => {
+                            scale = scale * Vector2F::splat(0.5f32.sqrt());
+                            needs_update = true;
+                    }    
                     _ => {}
                 }
             }
