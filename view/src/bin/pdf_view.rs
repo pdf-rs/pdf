@@ -52,7 +52,7 @@ fn main() -> Result<(), PdfError> {
     gl_attributes.set_context_profile(GLProfile::Core);
     gl_attributes.set_context_version(3, 3);
 
-    let mut scale = Vector2F::splat(2.0);
+    let mut scale = Vector2F::splat(1.0);
     // Open a window.
     let mut window_size = (size * scale).to_i32();
     let window = video.window("Probably Distorted File", window_size.x() as u32, window_size.y() as u32)
@@ -119,6 +119,22 @@ fn main() -> Result<(), PdfError> {
                 proxy.build_and_render(&mut renderer, options.clone());
                 window.gl_swap_window();
             }
+            Event::MouseWheel {y: y, .. } => {
+                match y {
+                    1 => {
+                        scale = scale * Vector2F::splat(1.25f32.sqrt());
+                        needs_update = true;
+                    }
+
+                    -1 => {
+                        scale = scale * Vector2F::splat(0.75f32.sqrt());
+                        needs_update = true;
+                    }
+                    _ => {}
+                }
+            }
+            
+
             /*
             Event::WindowResized(new_size) => {
                 window_size = new_size;
