@@ -5,7 +5,7 @@ Read, alter and write PDF files.
 
 One easy way you can contribute is to add different PDF files to `tests/files` and see if they pass the tests (`cargo test`).
 
-Feel free to contribute with ideas, issues or code! You can also [join the discussion](https://webchat.oftc.net/?channels=rust-pdf) on `#rust-pdf` on `irc.oftc.net`.
+Feel free to contribute with ideas, issues or code! Please join [us on Zulip](https://type.zulipchat.com/#narrow/stream/209232-pdf) if you have any questions or problems.
 
 # Workspace
 This repository uses a Cargo Workspace and default members. This means by default only the `pdf` library is build.
