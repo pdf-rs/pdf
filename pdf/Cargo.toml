@@ -13,7 +13,8 @@ Read, alter and write PDF files.
 (Crate that previously resided here moved to pdf-canvas)
 """
 
-features = ["unstable"]
+[features]
+unstable = []
 
 [dependencies.pdf_derive]
 path = "../pdf_derive"
