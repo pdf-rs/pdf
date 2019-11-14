@@ -5,7 +5,6 @@ use crate::error::{Result, PdfError};
 
 pub trait AnyObject {
     fn serialize(&self, out: &mut Vec<u8>);
-    #[cfg(feature="nightly")]
     fn type_name(&self) -> &'static str;
     fn type_id(&self) -> TypeId;
 }
@@ -15,11 +14,8 @@ impl<T> AnyObject for T
     fn serialize(&self, out: &mut Vec<u8>) {
         Object::serialize(self, out).expect("write error on Vec<u8> ?!?")
     }
-    #[cfg(feature="nightly")]
     fn type_name(&self) -> &'static str {
-        unsafe {
-            std::intrinsics::type_name::<T>()
-        }
+        std::any::type_name::<T>()
     }
     fn type_id(&self) -> TypeId {
         TypeId::of::<T>()
@@ -47,17 +43,11 @@ impl Any {
     {
         Any(rc as _)
     }
-    #[cfg(feature="nightly")]
     pub fn type_name(&self) -> &'static str {
         self.0.type_name()
     }
 }
 
-#[cfg(feature="nightly")]
 fn type_mismatch<T: AnyObject + 'static>(any: &Any) -> PdfError {
-    PdfError::Other { msg: format!("expected {}, found {}", unsafe { std::intrinsics::type_name::<T>() }, any.type_name()) }
-}
-#[cfg(not(feature="nightly"))]
-fn type_mismatch<T: AnyObject + 'static>(any: &Any) -> PdfError {
-    PdfError::Other { msg: format!("expected type id {:?}, found {:?}", TypeId::of::<T>(), any.0.type_id()) }
+    PdfError::Other { msg: format!("expected {}, found {}", std::any::type_name::<T>(), any.type_name()) }
 }
