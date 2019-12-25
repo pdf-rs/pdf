@@ -20,10 +20,15 @@ use pathfinder_renderer::concurrent::scene_proxy::SceneProxy;
 use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererOptions};
 use pathfinder_renderer::gpu::renderer::Renderer;
 use pathfinder_renderer::options::{BuildOptions, RenderTransform};
-use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
-use sdl2::video::GLProfile;
 use std::env;
+use glutin::{
+    event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState, VirtualKeyCode},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+    dpi::LogicalSize,
+    GlRequest, Api
+};
+use gl;
 
 use env_logger;
 use pdf::file::File as PdfFile;
@@ -43,28 +48,25 @@ fn main() -> Result<(), PdfError> {
     let scene: Scene = cache.render_page(&file, &*file.get_page(current_page)?)?;
     let size = scene.view_box().size();
     
-    // Set up SDL2.
-    let sdl_context = sdl2::init().unwrap();
-    let video = sdl_context.video().unwrap();
-
-    // Make sure we have at least a GL 3.0 context. Pathfinder requires this.
-    let gl_attributes = video.gl_attr();
-    gl_attributes.set_context_profile(GLProfile::Core);
-    gl_attributes.set_context_version(3, 3);
+    let event_loop = EventLoop::new();
 
     let mut scale = Vector2F::splat(1.0);
-    // Open a window.
     let mut window_size = (size * scale).to_i32();
-    let window = video.window("Probably Distorted File", window_size.x() as u32, window_size.y() as u32)
-                      .opengl()
-                      .build()
-                      .unwrap();
+    let window_builder = WindowBuilder::new()
+        .with_title("Probably Distorted File")
+        .with_inner_size(LogicalSize::new(window_size.x() as f64, window_size.y() as f64));
 
-    // Create the GL context, and make it current.
-    let gl_context = window.gl_create_context().unwrap();
-    gl::load_with(|name| video.gl_get_proc_address(name) as *const _);
-    window.gl_make_current(&gl_context).unwrap();
+    let windowed_context = glutin::ContextBuilder::new()
+        .with_gl(GlRequest::Specific(Api::OpenGl, (3, 0)))
+        .build_windowed(window_builder, &event_loop)
+        .unwrap();
+    
+    let windowed_context = unsafe {
+        windowed_context.make_current().unwrap()
+    };
 
+    gl::load_with(|ptr| windowed_context.get_proc_address(ptr));
+    
     // Create a Pathfinder renderer.
     let mut renderer = Renderer::new(GLDevice::new(GLVersion::GL3, 0),
                                      &EmbeddedResourceLoader,
@@ -81,84 +83,84 @@ fn main() -> Result<(), PdfError> {
         subpixel_aa_enabled: false
     };
     proxy.build_and_render(&mut renderer, options.clone());
-    window.gl_swap_window();
+    windowed_context.swap_buffers().unwrap();
 
-    // Wait for a keypress.
-    let mut event_pump = sdl_context.event_pump().unwrap();
-    loop {
-        let mut needs_update = false;
-        match event_pump.wait_event() {
-            Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break,
-            Event::KeyDown { keycode: Some(keycode), .. } => {
+    let mut needs_update = true;
+    event_loop.run(move |event, _, control_flow| {
+        match event {
+            Event::EventsCleared => {
+                if needs_update {
+                    println!("showing page {}", current_page);
+                    let scene = match file.get_page(current_page).and_then(|page| cache.render_page(&file, &page)) {
+                        Ok(scene) => scene,
+                        _ => {
+                            *control_flow = ControlFlow::Exit;
+                            return;
+                        }
+                    };
+                    proxy.replace_scene(scene);
+                    proxy.set_view_box(
+                        RectF::new(Vector2F::default(), window_size.to_f32())
+                    );
+                    options.transform = RenderTransform::Transform2D(Transform2F::from_scale(scale));
+                    proxy.build_and_render(&mut renderer, options.clone());
+                    windowed_context.swap_buffers().unwrap();
+
+                    needs_update = false;
+                }
+            },
+            Event::DeviceEvent { 
+                event: DeviceEvent::Key(KeyboardInput {
+                    state: ElementState::Pressed,
+                    virtual_keycode: Some(keycode),
+                    ..
+                }),
+                ..
+            } => {
                 match keycode {
-                    Keycode::Left => {
+                    VirtualKeyCode::Escape => {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    VirtualKeyCode::Left => {
                         if current_page > 0 {
                             current_page -= 1;
                             needs_update = true;
                         }
                     }
-                    Keycode::Right => {
+                    VirtualKeyCode::Right => {
                         if current_page < file.num_pages() - 1 {
                             current_page += 1;
                             needs_update = true;
                         }
                     }
-                    Keycode::Plus | Keycode::KpPlus => {
+                    VirtualKeyCode::Add => {
                         scale = scale * Vector2F::splat(2.0f32.sqrt());
                         needs_update = true;
                     }
-                    Keycode::Minus | Keycode::KpMinus => {
+                    VirtualKeyCode::Subtract => {
                         scale = scale * Vector2F::splat(0.5f32.sqrt());
                         needs_update = true;
                     }
                     _ => {}
                 }
             }
-            Event::KeyUp { .. } => {}
-            Event::Window { win_event: WindowEvent::Exposed, .. } => {
+            Event::WindowEvent {
+                event: WindowEvent::RedrawRequested,
+                ..
+            } => {
                 proxy.build_and_render(&mut renderer, options.clone());
-                window.gl_swap_window();
-            }
-            Event::MouseWheel {y: y, .. } => {
-                match y {
-                    1 => {
-                        scale = scale * Vector2F::splat(1.25f32.sqrt());
-                        needs_update = true;
-                    }
-
-                    -1 => {
-                        scale = scale * Vector2F::splat(0.75f32.sqrt());
-                        needs_update = true;
-                    }
-                    _ => {}
-                }
-            }
-            
-
-            /*
-            Event::WindowResized(new_size) => {
-                window_size = new_size;
-                proxy.set_view_box(
-                    RectF::new(Vector2F::default(), window_size.to_f32())
-                );
-                renderer.set_main_framebuffer_size(window_size.device_size());
-                needs_update = true;
-            }*/
-            e => println!("{:?}", e)
+                windowed_context.swap_buffers().unwrap();
+            },
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                println!("The close button was pressed; stopping");
+                *control_flow = ControlFlow::Exit
+            },
+            _ => *control_flow = ControlFlow::Wait,
         }
-        if needs_update {
-            println!("showing page {}", current_page);
-            let page = file.get_page(current_page)?;
-            let scene = cache.render_page(&file, &page)?;
-            proxy.replace_scene(scene);
-            proxy.set_view_box(
-                RectF::new(Vector2F::default(), window_size.to_f32())
-            );
-            options.transform = RenderTransform::Transform2D(Transform2F::from_scale(scale));
-            proxy.build_and_render(&mut renderer, options.clone());
-            window.gl_swap_window();
-        }
-    }
-    
+    });
+
     Ok(())
 }
