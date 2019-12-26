@@ -22,10 +22,10 @@ use pathfinder_renderer::gpu::renderer::Renderer;
 use pathfinder_renderer::options::{BuildOptions, RenderTransform};
 use std::env;
 use glutin::{
-    event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState, VirtualKeyCode},
+    event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState, VirtualKeyCode, MouseButton},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
-    dpi::LogicalSize,
+    dpi::{LogicalSize, LogicalPosition},
     GlRequest, Api
 };
 use gl;
@@ -51,7 +51,9 @@ fn main() -> Result<(), PdfError> {
     let event_loop = EventLoop::new();
 
     let mut scale = Vector2F::splat(1.0);
-    let mut window_size = (size * scale).to_i32();
+    let mut translation = Vector2F::new(0.0, 0.0);
+
+    let window_size = (size * scale).to_i32();
     let window_builder = WindowBuilder::new()
         .with_title("Probably Distorted File")
         .with_inner_size(LogicalSize::new(window_size.x() as f64, window_size.y() as f64));
@@ -67,25 +69,22 @@ fn main() -> Result<(), PdfError> {
 
     gl::load_with(|ptr| windowed_context.get_proc_address(ptr));
     
-    // Create a Pathfinder renderer.
-    let mut renderer = Renderer::new(GLDevice::new(GLVersion::GL3, 0),
-                                     &EmbeddedResourceLoader,
-                                     DestFramebuffer::full_window(window_size),
-                                     RendererOptions { background_color: Some(ColorF::white()) });
+    let window = windowed_context.window();
+    let dpi = Vector2F::splat(window.hidpi_factor() as f32);
 
     let proxy = SceneProxy::from_scene(scene, RayonExecutor);
-    proxy.set_view_box(
-        RectF::new(Vector2F::default(), window_size.to_f32())
+
+    // Create a Pathfinder renderer.
+    let mut renderer = Renderer::new(GLDevice::new(GLVersion::GL3, 0),
+        &EmbeddedResourceLoader,
+        DestFramebuffer::full_window((size * scale * dpi).to_i32()),
+        RendererOptions { background_color: Some(ColorF::new(0.9, 0.85, 0.7, 1.0)) }
     );
-    let mut options = BuildOptions {
-        transform: RenderTransform::Transform2D(Transform2F::from_scale(scale)),
-        dilation: Vector2F::default(),
-        subpixel_aa_enabled: false
-    };
-    proxy.build_and_render(&mut renderer, options.clone());
-    windowed_context.swap_buffers().unwrap();
 
     let mut needs_update = true;
+    let mut needs_redraw = true;
+    let mut drag_start: Option<LogicalPosition> = None;
+    let mut cursor_pos = LogicalPosition::new(0., 0.);
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::EventsCleared => {
@@ -99,14 +98,32 @@ fn main() -> Result<(), PdfError> {
                         }
                     };
                     proxy.replace_scene(scene);
-                    proxy.set_view_box(
-                        RectF::new(Vector2F::default(), window_size.to_f32())
-                    );
-                    options.transform = RenderTransform::Transform2D(Transform2F::from_scale(scale));
-                    proxy.build_and_render(&mut renderer, options.clone());
-                    windowed_context.swap_buffers().unwrap();
 
                     needs_update = false;
+                    needs_redraw = true;
+                }
+                if needs_redraw {
+                    let window = windowed_context.window();
+                    let dpi = Vector2F::splat(window.hidpi_factor() as f32);
+                    let view_size = size * scale;
+                    let window_size = LogicalSize::new(view_size.x() as f64, view_size.y() as f64);
+                    window.set_inner_size(window_size);
+                    renderer.set_main_framebuffer_size((view_size * dpi).to_i32());
+                    proxy.set_view_box(
+                        RectF::new(Vector2F::default(), view_size * dpi)
+                    );
+
+                    let options = BuildOptions {
+                        transform: RenderTransform::Transform2D(
+                            Transform2F::from_scale(dpi) * Transform2F::from_translation(translation) * Transform2F::from_scale(scale)
+                        ),
+                        dilation: Vector2F::default(),
+                        subpixel_aa_enabled: false
+                    };
+                    proxy.build_and_render(&mut renderer, options);
+                    windowed_context.swap_buffers().unwrap();
+
+                    needs_redraw = false;
                 }
             },
             Event::DeviceEvent { 
@@ -145,11 +162,32 @@ fn main() -> Result<(), PdfError> {
                 }
             }
             Event::WindowEvent {
+                event: WindowEvent::CursorMoved {
+                    position, ..
+                }, ..
+            } => {
+                cursor_pos = position;
+                if let Some(start) = drag_start {
+                    translation = Vector2F::new((position.x - start.x) as f32, (position.y - start.y) as f32);
+                    needs_redraw = true;
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::MouseInput {
+                    button: MouseButton::Left,
+                    state, ..
+                }, ..
+            } => {
+                drag_start = match state {
+                    ElementState::Pressed => Some(cursor_pos),
+                    _ => None
+                };
+            }
+            Event::WindowEvent {
                 event: WindowEvent::RedrawRequested,
                 ..
             } => {
-                proxy.build_and_render(&mut renderer, options.clone());
-                windowed_context.swap_buffers().unwrap();
+                needs_redraw = true;
             },
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
