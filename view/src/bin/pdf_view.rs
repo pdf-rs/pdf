@@ -22,10 +22,10 @@ use pathfinder_renderer::gpu::renderer::Renderer;
 use pathfinder_renderer::options::{BuildOptions, RenderTransform};
 use std::env;
 use glutin::{
-    event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState, VirtualKeyCode, MouseButton},
+    event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState, VirtualKeyCode, MouseButton, MouseScrollDelta, ModifiersState },
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
-    dpi::{LogicalSize, LogicalPosition},
+    dpi::{LogicalSize, LogicalPosition, PhysicalSize},
     GlRequest, Api
 };
 use gl;
@@ -52,10 +52,13 @@ fn main() -> Result<(), PdfError> {
     
     let event_loop = EventLoop::new();
 
-    let mut scale = Vector2F::splat(1.0);
-    let mut translation = Vector2F::new(0.0, 0.0);
+    // ratio of PDF screen space to logical screen space
+    let mut scale = 1.0;
 
-    let window_size = (size * scale).to_i32();
+    // center of the PDF screen space that is at the center of the window
+    let mut view_center = Vector2F::new(right + left, top + bottom).scale(0.5);
+
+    let mut window_size = size * Vector2F::splat(scale);
     let window_builder = WindowBuilder::new()
         .with_title("Probably Distorted File")
         .with_inner_size(LogicalSize::new(window_size.x() as f64, window_size.y() as f64));
@@ -72,22 +75,23 @@ fn main() -> Result<(), PdfError> {
     gl::load_with(|ptr| windowed_context.get_proc_address(ptr));
     
     let window = windowed_context.window();
-    let dpi = Vector2F::splat(window.hidpi_factor() as f32);
+    let mut dpi = window.hidpi_factor() as f32;
 
     let proxy = SceneProxy::new(RayonExecutor);
-
+    let mut framebuffer_size = (size * Vector2F::splat(scale * dpi)).to_i32();
     // Create a Pathfinder renderer.
     let mut renderer = Renderer::new(GLDevice::new(GLVersion::GL3, 0),
         &EmbeddedResourceLoader,
-        DestFramebuffer::full_window((size * scale * dpi).to_i32()),
-        RendererOptions { background_color: Some(ColorF::new(0.9, 0.85, 0.7, 1.0)) }
+        DestFramebuffer::full_window(framebuffer_size),
+        RendererOptions { background_color: Some(ColorF::new(0.9, 0.85, 0.8, 1.0)) }
     );
 
     let mut needs_update = true;
     let mut needs_redraw = true;
-    let mut drag_offset: Option<Vector2F> = None;
     let mut cursor_pos = Vector2F::default();
+    let mut dragging = false;
     event_loop.run(move |event, _, control_flow| {
+        dbg!(&event);
         match event {
             Event::EventsCleared => {
                 if needs_update {
@@ -105,19 +109,19 @@ fn main() -> Result<(), PdfError> {
                     needs_redraw = true;
                 }
                 if needs_redraw {
-                    let window = windowed_context.window();
-                    let dpi = Vector2F::splat(window.hidpi_factor() as f32);
-                    let view_size = size * scale;
-                    let window_size = LogicalSize::new(view_size.x() as f64, view_size.y() as f64);
-                    window.set_inner_size(window_size);
-                    renderer.set_main_framebuffer_size((view_size * dpi).to_i32());
-                    proxy.set_view_box(
-                        RectF::new(Vector2F::default(), view_size * dpi)
-                    );
-
+                    let physical_size = window_size * Vector2F::splat(dpi);
+                    let new_framebuffer_size = physical_size.to_i32();
+                    if new_framebuffer_size != framebuffer_size {
+                        framebuffer_size = new_framebuffer_size;
+                        windowed_context.resize(PhysicalSize::new(framebuffer_size.x() as f64, framebuffer_size.y() as f64));
+                        renderer.replace_dest_framebuffer(DestFramebuffer::full_window(framebuffer_size));
+                    }
+                    proxy.set_view_box(RectF::new(Vector2F::default(), physical_size));
                     let options = BuildOptions {
                         transform: RenderTransform::Transform2D(
-                            Transform2F::from_scale(dpi) * Transform2F::from_translation(translation) * Transform2F::from_scale(scale)
+                            Transform2F::from_translation(physical_size.scale(0.5)) *
+                            Transform2F::from_scale(Vector2F::splat(dpi * scale)) *
+                            Transform2F::from_translation(-view_center)
                         ),
                         dilation: Vector2F::default(),
                         subpixel_aa_enabled: false
@@ -128,15 +132,23 @@ fn main() -> Result<(), PdfError> {
                     needs_redraw = false;
                 }
             },
-            Event::DeviceEvent { 
-                event: DeviceEvent::Key(KeyboardInput {
-                    state: ElementState::Pressed,
-                    virtual_keycode: Some(keycode),
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::HiDpiFactorChanged(new_dpi) => {
+                    dpi = new_dpi as f32;
+                    needs_redraw = true;
+                }
+                WindowEvent::Resized(LogicalSize {width, height}) => {
+                    window_size = Vector2F::new(width as f32, height as f32);
+                    needs_redraw = true;
+                }
+                WindowEvent::KeyboardInput{
+                    input: KeyboardInput {
+                            state: ElementState::Pressed,
+                            virtual_keycode: Some(keycode),
+                            ..
+                        },
                     ..
-                }),
-                ..
-            } => {
-                match keycode {
+                }  => match keycode {
                     VirtualKeyCode::Escape => {
                         *control_flow = ControlFlow::Exit;
                     }
@@ -153,54 +165,53 @@ fn main() -> Result<(), PdfError> {
                         }
                     }
                     VirtualKeyCode::Add => {
-                        scale = scale * Vector2F::splat(2.0f32.sqrt());
+                        scale *= 2.0f32.sqrt();
                         needs_update = true;
                     }
                     VirtualKeyCode::Subtract => {
-                        scale = scale * Vector2F::splat(0.5f32.sqrt());
+                        scale *= 0.5f32.sqrt();
                         needs_update = true;
                     }
                     _ => {}
-                }
-            }
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved {
-                    position: LogicalPosition { x, y }, ..
-                }, ..
-            } => {
-                cursor_pos = Vector2F::new(x as f32, y as f32);
-                if let Some(offset) = drag_offset {
-                    translation = cursor_pos + offset;
-                    needs_redraw = true;
-                }
-            }
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput {
-                    button: MouseButton::Left,
-                    state, ..
-                }, ..
-            } => {
-                drag_offset = match state {
-                    ElementState::Pressed => Some(translation - cursor_pos),
-                    ElementState::Released => {
-                        dbg!(translation);
-                        None
+                },
+                WindowEvent::CursorMoved { position: LogicalPosition { x, y }, .. } => {
+                    let new_pos = Vector2F::new(x as f32, y as f32);
+                    let cursor_delta = new_pos - cursor_pos;
+                    cursor_pos = new_pos;
+
+                    if dragging {
+                        view_center = view_center - cursor_delta.scale(1.0 / scale);
+                        needs_redraw = true;
                     }
-                };
+                },
+                WindowEvent::MouseInput { button: MouseButton::Left, state, .. } => {
+                    dragging = match state {
+                        ElementState::Pressed => true,
+                        ElementState::Released => false
+                    };
+                },
+                WindowEvent::MouseWheel { delta, modifiers, .. } => {
+                    let delta = match delta {
+                        MouseScrollDelta::PixelDelta(LogicalPosition { x: dx, y: dy }) => Vector2F::new(dx as f32, dy as f32),
+                        MouseScrollDelta::LineDelta(dx, dy) => Vector2F::new(dx as f32, -dy as f32).scale(10.)
+                    };
+                    match modifiers {
+                        ModifiersState { ctrl: false, .. } => {
+                            view_center = view_center - delta.scale(1.0 / scale);
+                            needs_redraw = true;
+                        },
+                        _ => {}
+                    }
+                }
+                WindowEvent::RedrawRequested => {
+                    needs_redraw = true;
+                },
+                WindowEvent::CloseRequested => {
+                    println!("The close button was pressed; stopping");
+                    *control_flow = ControlFlow::Exit
+                },
+                _ => {}
             }
-            Event::WindowEvent {
-                event: WindowEvent::RedrawRequested,
-                ..
-            } => {
-                needs_redraw = true;
-            },
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                println!("The close button was pressed; stopping");
-                *control_flow = ControlFlow::Exit
-            },
             _ => *control_flow = ControlFlow::Wait,
         }
     });
