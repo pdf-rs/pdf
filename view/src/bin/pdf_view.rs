@@ -200,6 +200,10 @@ fn main() -> Result<(), PdfError> {
                             view_center = view_center - delta.scale(1.0 / scale);
                             needs_redraw = true;
                         },
+                        ModifiersState { ctrl: true, .. } => {
+                            scale *= (-0.02 * delta.y()).exp();
+                            needs_redraw = true;
+                        }
                         _ => {}
                     }
                 }
