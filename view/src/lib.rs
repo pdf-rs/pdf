@@ -164,7 +164,7 @@ impl<'a, S: Surface> TextState<'a, S> {
         self.line_matrix = m;
     }
     fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(GlyphId, bool)>, style: &S::Style) {
-        let e = self.font_entry.as_ref().unwrap();
+        let e = self.font_entry.as_ref().expect("no font");
 
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
@@ -172,7 +172,7 @@ impl<'a, S: Surface> TextState<'a, S> {
         
         for (gid, is_space) in glyphs {
             debug!("gid: {:?}", gid);
-            let glyph = e.font.glyph(gid).unwrap();
+            let glyph = e.font.glyph(gid).expect("no glyph");
             
             let transform = self.root_transform * self.text_matrix * tr;
             let path = glyph.path.transform(transform);
@@ -200,9 +200,9 @@ impl<'a, S: Surface> TextState<'a, S> {
                 return self.add_text_cid(surface, data, style);
             }
             
-            self.add_glyphs(surface, data.iter().map(|&b| {
-                let gid = e.font.gid_for_codepoint(b as u32).unwrap_or(GlyphId(b as u32));
-                (gid, b == 0x20)
+            self.add_glyphs(surface, data.iter().filter_map(|&b| {
+                let gid = e.font.gid_for_codepoint(b as u32)?;
+                Some((gid, b == 0x20))
             }), style);
         }
     }
@@ -434,7 +434,7 @@ impl<S: Surface + 'static> Cache<S> {
                     stack.push(graphics_state);
                 }
                 "Q" => { // restore
-                    graphics_state = stack.pop().unwrap();
+                    graphics_state = stack.pop().expect("graphcs stack is empty");
                 }
                 "cm" => { // modify transformation matrix 
                     ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {

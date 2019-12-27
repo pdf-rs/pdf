@@ -29,6 +29,7 @@ use glutin::{
     GlRequest, Api
 };
 use gl;
+use std::time::Instant;
 
 use env_logger;
 use pdf::file::File as PdfFile;
@@ -91,10 +92,10 @@ fn main() -> Result<(), PdfError> {
     let mut cursor_pos = Vector2F::default();
     let mut dragging = false;
     event_loop.run(move |event, _, control_flow| {
-        dbg!(&event);
         match event {
             Event::EventsCleared => {
                 if needs_update {
+                    let t0 = Instant::now();
                     println!("showing page {}", current_page);
                     let scene = match file.get_page(current_page).and_then(|page| cache.render_page(&file, &page)) {
                         Ok(scene) => scene,
@@ -104,11 +105,14 @@ fn main() -> Result<(), PdfError> {
                         }
                     };
                     proxy.replace_scene(scene);
+                    println!("update scene: {}ms", t0.elapsed().as_millis());
 
                     needs_update = false;
                     needs_redraw = true;
                 }
                 if needs_redraw {
+                    let t0 = Instant::now();
+
                     let physical_size = window_size * Vector2F::splat(dpi);
                     let new_framebuffer_size = physical_size.to_i32();
                     if new_framebuffer_size != framebuffer_size {
@@ -129,6 +133,8 @@ fn main() -> Result<(), PdfError> {
                     proxy.build_and_render(&mut renderer, options);
                     windowed_context.swap_buffers().unwrap();
 
+                    println!("render: {}ms", t0.elapsed().as_millis());
+                    
                     needs_redraw = false;
                 }
             },
