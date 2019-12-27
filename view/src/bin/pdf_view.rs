@@ -33,6 +33,7 @@ use gl;
 use env_logger;
 use pdf::file::File as PdfFile;
 use pdf::error::PdfError;
+use pdf::object::Rect;
 use view::Cache;
 
 fn main() -> Result<(), PdfError> {
@@ -44,9 +45,10 @@ fn main() -> Result<(), PdfError> {
     
     let mut current_page = 0;
     let mut cache = Cache::new();
-    // Render the canvas to screen.
-    let scene: Scene = cache.render_page(&file, &*file.get_page(current_page)?)?;
-    let size = scene.view_box().size();
+    
+    let page = file.get_page(current_page)?;
+    let Rect { left, right, top, bottom } = page.media_box(&file).expect("no media box");
+    let size = Vector2F::new(right - left, top - bottom);
     
     let event_loop = EventLoop::new();
 
@@ -72,7 +74,7 @@ fn main() -> Result<(), PdfError> {
     let window = windowed_context.window();
     let dpi = Vector2F::splat(window.hidpi_factor() as f32);
 
-    let proxy = SceneProxy::from_scene(scene, RayonExecutor);
+    let proxy = SceneProxy::new(RayonExecutor);
 
     // Create a Pathfinder renderer.
     let mut renderer = Renderer::new(GLDevice::new(GLVersion::GL3, 0),
@@ -83,8 +85,8 @@ fn main() -> Result<(), PdfError> {
 
     let mut needs_update = true;
     let mut needs_redraw = true;
-    let mut drag_start: Option<LogicalPosition> = None;
-    let mut cursor_pos = LogicalPosition::new(0., 0.);
+    let mut drag_offset: Option<Vector2F> = None;
+    let mut cursor_pos = Vector2F::default();
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::EventsCleared => {
@@ -163,12 +165,12 @@ fn main() -> Result<(), PdfError> {
             }
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved {
-                    position, ..
+                    position: LogicalPosition { x, y }, ..
                 }, ..
             } => {
-                cursor_pos = position;
-                if let Some(start) = drag_start {
-                    translation = Vector2F::new((position.x - start.x) as f32, (position.y - start.y) as f32);
+                cursor_pos = Vector2F::new(x as f32, y as f32);
+                if let Some(offset) = drag_offset {
+                    translation = cursor_pos + offset;
                     needs_redraw = true;
                 }
             }
@@ -178,9 +180,12 @@ fn main() -> Result<(), PdfError> {
                     state, ..
                 }, ..
             } => {
-                drag_start = match state {
-                    ElementState::Pressed => Some(cursor_pos),
-                    _ => None
+                drag_offset = match state {
+                    ElementState::Pressed => Some(translation - cursor_pos),
+                    ElementState::Released => {
+                        dbg!(translation);
+                        None
+                    }
                 };
             }
             Event::WindowEvent {

@@ -324,14 +324,12 @@ impl<S: Surface + 'static> Cache<S> {
     
     pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<S> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
-        
-        let resources = page.resources(file)?;
-        
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
         let mut surface = S::new(rect.size());
         let root_tansformation = Transform2F::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
         
+        let resources = page.resources(file)?;
         // make sure all fonts are in the cache, so we can reference them
         for font in resources.fonts.values() {
             self.load_font(font);
