@@ -70,6 +70,9 @@ pub struct Catalog {
 // URI: dict
 // AcroForm: dict
 // Metadata: stream
+    #[pdf(key="Metadata")]
+    pub metadata: Option<Stream>,
+
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
 // MarkInfo: dict
@@ -84,7 +87,6 @@ pub struct Catalog {
 // Collection: dict
 // NeedsRendering: bool
 }
-
 
 #[derive(Object, Debug, Default)]
 #[pdf(Type = "Pages")]
