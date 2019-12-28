@@ -97,7 +97,7 @@ impl<B: Backend> Resolve for Storage<B> {
 
 pub struct File<B: Backend> {
     storage:    Storage<B>,
-    trailer:    Trailer,
+    pub trailer:    Trailer,
 }
 impl<B: Backend> Resolve for File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
