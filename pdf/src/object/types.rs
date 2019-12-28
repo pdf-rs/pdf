@@ -640,16 +640,16 @@ pub struct StructTreeRoot {
 #[derive(Object, Debug)]
 pub struct StructElem {
     #[pdf(key="S")]
-    /// `S`
     struct_type: StructType,
+
     #[pdf(key="P")]
-    /// `P`
     parent: Ref<StructElem>,
+
     #[pdf(key="ID")]
-    /// `ID`
     id: Option<PdfString>,
-    #[pdf(key="Pg")]
+
     /// `Pg`: A page object representing a page on which some or all of the content items designated by the K entry are rendered.
+    #[pdf(key="Pg")]
     page: Option<Ref<Page>>,
 }
 
@@ -669,5 +669,8 @@ pub enum StructType {
     NonStruct,
     Private,
     Book,
+    Lbl,
+    Reference,
+    P
 }
 
