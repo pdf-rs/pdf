@@ -34,8 +34,8 @@ tuple = { git = "https://github.com/s3bk/tuple" }
 glob = "0.2.11"
 chrono = "0.4.0"
 once_cell = "0.2"
-log = "*"
-tempfile = "*"
+log = "0.4.8"
+tempfile = "3.1.0"
 md5 = "0.6"
 
 [lib]

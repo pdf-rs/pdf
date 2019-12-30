@@ -219,7 +219,11 @@ impl PredictorType {
     /// u8 -> Self. Temporary solution until Rust provides a canonical one.
     pub fn from_u8(n: u8) -> Result<PredictorType> {
         match n {
-            n if n <= 4 => Ok(unsafe { mem::transmute(n) }),
+            0 => Ok(PredictorType::NoFilter),
+            1 => Ok(PredictorType::Sub),
+            2 => Ok(PredictorType::Up),
+            3 => Ok(PredictorType::Avg),
+            4 => Ok(PredictorType::Paeth),
             n => Err(PdfError::IncorrectPredictorType {n}.into())
         }
     }

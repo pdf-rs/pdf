@@ -25,10 +25,10 @@ pub trait Backend: Sized {
         // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
         // u64::MAX has 20 digits + \n\n(2) + %%EOF(5) = 27 bytes max.
 
-        let mut lexer = Lexer::new(self.read(..)?);
+        let mut lexer = Lexer::new(t!(self.read(..)));
         lexer.set_pos_from_end(0);
-        lexer.seek_substr_back(b"startxref")?;
-        Ok(lexer.next()?.to::<usize>()?)
+        t!(lexer.seek_substr_back(b"startxref"));
+        t!(lexer.next()).to::<usize>()
     }
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {

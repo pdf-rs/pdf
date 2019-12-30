@@ -110,7 +110,10 @@ pub enum PdfError {
     Other { msg: String },
     
     #[snafu(display("NoneError at {}:{}:{}", file, line, column))]
-    NoneError { file: &'static str, line: u32, column: u32 }
+    NoneError { file: &'static str, line: u32, column: u32 },
+
+    #[snafu(display("Try at {}:{}:{}", file, line, column))]
+    Try { file: &'static str, line: u32, column: u32, source: Box<PdfError> }
 }
 impl PdfError {
     pub fn trace(&self) {
@@ -161,6 +164,16 @@ macro_rules! try_opt {
             })
         }
     )
+}
+
+#[macro_export]
+macro_rules! t {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(e) => return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), source: e.into() })
+        }
+    };
 }
 
 macro_rules! err_from {
