@@ -61,16 +61,16 @@ impl<B: Backend> Resolve for Storage<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(ref p) => Ok((*p).clone()),
-            None => match self.refs.get(r.id)? {
+            None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::new(self.backend.read(pos..)?);
-                    let p = parse_indirect_object(&mut lexer, self, self.decoder.as_ref())?.1;
+                    let mut lexer = Lexer::new(t!(self.backend.read(pos ..)));
+                    let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref())).1;
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
-                    let obj_stream = self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */})?;
-                    let obj_stream = ObjectStream::from_primitive(obj_stream, self)?;
-                    let slice = obj_stream.get_object_slice(index)?;
+                    let obj_stream = t!(self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}));
+                    let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
+                    let slice = t!(obj_stream.get_object_slice(index));
                     parse(slice, self)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
@@ -86,8 +86,8 @@ impl<B: Backend> Resolve for Storage<B> {
             return any.clone().downcast();
         }
         
-        let primitive = self.resolve(r.get_inner())?;
-        let obj = T::from_primitive(primitive, self)?;
+        let primitive = t!(self.resolve(r.get_inner()));
+        let obj = t!(T::from_primitive(primitive, self));
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
         
@@ -115,12 +115,13 @@ impl File<Vec<u8>> {
 impl<B: Backend> File<B> {
     /// Opens the file at `path` and uses Vec<u8> as backend.
     pub fn from_data(backend: B) -> Result<Self> {
-        let (refs, trailer) = backend.read_xref_table_and_trailer()?;
+        let (refs, trailer) = t!(backend.read_xref_table_and_trailer());
+        
         let mut storage = Storage::new(backend, refs);
 
-        let trailer = Trailer::from_primitive(Primitive::Dictionary(trailer), &storage)?;
+        let trailer = t!(Trailer::from_primitive(Primitive::Dictionary(trailer), &storage));
         if let Some(ref dict) = trailer.encrypt_dict {
-            storage.decoder = Some(Decoder::default(&dict, trailer.id[0].as_bytes())?);
+            storage.decoder = Some(t!(Decoder::default(&dict, trailer.id[0].as_bytes())));
         }
         
         Ok(File {

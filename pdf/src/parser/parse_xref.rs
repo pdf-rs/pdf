@@ -49,10 +49,10 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
 pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
-    let xref_stream = parse_indirect_stream(lexer, resolve)?.1;
+    let xref_stream = t!(parse_indirect_stream(lexer, resolve)).1;
     let trailer = xref_stream.info.clone();
-    let xref_stream = Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve)?;
-    let mut data_left = xref_stream.data()?;
+    let xref_stream = t!(Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve));
+    let mut data_left = t!(xref_stream.data());
 
     let width = &xref_stream.w;
 
@@ -61,7 +61,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
 
     let mut sections = Vec::new();
     for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {
-        let section = parse_xref_section_from_stream(first_id, num_objects, width, &mut data_left)?;
+        let section = t!(parse_xref_section_from_stream(first_id, num_objects, width, &mut data_left));
         sections.push(section);
     }
 
@@ -75,19 +75,19 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
     
     // Keep reading subsections until we hit `trailer`
     while !lexer.peek()?.equals(b"trailer") {
-        let start_id = lexer.next_as::<u32>()?;
-        let num_ids = lexer.next_as::<u32>()?;
+        let start_id = t!(lexer.next_as::<u32>());
+        let num_ids = t!(lexer.next_as::<u32>());
 
         let mut section = XRefSection::new(start_id);
 
         for _ in 0..num_ids {
-            let w1 = lexer.next()?;
-            let w2 = lexer.next()?;
-            let w3 = lexer.next()?;
+            let w1 = t!(lexer.next());
+            let w2 = t!(lexer.next());
+            let w3 = t!(lexer.next());
             if w3.equals(b"f") {
-                section.add_free_entry(w1.to::<ObjNr>()?, w2.to::<GenNr>()?);
+                section.add_free_entry(t!(w1.to::<ObjNr>()), t!(w2.to::<GenNr>()));
             } else if w3.equals(b"n") {
-                section.add_inuse_entry(w1.to::<usize>()?, w2.to::<GenNr>()?);
+                section.add_inuse_entry(t!(w1.to::<usize>()), t!(w2.to::<GenNr>()));
             } else {
                 return Err(PdfError::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.to_string(), expected: "f or n"});
             }
@@ -95,15 +95,15 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
         sections.push(section);
     }
     // Read trailer
-    lexer.next_expect("trailer")?;
-    let trailer = parse_with_lexer(lexer, resolve)?;
-    let trailer = trailer.to_dictionary(resolve)?;
+    t!(lexer.next_expect("trailer"));
+    let trailer = t!(parse_with_lexer(lexer, resolve));
+    let trailer = t!(trailer.to_dictionary(resolve));
  
     Ok((sections, trailer))
 }
 
 pub fn read_xref_and_trailer_at(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
-    let next_word = lexer.next()?;
+    let next_word = t!(lexer.next());
     if next_word.equals(b"xref") {
         // Read classic xref table
         parse_xref_table_and_trailer(lexer, resolve)

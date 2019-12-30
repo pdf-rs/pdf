@@ -3,7 +3,7 @@
 
 use std;
 use std::str::FromStr;
-use std::ops::Range;
+use std::ops::{Range, Deref};
 use std::io::SeekFrom;
 
 use crate::error::*;
@@ -115,7 +115,7 @@ impl<'a> Lexer<'a> {
     pub fn peek(&self) -> Result<Substr<'a>> {
         match self.next_word() {
             Ok((substr, _)) => Ok(substr),
-            Err(PdfError::EOF) => Ok(self.new_substr(self.pos..self.pos)),
+            Err(PdfError::EOF { .. }) => Ok(self.new_substr(self.pos..self.pos)),
             Err(e) => Err(e),
         }
 
@@ -141,7 +141,7 @@ impl<'a> Lexer<'a> {
         // Move away from eventual whitespace
         let pos = boundary(self.buf, pos, is_whitespace);
         if pos >= self.buf.len() {
-            Err(PdfError::EOF)
+            Err(PdfError::OutOfRange { requested: self.buf.len() .. pos+1, len: self.buf.len() })
         } else {
             Ok(pos)
         }
@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
     // TODO ^ backward case is actually not tested or.. thought about that well.
     fn next_word(&self) -> Result<(Substr<'a>, usize)> {
         if self.pos == self.buf.len() {
-            return Err(PdfError::EOF);
+            return Err(PdfError::OutOfRange { requested: self.buf.len() .. self.pos+1, len: self.buf.len() });
         }
         let mut pos = self.skip_whitespace(self.pos)?;
         while self.buf.get(pos) == Some(&b'%') {
@@ -197,7 +197,7 @@ impl<'a> Lexer<'a> {
         if pos < self.buf.len() {
             Ok(pos + 1)
         } else {
-            Err(PdfError::EOF)
+            Err(PdfError::OutOfRange { requested: self.buf.len() .. pos+1, len: self.buf.len() })
         }
     }
 
@@ -279,8 +279,9 @@ impl<'a> Lexer<'a> {
     // TODO: seek_substr and seek_substr_back should use next() or back()?
     /// Moves pos to after the found `substr`. Returns Substr with traversed text if `substr` is found.
     #[allow(dead_code)]
-    pub fn seek_substr(&mut self, substr: &[u8]) -> Option<Substr<'a>> {
+    pub fn seek_substr(&mut self, substr: impl AsRef<[u8]>) -> Option<Substr<'a>> {
         //
+        let substr = substr.as_ref();
         let start = self.pos;
         let mut matched = 0;
         loop {
@@ -300,7 +301,6 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         Some(self.new_substr(start..(self.pos - substr.len())))
     }
-
 
     //TODO perhaps seek_substr_back should, like back(), move to the first letter of the substr.
     /// Searches for string backward. Moves to after the found `substr`, returns the traversed
@@ -396,7 +396,14 @@ impl<'a> Substr<'a> {
         self.slice
     }
 
-    pub fn equals(&self, other: &[u8]) -> bool {
-        self.slice == other
+    pub fn equals(&self, other: impl AsRef<[u8]>) -> bool {
+        self.slice == other.as_ref()
+    }
+}
+
+impl<'a> Deref for Substr<'a> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.as_slice()
     }
 }

@@ -30,16 +30,17 @@ pub trait Backend: Sized {
         t!(lexer.seek_substr_back(b"startxref"));
         t!(lexer.next()).to::<usize>()
     }
+
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {
-        let xref_offset = self.locate_xref_offset()?;
-        let mut lexer = Lexer::new(self.read(xref_offset..)?);
+        let mut xref_offset = t!(self.locate_xref_offset());
+        let mut lexer = Lexer::new(t!(self.read(xref_offset..)));
         
-        let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, &NoResolve)?;
+        let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
         
-        let highest_id = trailer.get("Size")
+        let highest_id = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
-            .clone().as_integer()?;
+            .as_integer());
 
         let mut refs = XRefTable::new(highest_id as ObjNr);
         for section in xref_sections {
@@ -48,14 +49,14 @@ pub trait Backend: Sized {
         
         let mut prev_trailer = {
             match trailer.get("Prev") {
-                Some(p) => Some(p.as_integer()?),
+                Some(p) => Some(t!(p.as_integer())),
                 None => None
             }
         };
         trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
-            let mut lexer = Lexer::new(self.read(prev_xref_offset as usize..)?);
-            let (xref_sections, trailer) = read_xref_and_trailer_at(&mut lexer, &NoResolve)?;
+            let mut lexer = Lexer::new(t!(self.read(prev_xref_offset as usize..)));
+            let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
             
             for section in xref_sections {
                 refs.add_entries_from(section);
@@ -63,7 +64,7 @@ pub trait Backend: Sized {
             
             prev_trailer = {
                 match trailer.get("Prev") {
-                    Some(p) => Some(p.as_integer()?),
+                    Some(p) => Some(t!(p.as_integer())),
                     None => None
                 }
             };
@@ -75,7 +76,7 @@ pub trait Backend: Sized {
 
 impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
     fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
-        let r = range.to_range(self.len())?;
+        let r = t!(range.to_range(self.len()));
         Ok(&self[r])
     }
     /*
@@ -107,7 +108,11 @@ pub trait IndexRange
             (Some(start), _) if start <= len => Ok(start .. len),
             (None, Some(end)) if end <= len => Ok(0 .. end),
             (Some(start), Some(end)) if start <= end && end <= len => Ok(start .. end),
-            _ => return Err(PdfError::EOF)
+            _ => {
+                let start = self.start().unwrap_or(0);
+                let end = self.end().unwrap_or(len);
+                Err(PdfError::OutOfRange { requested: start .. end, len: len })
+            }
         }
     }
 }

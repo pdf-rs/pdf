@@ -37,7 +37,7 @@ use pdf::error::PdfError;
 use pdf::object::Rect;
 use view::Cache;
 
-fn main() -> Result<(), PdfError> {
+fn run() -> Result<(), PdfError> {
     env_logger::init();
     
     let path = env::args().nth(1).expect("no file given");
@@ -227,4 +227,13 @@ fn main() -> Result<(), PdfError> {
     });
 
     Ok(())
+}
+
+fn main() {
+    match run() {
+        Ok(_) => {},
+        Err(e) => {
+            e.trace();
+        }
+    }
 }

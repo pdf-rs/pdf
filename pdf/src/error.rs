@@ -2,10 +2,14 @@ use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
 use std::borrow::Cow;
+use std::ops::Range;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
     // Syntax / parsing
+    #[snafu(display("Out of range requested {:?}, but len is {}", requested, len))]
+    OutOfRange { requested: Range<usize>, len: usize },
+
     #[snafu(display("Unexpected end of file"))]
     EOF,
     
@@ -113,23 +117,15 @@ pub enum PdfError {
     NoneError { file: &'static str, line: u32, column: u32 },
 
     #[snafu(display("Try at {}:{}:{}", file, line, column))]
-    Try { file: &'static str, line: u32, column: u32, source: Box<PdfError> }
+    Try { file: &'static str, line: u32, column: u32, source: Box<PdfError> },
+
+    #[snafu(display("TryContext at {}:{}:{}: {:?}", file, line, column, context))]
+    TryContext { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> }
 }
 impl PdfError {
     pub fn trace(&self) {
         trace(self, 0);
     }
-}
-pub struct Context {
-    file: &'static str,
-    line: u32,
-    column: u32
-}
-pub struct VerboseError {
-    context: Context,
-    message: Cow<'static, str>,
-    error: PdfError,
-    source: Option<Box<VerboseError>>
 }
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);
@@ -172,6 +168,15 @@ macro_rules! t {
         match $e {
             Ok(v) => v,
             Err(e) => return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), source: e.into() })
+        }
+    };
+    ($e:expr, $($c:expr),*) => {
+        match $e {
+            Ok(v) => v,
+            Err(e) => {
+                let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
+                return Err($crate::PdfError::TryContext { file: file!(), line: line!(), column: column!(), context, source: e.into() })
+            }
         }
     };
 }
