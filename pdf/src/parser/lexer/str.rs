@@ -106,7 +106,7 @@ impl<'a> StringLexer<'a> {
             self.pos += 1;
             Ok(self.buf[self.pos-1])
         } else {
-            Err(PdfError::OutOfRange { requested: self.buf.len() .. self.pos+1, len: self.buf.len() })
+            Err(PdfError::EOF)
         }
     }
     fn back(&mut self) -> Result<()> {
@@ -121,7 +121,7 @@ impl<'a> StringLexer<'a> {
         if self.pos < self.buf.len() {
             Ok(self.buf[self.pos])
         } else {
-            Err(PdfError::OutOfRange { requested: self.buf.len() .. self.pos+1, len: self.buf.len() })
+            Err(PdfError::EOF)
         }
     }
 }
@@ -205,7 +205,7 @@ impl<'a> HexStringLexer<'a> {
             self.pos += 1;
             Ok(self.buf[self.pos - 1])
         } else {
-            Err(PdfError::OutOfRange { requested: self.buf.len() .. self.pos+1, len: self.buf.len() })
+            Err(PdfError::EOF)
         }
     }
 
@@ -222,7 +222,7 @@ impl<'a> HexStringLexer<'a> {
         if self.pos < self.buf.len() {
             Ok(self.buf[self.pos])
         } else {
-            Err(PdfError::OutOfRange { requested: self.buf.len() .. self.pos+1, len: self.buf.len() })
+            Err(PdfError::EOF)
         }
     }
 }

@@ -115,7 +115,7 @@ impl<'a> Lexer<'a> {
     pub fn peek(&self) -> Result<Substr<'a>> {
         match self.next_word() {
             Ok((substr, _)) => Ok(substr),
-            Err(PdfError::EOF { .. }) => Ok(self.new_substr(self.pos..self.pos)),
+            Err(PdfError::EOF) => Ok(self.new_substr(self.pos..self.pos)),
             Err(e) => Err(e),
         }
 
@@ -141,7 +141,7 @@ impl<'a> Lexer<'a> {
         // Move away from eventual whitespace
         let pos = boundary(self.buf, pos, is_whitespace);
         if pos >= self.buf.len() {
-            Err(PdfError::OutOfRange { requested: self.buf.len() .. pos+1, len: self.buf.len() })
+            Err(PdfError::EOF)
         } else {
             Ok(pos)
         }
@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
     // TODO ^ backward case is actually not tested or.. thought about that well.
     fn next_word(&self) -> Result<(Substr<'a>, usize)> {
         if self.pos == self.buf.len() {
-            return Err(PdfError::OutOfRange { requested: self.buf.len() .. self.pos+1, len: self.buf.len() });
+            return Err(PdfError::EOF);
         }
         let mut pos = self.skip_whitespace(self.pos)?;
         while self.buf.get(pos) == Some(&b'%') {
@@ -197,7 +197,7 @@ impl<'a> Lexer<'a> {
         if pos < self.buf.len() {
             Ok(pos + 1)
         } else {
-            Err(PdfError::OutOfRange { requested: self.buf.len() .. pos+1, len: self.buf.len() })
+            Err(PdfError::EOF)
         }
     }
 

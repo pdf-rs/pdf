@@ -7,9 +7,6 @@ use std::ops::Range;
 #[derive(Debug, Snafu)]
 pub enum PdfError {
     // Syntax / parsing
-    #[snafu(display("Out of range requested {:?}, but len is {}", requested, len))]
-    OutOfRange { requested: Range<usize>, len: usize },
-
     #[snafu(display("Unexpected end of file"))]
     EOF,
     
@@ -125,6 +122,13 @@ pub enum PdfError {
 impl PdfError {
     pub fn trace(&self) {
         trace(self, 0);
+    }
+    pub fn is_eof(&self) -> bool {
+        match self {
+            &PdfError::EOF => true,
+            &PdfError::Try { ref source, .. } | PdfError::TryContext { ref source, .. } => source.is_eof(),
+            _ => false
+        }
     }
 }
 fn trace(err: &dyn Error, depth: usize) {

@@ -48,11 +48,13 @@ impl Content {
                     // Operand
                     buffer.push(obj)
                 }
-                Err(PdfError::EOF { .. }) => break,
-                Err(_) => {
+                Err(e) => {
+                    if e.is_eof() {
+                        break;
+                    }
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
-                    let operator = lexer.next()?.to_string();
+                    let operator = t!(lexer.next()).to_string();
                     let operation = Operation::new(operator, replace(&mut buffer, Vec::new()));
                     // Give operands to operation and empty buffer.
                     content.operations.push(operation.clone());
@@ -79,14 +81,15 @@ impl Object for Content {
             Primitive::Array(parts) => {
                 let mut content_data = Vec::new();
                 for p in parts {
-                    content_data.extend(ContentStream::from_primitive(p, resolve)?.data()?);
+                    let part = t!(ContentStream::from_primitive(p, resolve));
+                    let data = t!(part.data());
+                    content_data.extend(data);
                 }
                 Content::parse_from(&content_data, resolve)
             }
             p => {
                 Content::parse_from(
-                    ContentStream::from_primitive(p, resolve)?
-                        .data()?,
+                    t!(t!(ContentStream::from_primitive(p, resolve)).data()),
                     resolve
                 )
             }

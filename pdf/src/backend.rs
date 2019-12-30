@@ -108,11 +108,7 @@ pub trait IndexRange
             (Some(start), _) if start <= len => Ok(start .. len),
             (None, Some(end)) if end <= len => Ok(0 .. end),
             (Some(start), Some(end)) if start <= end && end <= len => Ok(start .. end),
-            _ => {
-                let start = self.start().unwrap_or(0);
-                let end = self.end().unwrap_or(len);
-                Err(PdfError::OutOfRange { requested: start .. end, len: len })
-            }
+            _ => Err(PdfError::ContentReadPastBoundary)
         }
     }
 }
