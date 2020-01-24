@@ -172,18 +172,19 @@ impl<'a, S: Surface> TextState<'a, S> {
         
         for (gid, is_space) in glyphs {
             debug!("gid: {:?}", gid);
-            let glyph = e.font.glyph(gid).expect("no glyph");
+            if let Some(glyph) = e.font.glyph(gid) {
             
-            let transform = self.root_transform * self.text_matrix * tr;
-            let path = glyph.path.transform(transform);
-            surface.draw_path(path, &style);
-            
-            let dx = match is_space {
-                true => self.word_space,
-                false => self.char_space
-            };
-            let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.metrics.advance.x();
-            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+                let transform = self.root_transform * self.text_matrix * tr;
+                let path = glyph.path.transform(transform);
+                surface.draw_path(path, &style);
+                
+                let dx = match is_space {
+                    true => self.word_space,
+                    false => self.char_space
+                };
+                let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.metrics.advance.x();
+                self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+            }
         }
     }
     fn add_text_cid(&mut self, surface: &mut S, data: &[u8], style: &S::Style) {
