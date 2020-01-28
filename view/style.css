@@ -1,0 +1,27 @@
+body {
+    display: flex;
+    flex-direction: row;
+    align-content: center;
+    background-color: rgba(220, 200, 160, 255);
+}
+#canvas {
+    align-self: center;
+    margin-left: auto;
+    margin-right: auto;
+}
+#drop {
+    display: flex;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    flex-direction: row;
+    align-items: center;
+    position: fixed;
+}
+#drop p {
+    text-align: center;
+    flex: auto;
+    font-size: 24pt;
+    color: black;
+}

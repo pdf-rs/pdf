@@ -3,12 +3,14 @@ members = [
     "pdf",
     "pdf_derive",
     "view",
+    "render",
     "examples/read",
     "examples/text",
 ]
 default-members = [
     "pdf",
     "pdf_derive",
+    "render"
    # "view"
 ]
 

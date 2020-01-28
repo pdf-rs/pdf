@@ -3,9 +3,8 @@ use pdf::object::*;
 use std::path::Path;
 use std::env::args_os;
 use std::panic::catch_unwind;
-use view::Cache;
+use pdf_render::Cache;
 use pathfinder_renderer::scene::Scene;
-use env_logger;
 
 fn render_file(path: &Path) -> Vec<Scene> {
     let file = PdfFile::<Vec<u8>>::open(path).unwrap();

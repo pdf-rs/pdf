@@ -50,12 +50,20 @@ pub enum FontData {
     Type0(Type0Font),
     TrueType(TFont),
     CIDFontType0(CIDFont),
-    CIDFontType2(CIDFont),
+    CIDFontType2(CIDFont, Option<Vec<u16>>),
     Other(Dictionary),
-    Standard(&'static str)
+    Standard(&'static [u8])
 }
 
-pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
+macro_rules! fonts {
+    ( $( ($name:tt, $file:tt ), )* ) => {
+        &[ $(
+            ($name, &*include_bytes!(concat!("../../fonts/", $file))),
+        )* ]
+    };
+}
+
+pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = fonts!(
     ("Courier", "CourierStd.otf"),
     ("Courier-Bold", "CourierStd-Bold.otf"),
     ("Courier-Oblique", "CourierStd-Oblique.otf"),
@@ -77,7 +85,7 @@ pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Arial-BoldMT", "Arial-BoldMT.otf"),
     ("ArialMT", "ArialMT.ttf"),
     ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
-];
+);
 impl Object for Font {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -96,19 +104,29 @@ impl Object for Font {
         };
         let _other = dict.clone();
         let data = match STANDARD_FONTS.iter().filter(|&(name, _)| *name == base_font).next() {
-            Some((_, filename)) => {
-                FontData::Standard(filename)
+            Some((_, data)) => {
+                FontData::Standard(data)
             }
             None => match subtype {
                 FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
                 FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
                 FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
                 FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
-                FontType::CIDFontType2 => FontData::CIDFontType2(CIDFont::from_dict(dict, resolve)?),
+                FontType::CIDFontType2 => {
+                    let cid_map = match dict.remove("CIDToGIDMap") {
+                        Some(p @ Primitive::Stream(_)) | Some(p @ Primitive::Reference(_)) => {
+                            let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
+                            let data = stream.data()?;
+                            Some(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect())
+                        },
+                        _ => None
+                    };
+                    let cid_font = CIDFont::from_dict(dict, resolve)?;
+                    FontData::CIDFontType2(cid_font, cid_map)
+                }
                 _ => FontData::Other(dict)
             }
         };
-        
         
         Ok(Font {
             subtype,
@@ -122,17 +140,30 @@ impl Object for Font {
 }
 
 impl Font {
-    pub fn standard_font(&self) -> Option<&str> {
+    pub fn standard_font(&self) -> Option<&[u8]> {
         match self.data {
-            FontData::Standard(name) => Some(name),
+            FontData::Standard(data) => Some(data),
             _ => None
         }
     }
     pub fn embedded_data(&self) -> Option<Result<&[u8]>> {
         match self.data {
             FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data()),
-            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c) => c.font_descriptor.data(),
+            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(),
             FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.data(),
+            _ => None
+        }
+    }
+    pub fn is_cid(&self) -> bool {
+        match self.data {
+            FontData::CIDFontType0(_) | FontData::CIDFontType2(_, _) => true,
+            _ => false
+        }
+    }
+    pub fn cid_to_gid_map(&self) -> Option<&[u16]> {
+        match self.data {
+            FontData::Type0(ref inner) => inner.descendant_fonts.get(0).and_then(|f| f.cid_to_gid_map()),
+            FontData::CIDFontType2(_, ref data) => data.as_ref().map(|v| &**v),
             _ => None
         }
     }
@@ -155,7 +186,7 @@ impl Font {
                     .copy_from_slice(&info.widths);
                 Ok(Some(widths))
             },
-            FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid) => {
+            FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid, _) => {
                 let mut widths = [cid.default_width; 256];
                 let mut iter = cid.widths.iter();
                 while let Some(ref p) = iter.next() {
@@ -225,9 +256,6 @@ pub struct CIDFont {
     #[pdf(key="W")]
     pub widths: Vec<Primitive>,
 
-    #[pdf(key="CIDToGIDMap")]
-    map: Primitive,
-    
     #[pdf(other)]
     _other: Dictionary
 }

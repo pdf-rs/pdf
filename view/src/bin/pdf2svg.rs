@@ -1,15 +1,13 @@
-use env_logger;
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::error::PdfError;
 use std::env;
 use std::fs;
-use view::Cache;
+use pdf_render::Cache;
 use vector::Svg;
 
 fn main() -> Result<(), PdfError> {
     env_logger::init();
-    
     let mut args = env::args().skip(1);
     let path = args.next().expect("no file given");
     let first_page = args.next().map(|s| s.parse().expect("not a number")).unwrap_or(0);

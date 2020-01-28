@@ -213,6 +213,10 @@ macro_rules! unimplemented {
     () => (bail!("Unimplemented @ {}:{}", file!(), line!()))
 }
 
+#[cfg(not(feature = "dump"))]
+pub fn dump_data(data: &[u8]) {}
+
+#[cfg(feature = "dump")]
 pub fn dump_data(data: &[u8]) {
     use std::io::Write;
     if let Some(path) = ::std::env::var_os("PDF_OUT") {

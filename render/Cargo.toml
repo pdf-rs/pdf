@@ -1,0 +1,17 @@
+[package]
+name = "pdf_render"
+version = "0.1.0"
+authors = ["Sebastian K <s3bk@protonmail.com>"]
+edition = "2018"
+
+[features]
+unstable = ["font/unstable"]
+
+[dependencies]
+log = "0.4.8"
+pdf = { path = "../pdf" }
+font = { git = "https://github.com/pdf-rs/font/" }
+encoding = { git = "https://github.com/pdf-rs/encoding/" }
+
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
+vector = { git = "https://github.com/s3bk/vector/" }

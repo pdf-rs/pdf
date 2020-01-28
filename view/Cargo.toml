@@ -1,33 +1,39 @@
 [package]
-name = "view"
+name = "pdf_view"
 version = "0.1.0"
 authors = ["Sebastian Köln <sebk@rynx.org>"]
 edition = "2018"
-
 [features]
-unstable = ["font/unstable"]
+unstable = ["pdf_render/unstable"]
 
 [dependencies]
 pdf = { path = "../pdf" }
-font = { git = "https://github.com/pdf-rs/font/" }
-encoding = { git = "https://github.com/pdf-rs/encoding/" }
-
-pathfinder_content = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_export = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_gl = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_gpu = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder/" }
-vector = { git = "https://github.com/s3bk/vector/" }
-
-euclid = "0.19"
+pdf_render = { path = "../render" }
+pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
+#pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
+pathfinder_view = { path = "../../pathfinder_view" }
+winit = { git = "https://github.com/s3bk/winit", branch = "experiment" }
 log = "0.4.8"
+vector = { git = "https://github.com/s3bk/vector" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.48"
+js-sys = "*"
+console_log = "*"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pathfinder_view = { path = "../../pathfinder_view", features = ["pan"] }
+#pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view", features = ["pan"] }
 env_logger = "*"
-gl = "0.6"
-glutin = "0.22.0-alpha5"
 
 [[bin]]
 name = "pdf_view"
 
 [[bin]]
 name = "pdf2svg"
+
+[[bin]]
+name = "render"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
