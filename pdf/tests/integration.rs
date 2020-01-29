@@ -1,10 +1,5 @@
-extern crate pdf;
-extern crate memmap;
-extern crate glob;
-
 use std::{str, fs};
 use std::rc::Rc;
-use memmap::Mmap;
 use pdf::file::File;
 use pdf::object::*;
 use pdf::parser::parse;
@@ -28,6 +23,7 @@ macro_rules! run {
 #[test]
 fn open_file() {
     let _ = run!(File::open(file_path!("example.pdf")));
+    #[cfg(feature = "mmap")]
     let _ = run!({
         let file = fs::File::open(file_path!("example.pdf")).expect("can't open file");
         let mmap = unsafe { Mmap::map(&file).expect("can't mmap file") };

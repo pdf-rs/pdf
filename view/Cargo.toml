@@ -10,8 +10,7 @@ unstable = ["pdf_render/unstable"]
 pdf = { path = "../pdf" }
 pdf_render = { path = "../render" }
 pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
-#pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
-pathfinder_view = { path = "../../pathfinder_view" }
+pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 winit = { git = "https://github.com/s3bk/winit", branch = "experiment" }
 log = "0.4.8"
 vector = { git = "https://github.com/s3bk/vector" }
@@ -20,10 +19,10 @@ vector = { git = "https://github.com/s3bk/vector" }
 wasm-bindgen = "0.2.48"
 js-sys = "*"
 console_log = "*"
+console_error_panic_hook = "*"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pathfinder_view = { path = "../../pathfinder_view", features = ["pan"] }
-#pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view", features = ["pan"] }
+pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view", features = ["pan"] }
 env_logger = "*"
 
 [[bin]]
