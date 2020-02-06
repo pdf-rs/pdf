@@ -173,47 +173,55 @@ impl<'a, S: Surface> TextState<'a, S> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(GlyphId, bool)>, style: &S::Style) {
+    fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>, style: &S::Style) {
         let e = self.font_entry.as_ref().expect("no font");
 
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             self.font_size, 0., self.rise) * e.font.font_matrix();
         
-        for (gid, is_space) in glyphs {
-            debug!("gid: {:?}", gid);
+        for (cid, gid) in glyphs {
+            debug!("cid {} -> gid {:?}", cid, gid);
+            let gid = match gid {
+                Some(gid) => gid,
+                None => {
+                    continue;
+                }
+            };
             if let Some(glyph) = e.font.glyph(gid) {
-            
                 let transform = self.root_transform * self.text_matrix * tr;
                 let path = glyph.path.transform(transform);
                 surface.draw_path(path, &style);
                 
-                let dx = match is_space {
-                    true => self.word_space,
-                    false => self.char_space
+                let dx = match cid {
+                    0x20 => self.word_space,
+                    _ => self.char_space
                 };
                 let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.metrics.advance.x();
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+            } else {
+                info!("no glyph for gid {:?}", gid);
             }
         }
     }
     fn draw_text(&mut self, surface: &mut S, data: &[u8], style: &S::Style) {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
+            let get_glyph = |cid: u16| {
+                let gid = match e.encoding {
+                    TextEncoding::CID => Some(GlyphId(cid as u32)),
+                    TextEncoding::Cmap(ref cmap) => cmap.get(&cid).cloned()
+                };
+                (cid, gid)
+            };
             if e.is_cid {
-                self.add_glyphs(surface, data.chunks_exact(2).map(|s| {
-                    let cid = u16::from_be_bytes(s.try_into().unwrap());
-                    let gid = match e.encoding {
-                        TextEncoding::CID => GlyphId(cid as u32),
-                        TextEncoding::Cmap(ref cmap) => cmap.get(&cid).cloned().unwrap_or(GlyphId(0))
-                    };
-                    (gid, cid == 0x20)
-                }), style);
+                self.add_glyphs(
+                    surface,
+                    data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
+                    style
+                );
             } else {
-                self.add_glyphs(surface, data.iter().filter_map(|&b| {
-                    let gid = e.font.gid_for_codepoint(b as u32)?;
-                    Some((gid, b == 0x20))
-                }), style);
+                self.add_glyphs(surface, data.iter().map(|&b| get_glyph(b as u16)), style);
             }
         } else {
             warn!("no font set");
@@ -268,6 +276,7 @@ impl<S: Surface> FontEntry<S> {
                 },
                 _ => {
                     warn!("can't translate from text encoding {:?} to font encoding {:?}", encoding.base, font_encoding);
+                    
                     // assuming same encoding
                     for cp in 0 .. 256 {
                         if let Some(gid) = font.gid_for_codepoint(cp) {
@@ -278,12 +287,17 @@ impl<S: Surface> FontEntry<S> {
             }
             for (&cp, name) in encoding.differences.iter() {
                 debug!("{} -> {}", cp, name);
-                let gid = font.gid_for_name(&name).unwrap_or(GlyphId(cp));
-                cmap.insert(cp as u16, gid);
+                match font.gid_for_name(&name) {
+                    Some(gid) => {
+                        cmap.insert(cp as u16, gid);
+                    }
+                    None => info!("no glyph for name {}", name)
+                }
             }
+            debug!("cmap: {:?}", cmap);
             TextEncoding::Cmap(cmap)
         };
-        dbg!(&encoding);
+        
         FontEntry {
             font: font,
             encoding,

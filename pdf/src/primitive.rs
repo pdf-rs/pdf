@@ -292,6 +292,9 @@ impl Primitive {
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
+    pub fn as_str(&self) -> Option<&str> {
+        self.as_string().ok().and_then(|s| s.as_str().ok())
+    }
     /// Does not accept a Reference
     pub fn as_array(&self) -> Result<&[Primitive]> {
         match self {

@@ -25,3 +25,20 @@ body {
     font-size: 24pt;
     color: black;
 }
+#banner {
+    position: fixed;
+    z-index: 1;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.8);
+    padding: 0.5em;
+    font-family: sans-serif;
+}
+#banner a {
+    color: gold;
+    text-decoration: none;
+    font-weight: bold;
+}
+#banner a:hover {
+    color: white;
+}
