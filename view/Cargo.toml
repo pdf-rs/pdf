@@ -11,7 +11,7 @@ pdf = { path = "../pdf" }
 pdf_render = { path = "../render" }
 pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
-winit = { git = "https://github.com/s3bk/winit", branch = "experiment" }
+winit = { git = "https://github.com/s3bk/winit" }
 log = "0.4.8"
 vector = { git = "https://github.com/s3bk/vector" }
 
@@ -22,7 +22,7 @@ console_log = "*"
 console_error_panic_hook = "*"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view", features = ["pan"] }
+pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 env_logger = "*"
 
 [[bin]]

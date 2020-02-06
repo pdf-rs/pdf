@@ -5,9 +5,9 @@ use pdf::backend::Backend;
 use pdf::error::PdfError;
 use pdf_render::Cache;
 
-use pathfinder_view::{Interactive};
+use pathfinder_view::{Interactive, Config};
 use pathfinder_renderer::scene::Scene;
-use winit::event::{ElementState, VirtualKeyCode};
+use winit::event::{ElementState, VirtualKeyCode, ModifiersState};
 
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
@@ -29,7 +29,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         let scene = self.cache.render_page(&self.file, &page).unwrap();
         scene
     }
-    fn keyboard_input(&mut self, state: ElementState, keycode: VirtualKeyCode) -> bool {
+    fn keyboard_input(&mut self, state: ElementState, keycode: VirtualKeyCode, _modifiers: ModifiersState) -> bool {
         match (state, keycode) {
             (ElementState::Pressed, VirtualKeyCode::Left) if self.current_page > 0 => {
                 self.current_page -= 1;
@@ -68,5 +68,5 @@ pub fn show(data: &Uint8Array) {
     let view = PdfView::new(file);
 
     info!("showing");
-    pathfinder_view::show(view);
+    pathfinder_view::show(view, Config { zoom: false, pan: true });
 }
