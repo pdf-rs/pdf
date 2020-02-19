@@ -14,7 +14,7 @@ fn main() {
     if let Some(ref names) = file.get_root().names {
         let mut count = 0;
         let mut cb = |key: &PdfString, val: &Primitive| {
-            println!("{:?} {:?}", key, val);
+            //println!("{:?} {:?}", key, val);
             count += 1;
         };
         if let Some(ref pages) = names.pages {
