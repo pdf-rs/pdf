@@ -13,7 +13,7 @@ pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 winit = { git = "https://github.com/s3bk/winit" }
 log = "0.4.8"
-vector = { git = "https://github.com/s3bk/vector" }
+vector = { git = "https://github.com/s3bk/vector/", features = ["impl_pathfinder", "impl_svg"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.48"

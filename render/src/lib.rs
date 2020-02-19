@@ -17,10 +17,10 @@ use pdf::encoding::{Encoding as PdfEncoding, BaseEncoding};
 use encoding::{Encoding};
 
 use pathfinder_geometry::{
-    vector::Vector2F, rect::RectF, transform2d::Transform2F
+    vector::Vector2F, rect::RectF, transform2d::Transform2F,
 };
 use font::{self, Font, GlyphId};
-use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline};
+use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline, FillRule};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -94,26 +94,30 @@ impl GraphicsState {
             TextMode::FillThenStroke => self.fill_and_stroke_style(),
             _ => PathStyle {
                 fill: None,
-                stroke: None
+                stroke: None,
+                fill_rule: FillRule::NonZero,
             }
         }
     }
     fn fill_style(&self) -> PathStyle {
         PathStyle {
             fill: Some(self.fill_color),
-            stroke: None
+            stroke: None,
+            fill_rule: FillRule::NonZero,
         }
     }
     fn stroke_style(&self) -> PathStyle {
         PathStyle {
             fill: None,
-            stroke: Some((self.stroke_color, self.stroke_width))
+            stroke: Some((self.stroke_color, self.stroke_width)),
+            fill_rule: FillRule::NonZero,
         }
     }
     fn fill_and_stroke_style(&self) -> PathStyle {
         PathStyle {
             fill: Some(self.fill_color),
-            stroke: Some((self.stroke_color, self.stroke_width))
+            stroke: Some((self.stroke_color, self.stroke_width)),
+            fill_rule: FillRule::NonZero,
         }
     }
 }
@@ -307,7 +311,7 @@ impl<S: Surface> FontEntry<S> {
 }
 
 
-impl<S: Surface + 'static> Cache<S> {
+impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
     pub fn new() -> Cache<S> {
         Cache {
             fonts: HashMap::new()
@@ -357,7 +361,8 @@ impl<S: Surface + 'static> Cache<S> {
         // draw the page
         let style = surface.build_style(PathStyle {
             fill: Some((255,255,255,255)),
-            stroke: Some(((0,0,0,255), 0.25))
+            stroke: Some(((0,0,0,255), 0.25)),
+            fill_rule: FillRule::NonZero,
         });
         path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
         surface.draw_path(path_builder.take(), &style);
