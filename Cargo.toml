@@ -6,6 +6,7 @@ members = [
     "render",
     "examples/read",
     "examples/text",
+    "examples/names",
 ]
 default-members = [
     "pdf",

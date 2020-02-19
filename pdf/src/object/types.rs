@@ -406,8 +406,26 @@ pub enum NameTreeNode<T> {
 /// entry. Hence, `limits`, 
 #[derive(Debug)]
 pub struct NameTree<T> {
-    limits: Option<(PdfString, PdfString)>,
-    node: NameTreeNode<T>,
+    pub limits: Option<(PdfString, PdfString)>,
+    pub node: NameTreeNode<T>,
+}
+impl<T: Object> NameTree<T> {
+    pub fn walk(&self, r: &impl Resolve, callback: &mut dyn FnMut(&PdfString, &T)) -> Result<(), PdfError> {
+        match self.node {
+            NameTreeNode::Leaf(ref items) => {
+                for (name, val) in items {
+                    callback(name, val);
+                }
+            }
+            NameTreeNode::Intermediate(ref items) => {
+                for &tree_ref in items {
+                    let tree = r.get(tree_ref)?;
+                    tree.walk(r, callback)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<T: Object> Object for NameTree<T> {
@@ -469,29 +487,32 @@ impl<T: Object> Object for NameTree<T> {
 }
 
 
-
-
 /// There is one `NameDictionary` associated with each PDF file.
 #[derive(Object, Debug)]
 pub struct NameDictionary {
     #[pdf(key="Pages")]
-    pages: Option<NameTree<Primitive>>,
-    /*
+    pub pages: Option<NameTree<Primitive>>,
+    
     #[pdf(key="Dests")]
-    ap: NameTree<T>,
+    pub dests: Option<NameTree<Primitive>>,
+    
     #[pdf(key="AP")]
-    ap: NameTree<T>,
+    pub ap: Option<NameTree<Primitive>>,
+    
     #[pdf(key="JavaScript")]
-    javascript: NameTree<T>,
+    pub javascript: Option<NameTree<Primitive>>,
+    
     #[pdf(key="Templates")]
-    templates: NameTree<T>,
+    pub templates: Option<NameTree<Primitive>>,
+    
     #[pdf(key="IDS")]
-    ids: NameTree<T>,
+    pub ids: Option<NameTree<Primitive>>,
+    
     #[pdf(key="URLS")]
-    urls: NameTree<T>,
-    */
+    pub urls: Option<NameTree<Primitive>>,
+    
     #[pdf(key="EmbeddedFiles")]
-    embedded_files: Option<FileSpec>,
+    pub embedded_files: Option<FileSpec>,
     /*
     #[pdf(key="AlternativePresentations")]
     alternate_presentations: NameTree<AlternatePresentation>,
