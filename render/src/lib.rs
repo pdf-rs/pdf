@@ -392,7 +392,8 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
             stroke_color: (0, 0, 0, 255),
         };
         
-        let mut iter = try_opt!(page.contents.as_ref()).operations.iter();
+        let contents = file.get(try_opt!(page.contents))?;
+        let mut iter = contents.operations.iter();
         while let Some(op) = iter.next() {
             debug!("{}", op);
             let ref ops = op.operands;

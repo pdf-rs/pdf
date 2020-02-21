@@ -10,7 +10,7 @@ use pdf::primitive::Primitive;
 use pdf::font::*;
 use pdf::parser::Lexer;
 use pdf::parser::parse_with_lexer;
-use pdf::object::NoResolve;
+use pdf::object::{Resolve, NoResolve};
 use pdf::encoding::BaseEncoding;
 
 use byteorder::BE;
@@ -151,7 +151,9 @@ fn main() {
             }
         }
         let mut current_font = None;
-        for Operation { ref operator, ref operands } in &page.unwrap().contents.as_ref().unwrap().operations {
+        let page = page.unwrap();
+        let contents = file.get(page.contents.unwrap()).unwrap();
+        for Operation { ref operator, ref operands } in &contents.operations {
             // println!("{} {:?}", operator, operands);
             match operator.as_str() {
                 "gs" => {

@@ -125,7 +125,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         let mut array = Vec::new();
         // Array
         loop {
-            let element = t!(parse_with_lexer(lexer, r));
+            let element = t!(parse_with_lexer_ctx(lexer, r, ctx));
             array.push(element.clone());
 
             // Exit if closing delimiter

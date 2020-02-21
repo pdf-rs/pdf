@@ -86,13 +86,7 @@ impl<B: Backend> Resolve for Storage<B> {
             return any.clone().downcast();
         }
 
-        let mut primitive = t!(self.resolve(key));
-        if let Some(ref decoder) = self.decoder {
-            match primitive {
-                Primitive::String(ref mut string) => decoder.decrypt(key.id, key.gen, &mut string.data),
-                _ => {}
-            }
-        }
+        let primitive = t!(self.resolve(key));
         let obj = t!(T::from_primitive(primitive, self));
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
@@ -145,14 +139,14 @@ impl<B: Backend> File<B> {
         (0 .. self.num_pages()).map(move |n| self.get_page(n))
     }
     pub fn num_pages(&self) -> u32 {
-        match self.trailer.root.pages {
+        match *self.trailer.root.pages {
             PagesNode::Tree(ref tree) => tree.count,
             PagesNode::Leaf(_) => 1
         }
     }
     
     pub fn get_page(&self, n: u32) -> Result<PageRc> {
-        match self.trailer.root.pages {
+        match *self.trailer.root.pages {
             PagesNode::Tree(ref tree) => {
                 tree.page(self, n)
             }

@@ -54,16 +54,19 @@ pub type PageRc = Rc<Page>;
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: PagesNode,
+    pub pages: Rc<PagesNode>,
+
 // PageLabels: number_tree,
     #[pdf(key="Names")]
     pub names: Option<NameDictionary>,
     
-// Dests: Dict
+    #[pdf(key="Dests")]
+    pub dests: Option<Ref<Dictionary>>,
+
 // ViewerPreferences: dict
 // PageLayout: name
 // PageMode: name
-// Outlines: dict
+
     #[pdf(key="Outlines")]
     pub outlines: Option<Outlines>,
 // Threads: array
@@ -163,7 +166,7 @@ pub struct Page {
     pub trim_box:   Option<Rect>,
     
     #[pdf(key="Contents")]
-    pub contents:   Option<Content>
+    pub contents:   Option<Ref<Content>>
 }
 fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -> Result<Option<T>>
     where F: Fn(&PageTree) -> Option<T>
@@ -488,6 +491,75 @@ impl<T: Object> Object for NameTree<T> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum DestView {
+    // left, top, zoom
+    XYZ { left: f32, top: f32, zoom: f32 },
+    Fit,
+    FitH { top: f32 },
+    FitV { left: f32 },
+    FitR(Rect),
+    FitB,
+    FitBH { top: f32 }
+}
+
+#[derive(Debug, Clone)]
+pub struct Dest {
+    pub page: Ref<PagesNode>,
+    pub view: DestView
+}
+impl Object for Dest {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
+        unimplemented!();
+    }
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let p = match p {
+            Primitive::Reference(r) => resolve.resolve(r)?,
+            p => p
+        };
+        let p = match p {
+            Primitive::Dictionary(mut dict) => dict.require("Dest", "D")?,
+            p => p
+        };
+        let array = p.as_array()?;
+        let page = Ref::from_primitive(try_opt!(array.get(0)).clone(), resolve)?;
+        let kind = try_opt!(array.get(1));
+        let view = match kind.as_name()? {
+            "XYZ" => DestView::XYZ {
+                left: try_opt!(array.get(2)).as_number()?,
+                top: try_opt!(array.get(3)).as_number()?,
+                zoom: match try_opt!(array.get(4)) {
+                    &Primitive::Null => 0.0,
+                    &Primitive::Integer(n) => n as f32,
+                    &Primitive::Number(f) => f,
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() })
+                }
+            },
+            "Fit" => DestView::Fit,
+            "FitH" => DestView::FitH {
+                top: try_opt!(array.get(2)).as_number()?
+            },
+            "FitV" => DestView::FitV {
+                left: try_opt!(array.get(2)).as_number()?
+            },
+            "FitR" => DestView::FitR(Rect {
+                left:   try_opt!(array.get(2)).as_number()?,
+                bottom: try_opt!(array.get(3)).as_number()?,
+                right:  try_opt!(array.get(4)).as_number()?,
+                top:    try_opt!(array.get(5)).as_number()?,
+            }),
+            "FitB" => DestView::FitB,
+            "FitBH" => DestView::FitBH {
+                top: try_opt!(array.get(2)).as_number()?
+            },
+            name => return Err(PdfError::UnknownVariant { id: "Dest", name: name.into() })
+        };
+        Ok(Dest {
+            page,
+            view
+        })
+    }
+}
 
 /// There is one `NameDictionary` associated with each PDF file.
 #[derive(Object, Debug)]
@@ -496,7 +568,7 @@ pub struct NameDictionary {
     pub pages: Option<NameTree<Primitive>>,
     
     #[pdf(key="Dests")]
-    pub dests: Option<NameTree<Primitive>>,
+    pub dests: Option<NameTree<Dest>>,
     
     #[pdf(key="AP")]
     pub ap: Option<NameTree<Primitive>>,
@@ -627,7 +699,7 @@ pub struct OutlineItem {
     pub count:  i32,
 
     #[pdf(key="Dest")]
-    pub dest: Option<Primitive>,
+    pub dest: Option<PdfString>,
 
     #[pdf(key="A")]
     pub action: Option<Dictionary>,
