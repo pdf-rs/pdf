@@ -396,7 +396,8 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         while let Some(op) = iter.next() {
             debug!("{}", op);
             let ref ops = op.operands;
-            match op.operator.as_str() {
+            let op = op.operator.as_str();
+            match &*op {
                 "m" => { // move x y
                     ops_p!(ops, p => {
                         path_builder.move_to(p);
@@ -497,7 +498,8 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 }
                 "d" => { // line dash [ array phase ]
                 }
-                "gs" => ops!(ops, gs: &str => { // set from graphic state dictionary
+                "gs" => ops!(ops, gs: &Primitive => { // set from graphic state dictionary
+                    let gs = gs.as_name()?;
                     let gs = try_opt!(resources.graphics_states.get(gs));
                     
                     if let Some(lw) = gs.line_width {
@@ -571,7 +573,8 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 }),
                 
                 // text font
-                "Tf" => ops!(ops, font_name: &str, size: f32 => {
+                "Tf" => ops!(ops, font_name: &Primitive, size: f32 => {
+                    let font_name = font_name.as_name()?;
                     let font = try_opt!(resources.fonts.get(font_name));
                     if let Some(e) = self.get_font(&font.name) {
                         text_state.font_entry = Some(e);
