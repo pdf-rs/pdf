@@ -64,6 +64,8 @@ pub struct Catalog {
 // PageLayout: name
 // PageMode: name
 // Outlines: dict
+    #[pdf(key="Outlines")]
+    pub outlines: Option<Outlines>,
 // Threads: array
 // OpenAction: array or dict
 // AA: dict
@@ -604,10 +606,54 @@ pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> Result<()>
     Ok(())
 }
 
-#[derive(Object)]
+#[derive(Object, Debug, Clone)]
+pub struct OutlineItem {
+    #[pdf(key="Title")]
+    pub title: Option<PdfString>,
+
+    #[pdf(key="Prev")]
+    pub prev: Option<Ref<OutlineItem>>,
+
+    #[pdf(key="Next")]
+    pub next: Option<Ref<OutlineItem>>,
+    
+    #[pdf(key="First")]
+    pub first: Option<Ref<OutlineItem>>,
+
+    #[pdf(key="Last")]
+    pub last: Option<Ref<OutlineItem>>,
+
+    #[pdf(key="Count", default="0")]
+    pub count:  i32,
+
+    #[pdf(key="Dest")]
+    pub dest: Option<Primitive>,
+
+    #[pdf(key="A")]
+    pub action: Option<Dictionary>,
+
+    #[pdf(key="SE")]
+    pub se: Option<Dictionary>,
+
+    #[pdf(key="C")]
+    pub color: Option<Vec<f32>>,
+
+    #[pdf(key="F")]
+    pub flags: Option<i32>,
+}
+
+#[derive(Object, Debug)]
+#[pdf(Type="Outlines?")]
 pub struct Outlines {
-    #[pdf(key="Count")]
-    pub count:  usize
+    #[pdf(key="Count", default="0")]
+    pub count:  i32,
+
+    #[pdf(key="First")]
+    pub first: Option<Ref<OutlineItem>>,
+
+    #[pdf(key="Last")]
+    pub last: Option<Ref<OutlineItem>>,
+
 }
 
 #[derive(Debug, Copy, Clone)]

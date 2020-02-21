@@ -13,9 +13,9 @@ pub enum PdfError {
     #[snafu(display("Error parsing from string: {}", source))]
     Parse { source: Box<dyn Error> },
     
-    #[snafu(display("Invalid UTF-8: {}", source))]
-    Utf8 { source: Box<dyn Error> },
-    
+    #[snafu(display("Invalid encoding: {}", source))]
+    Encoding { source: Box<dyn Error> },
+
     #[snafu(display("Unexpected token '{}' at {} - expected '{}'", lexeme, pos, expected))]
     UnexpectedLexeme {pos: usize, lexeme: String, expected: &'static str},
     
@@ -196,7 +196,7 @@ macro_rules! err_from {
         )*
     )
 }
-err_from!(std::str::Utf8Error, std::string::FromUtf8Error => Utf8);
+err_from!(std::str::Utf8Error, std::string::FromUtf8Error, std::string::FromUtf16Error => Encoding);
 err_from!(std::num::ParseIntError, std::string::ParseError => Parse);
 
 macro_rules! err {

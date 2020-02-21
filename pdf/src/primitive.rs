@@ -7,6 +7,7 @@ use std::ops::{Index, Range};
 use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
 use std::convert::TryInto;
+use std::borrow::Cow;
 use itertools::Itertools;
 
 #[derive(Clone, Debug)]
@@ -223,14 +224,20 @@ impl PdfString {
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
     }
-    pub fn as_str(&self) -> Result<&str> {
-        Ok(str::from_utf8(&self.data)?)
+    pub fn as_str(&self) -> Result<Cow<str>> {
+        if self.data.starts_with(&[0xfe, 0xff]) {
+            // FIXME: avoid extra allocation
+            let utf16: Vec<u16> = self.data[2..].chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect();
+            Ok(Cow::Owned(String::from_utf16(&utf16)?))
+        } else {
+            Ok(Cow::Borrowed(str::from_utf8(&self.data)?))
+        }
     }
     pub fn into_bytes(self) -> Vec<u8> {
         self.data
     }
     pub fn into_string(self) -> Result<String> {
-        Ok(String::from_utf8(self.data)?)
+        Ok(self.as_str()?.into_owned())
     }
 }
 
@@ -292,7 +299,7 @@ impl Primitive {
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
-    pub fn as_str(&self) -> Option<&str> {
+    pub fn as_str(&self) -> Option<Cow<str>> {
         self.as_string().ok().and_then(|s| s.as_str().ok())
     }
     /// Does not accept a Reference
@@ -424,12 +431,25 @@ impl<'a> TryInto<&'a [u8]> for &'a Primitive {
         }
     }
 }
-impl<'a> TryInto<&'a str> for &'a Primitive {
+impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     type Error = PdfError;
-    fn try_into(self) -> Result<&'a str> {
+    fn try_into(self) -> Result<Cow<'a, str>> {
         match self {
-            Primitive::Name(ref s) => Ok(s),
+            Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
             Primitive::String(ref s) => Ok(s.as_str()?),
+            ref p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Name or String",
+                found: p.get_debug_name()
+            })
+        }
+    }
+}
+impl<'a> TryInto<String> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<String> {
+        match self {
+            Primitive::Name(ref s) => Ok(s.clone()),
+            Primitive::String(ref s) => Ok(s.as_str()?.into_owned()),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()

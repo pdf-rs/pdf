@@ -85,8 +85,14 @@ impl<B: Backend> Resolve for Storage<B> {
         if let Some(any) = self.cache.borrow().get(&key) {
             return any.clone().downcast();
         }
-        
-        let primitive = t!(self.resolve(r.get_inner()));
+
+        let mut primitive = t!(self.resolve(key));
+        if let Some(ref decoder) = self.decoder {
+            match primitive {
+                Primitive::String(ref mut string) => decoder.decrypt(key.id, key.gen, &mut string.data),
+                _ => {}
+            }
+        }
         let obj = t!(T::from_primitive(primitive, self));
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
