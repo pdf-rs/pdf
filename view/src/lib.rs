@@ -11,12 +11,14 @@ use winit::event::{ElementState, VirtualKeyCode, ModifiersState};
 
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
+    num_pages: usize,
     current_page: u32,
     cache: Cache<Scene>,
 }
 impl<B: Backend> PdfView<B> {
     pub fn new(file: PdfFile<B>) -> Self {
         PdfView {
+            num_pages: file.num_pages() as usize,
             file,
             current_page: 0,
             cache: Cache::new()
@@ -24,23 +26,20 @@ impl<B: Backend> PdfView<B> {
     }
 }
 impl<B: Backend + 'static> Interactive for PdfView<B> {
-    fn scene(&mut self) -> Scene {
-        let page = self.file.get_page(self.current_page).unwrap();
+    fn title(&self) -> String {
+        self.file.trailer.info_dict.as_ref()
+            .and_then(|info| info.get("Title"))
+            .and_then(|p| p.as_str().map(|s| s.into_owned()))
+            .unwrap_or_else(|| "PDF View".into())
+    }
+    fn num_pages(&self) -> usize {
+        self.num_pages
+    }
+    fn scene(&mut self, page_nr: usize) -> Scene {
+        dbg!(page_nr);
+        let page = self.file.get_page(page_nr as u32).unwrap();
         let scene = self.cache.render_page(&self.file, &page).unwrap();
         scene
-    }
-    fn keyboard_input(&mut self, state: ElementState, keycode: VirtualKeyCode, _modifiers: ModifiersState) -> bool {
-        match (state, keycode) {
-            (ElementState::Pressed, VirtualKeyCode::Left) if self.current_page > 0 => {
-                self.current_page -= 1;
-                true
-            }
-            (ElementState::Pressed, VirtualKeyCode::Right) if self.current_page < self.file.num_pages() - 1 => {
-                self.current_page += 1;
-                true
-            }
-            _ => false
-        }
     }
 }
 
