@@ -229,9 +229,9 @@ impl PdfString {
         if self.data.starts_with(&[0xfe, 0xff]) {
             // FIXME: avoid extra allocation
             let utf16: Vec<u16> = self.data[2..].chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect();
-            Ok(Cow::Owned(String::from_utf16(&utf16)?))
+            Ok(Cow::Owned(String::from_utf16_lossy(&utf16)))
         } else {
-            Ok(Cow::Borrowed(str::from_utf8(&self.data)?))
+            Ok(String::from_utf8_lossy(&self.data))
         }
     }
     pub fn into_bytes(self) -> Vec<u8> {
