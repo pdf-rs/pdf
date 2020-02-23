@@ -202,7 +202,7 @@ impl Object for PdfString {
         }
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::String (string) => Ok(string),
             Primitive::Reference(id) => Ok(r.resolve(id)?.to_string()?),
