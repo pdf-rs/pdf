@@ -36,7 +36,7 @@ fn walk_outline(r: &impl Resolve, mut node: Rc<OutlineItem>, map: &impl Fn(&str)
     let indent = Indent(depth);
     loop {
         if let Some(ref title) = node.title {
-            println!("{}title: {:?}", indent, tr.get(*title));
+            println!("{}title: {:?}", indent, tr.get(*title).unwrap());
         }
         if let Some(ref dest) = node.dest {
             let name = dest.as_str().unwrap();
