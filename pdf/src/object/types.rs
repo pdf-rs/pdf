@@ -681,7 +681,7 @@ pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> Result<()>
 #[derive(Object, Debug, Clone)]
 pub struct OutlineItem {
     #[pdf(key="Title")]
-    pub title: Option<PdfString>,
+    pub title: Option<Ref<PdfString>>,
 
     #[pdf(key="Prev")]
     pub prev: Option<Ref<OutlineItem>>,
