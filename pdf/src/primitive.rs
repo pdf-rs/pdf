@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::object::{PlainRef, Resolve, Object};
+use crate::object::{PlainRef, Resolve, Object, NoResolve};
 
 use std::collections::{btree_map, BTreeMap};
 use std::{str, fmt, io};
@@ -202,9 +202,10 @@ impl Object for PdfString {
         }
         Ok(())
     }
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::String (string) => Ok(string),
+            Primitive::Reference(id) => PdfString::from_primitive(r.resolve(id)?, &NoResolve),
             _ => unexpected_primitive!(String, p.get_debug_name()),
         }
     }
