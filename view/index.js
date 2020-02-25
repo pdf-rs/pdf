@@ -3,6 +3,8 @@ wasm_bindgen("pkg/pdf_view_bg.wasm").catch(console.error)
     display("Drop a PDF here");
 });
 
+function set_scroll_factors() {}
+
 function drop_handler(e) {
     e.stopPropagation();
     e.preventDefault();
@@ -24,8 +26,9 @@ function show(file) {
         let data = new Uint8Array(reader.result);
         try {
             wasm_bindgen.show(data)
-        } catch {
+        } catch (e) {
             display("oops. try another one.");
+            display(e);
             return;
         }
 

@@ -20,7 +20,7 @@ fn main() -> Result<(), PdfError> {
     for (i, page) in file.pages().enumerate().skip(first_page).take(last_page + 1 - first_page) {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
-        let svg: Svg = cache.render_page(&file, p)?;
+        let (svg, _): (Svg, _) = cache.render_page(&file, p)?;
         fs::write(format!("{}_{}.svg", path, i), svg.finish())?;
     }
     Ok(())

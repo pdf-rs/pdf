@@ -14,6 +14,7 @@ use pdf::backend::Backend;
 use pdf::font::{Font as PdfFont, FontType};
 use pdf::error::{PdfError, Result};
 use pdf::encoding::{Encoding as PdfEncoding, BaseEncoding};
+use pdf::content::Operation;
 use encoding::{Encoding};
 
 use pathfinder_geometry::{
@@ -56,6 +57,28 @@ fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> Rgba8 {
         (1.0 - m) * (1.0 - k),
         (1.0 - y) * (1.0 - k)
     )
+}
+
+#[derive(Copy, Clone)]
+struct BBox(Option<RectF>);
+impl BBox {
+    fn empty() -> Self {
+        BBox(None)
+    }
+    fn add(&mut self, r2: RectF) {
+        self.0 = Some(match self.0 {
+            Some(r1) => r1.union_rect(r2),
+            None => r2
+        });
+    }
+    fn add_bbox(&mut self, bb: Self) {
+        if let Some(r) = bb.0 {
+            self.add(r);
+        }
+    }
+    fn rect(self) -> Option<RectF> {
+        self.0
+    }
 }
 
 #[derive(Debug)]
@@ -177,24 +200,30 @@ impl<'a, S: Surface> TextState<'a, S> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>, style: &S::Style) {
+    fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>, style: &S::Style) -> BBox {
         let e = self.font_entry.as_ref().expect("no font");
+        let mut bbox = BBox::empty();
 
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             self.font_size, 0., self.rise) * e.font.font_matrix();
         
+        let mut text = String::with_capacity(32);
         for (cid, gid) in glyphs {
+            if let Some(c) = std::char::from_u32(cid as u32) {
+                text.push(c);
+            }
             debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
                 Some(gid) => gid,
-                None => {
-                    continue;
-                }
+                None => GlyphId(cid as u32) // lets hope that works…
             };
             if let Some(glyph) = e.font.glyph(gid) {
                 let transform = self.root_transform * self.text_matrix * tr;
                 let path = glyph.path.transform(transform);
+                if let Some(rect) = path.bounding_box() {
+                    bbox.add(rect);
+                }
                 surface.draw_path(path, &style);
                 
                 let dx = match cid {
@@ -207,8 +236,10 @@ impl<'a, S: Surface> TextState<'a, S> {
                 info!("no glyph for gid {:?}", gid);
             }
         }
+        debug!("text: {}", text);
+        bbox
     }
-    fn draw_text(&mut self, surface: &mut S, data: &[u8], style: &S::Style) {
+    fn draw_text(&mut self, surface: &mut S, data: &[u8], style: &S::Style) -> BBox {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
             let get_glyph = |cid: u16| {
@@ -223,12 +254,13 @@ impl<'a, S: Surface> TextState<'a, S> {
                     surface,
                     data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
                     style
-                );
+                )
             } else {
-                self.add_glyphs(surface, data.iter().map(|&b| get_glyph(b as u16)), style);
+                self.add_glyphs(surface, data.iter().map(|&b| get_glyph(b as u16)), style)
             }
         } else {
             warn!("no font set");
+            BBox::empty()
         }
     }
     fn advance(&mut self, delta: f32) {
@@ -246,20 +278,21 @@ impl<S: Surface> FontEntry<S> {
     fn build(font: Box<dyn Font<S::Outline>>, pdf_font: &PdfFont) -> FontEntry<S> {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
-        
+        let base_encoding = encoding.as_ref().map(|e| &e.base);
+
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             let cmap = map.iter().enumerate().map(|(cid, &gid)| (cid as u16, GlyphId(gid as u32))).collect();
             TextEncoding::Cmap(cmap)
-        } else if encoding.base == BaseEncoding::IdentityH {
+        } else if base_encoding == Some(&BaseEncoding::IdentityH) {
             is_cid = true;
             TextEncoding::CID
         } else {
             let mut cmap = HashMap::new();
-            let source_encoding = match encoding.base {
-                BaseEncoding::StandardEncoding => Some(Encoding::AdobeStandard),
-                BaseEncoding::SymbolEncoding => Some(Encoding::AdobeSymbol),
-                BaseEncoding::WinAnsiEncoding => Some(Encoding::WinAnsiEncoding),
+            let source_encoding = match base_encoding {
+                Some(BaseEncoding::StandardEncoding) => Some(Encoding::AdobeStandard),
+                Some(BaseEncoding::SymbolEncoding) => Some(Encoding::AdobeSymbol),
+                Some(BaseEncoding::WinAnsiEncoding) => Some(Encoding::WinAnsiEncoding),
                 ref e => {
                     warn!("unsupported pdf encoding {:?}", e);
                     None
@@ -279,7 +312,7 @@ impl<S: Surface> FontEntry<S> {
                     }
                 },
                 _ => {
-                    warn!("can't translate from text encoding {:?} to font encoding {:?}", encoding.base, font_encoding);
+                    warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
                     
                     // assuming same encoding
                     for cp in 0 .. 256 {
@@ -289,13 +322,15 @@ impl<S: Surface> FontEntry<S> {
                     }
                 }
             }
-            for (&cp, name) in encoding.differences.iter() {
-                debug!("{} -> {}", cp, name);
-                match font.gid_for_name(&name) {
-                    Some(gid) => {
-                        cmap.insert(cp as u16, gid);
+            if let Some(encoding) = encoding {
+                for (&cp, name) in encoding.differences.iter() {
+                    debug!("{} -> {}", cp, name);
+                    match font.gid_for_name(&name) {
+                        Some(gid) => {
+                            cmap.insert(cp as u16, gid);
+                        }
+                        None => info!("no glyph for name {}", name)
                     }
-                    None => info!("no glyph for name {}", name)
                 }
             }
             debug!("cmap: {:?}", cmap);
@@ -310,6 +345,16 @@ impl<S: Surface> FontEntry<S> {
     }
 }
 
+pub struct ItemMap(Vec<(RectF, Operation)>);
+impl ItemMap {
+    pub fn print(&self, p: Vector2F) {
+        for &(rect, ref op) in self.0.iter() {
+            if rect.contains_point(p) {
+                println!("{}", op);
+            }
+        }
+    }
+}
 
 impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
     pub fn new() -> Cache<S> {
@@ -349,7 +394,7 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         self.fonts.get(font_name)
     }
     
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<S> {
+    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<(S, ItemMap)> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
@@ -357,6 +402,11 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         let mut surface = S::new(rect.size() * scale);
         
         let mut path_builder = PathBuilder::<S::Outline>::new();
+
+        let mut items = Vec::new();
+        let mut add_item = |bbox: BBox, op: &Operation| if let Some(r) = bbox.rect() {
+            items.push((r, op.clone()));
+        };
 
         // draw the page
         let style = surface.build_style(PathStyle {
@@ -392,13 +442,12 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
             stroke_color: (0, 0, 0, 255),
         };
         
-        let contents = file.get(try_opt!(page.contents))?;
+        let contents = try_opt!(page.contents.as_ref());
         let mut iter = contents.operations.iter();
         while let Some(op) = iter.next() {
             debug!("{}", op);
             let ref ops = op.operands;
-            let op = op.operator.as_str();
-            match &*op {
+            match op.operator.as_str() {
                 "m" => { // move x y
                     ops_p!(ops, p => {
                         path_builder.move_to(p);
@@ -631,14 +680,16 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 // draw text
                 "Tj" => ops!(ops, text: &[u8] => {
                     let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
-                    text_state.draw_text(&mut surface, text, &style);
+                    let bb = text_state.draw_text(&mut surface, text, &style);
+                    add_item(bb, op);
                 }),
                 
                 // move to the next line and draw text
                 "'" => ops!(ops, text: &[u8] => {
                     let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
                     text_state.next_line();
-                    text_state.draw_text(&mut surface, text, &style);
+                    let bb = text_state.draw_text(&mut surface, text, &style);
+                    add_item(bb, op);
                 }),
                 
                 // set word and charactr spacing, move to the next line and draw text
@@ -647,14 +698,17 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                     text_state.word_space = word_space;
                     text_state.char_space = char_space;
                     text_state.next_line();
-                    text_state.draw_text(&mut surface, text, &style);
+                    let bb = text_state.draw_text(&mut surface, text, &style);
+                    add_item(bb, op);
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
+                    let mut bb = BBox::empty();
                     let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
                     for arg in array {
                         match arg {
                             Primitive::String(ref data) => {
-                                text_state.draw_text(&mut surface, data.as_bytes(), &style);
+                                let r2 = text_state.draw_text(&mut surface, data.as_bytes(), &style);
+                                bb.add_bbox(r2);
                             },
                             p => {
                                 let offset = p.as_number().expect("wrong argument to TJ");
@@ -662,11 +716,12 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                             }
                         }
                     }
+                    add_item(bb, op);
                 }),
                 _ => {}
             }
         }
         
-        Ok(surface)
+        Ok((surface, ItemMap(items)))
     }
 }

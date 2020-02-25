@@ -37,7 +37,7 @@ pub struct Font {
     pub name: String,
     pub data: FontData,
     
-    encoding: Encoding,
+    encoding: Option<Encoding>,
     
     to_unicode: Option<Stream>,
     
@@ -94,10 +94,8 @@ impl Object for Font {
         let base_font = dict.require("Font", "BaseFont")?.to_name()?;
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
         
-        let encoding = match dict.remove("Encoding") {
-            Some(p) => Object::from_primitive(p, resolve)?,
-            None => Encoding::standard()
-        };
+        let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
+
         let to_unicode = match dict.remove("ToUnicode") {
             Some(p) => Some(Stream::from_primitive(p, resolve)?),
             None => None
@@ -167,8 +165,8 @@ impl Font {
             _ => None
         }
     }
-    pub fn encoding(&self) -> &Encoding {
-        &self.encoding
+    pub fn encoding(&self) -> Option<&Encoding> {
+        self.encoding.as_ref()
     }
     pub fn info(&self) -> Option<&TFont> {
         match self.data {

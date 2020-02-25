@@ -3,25 +3,26 @@
 use pdf::file::File as PdfFile;
 use pdf::backend::Backend;
 use pdf::error::PdfError;
-use pdf_render::Cache;
+use pdf_render::{Cache, ItemMap};
 
 use pathfinder_view::{Interactive, Config};
 use pathfinder_renderer::scene::Scene;
+use pathfinder_geometry::vector::Vector2F;
 use winit::event::{ElementState, VirtualKeyCode, ModifiersState};
 
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
     num_pages: usize,
-    current_page: u32,
     cache: Cache<Scene>,
+    map: Option<ItemMap>
 }
 impl<B: Backend> PdfView<B> {
     pub fn new(file: PdfFile<B>) -> Self {
         PdfView {
             num_pages: file.num_pages() as usize,
             file,
-            current_page: 0,
-            cache: Cache::new()
+            cache: Cache::new(),
+            map: None
         }
     }
 }
@@ -38,8 +39,18 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     fn scene(&mut self, page_nr: usize) -> Scene {
         dbg!(page_nr);
         let page = self.file.get_page(page_nr as u32).unwrap();
-        let scene = self.cache.render_page(&self.file, &page).unwrap();
+        let (scene, map) = self.cache.render_page(&self.file, &page).unwrap();
+        self.map = Some(map);
         scene
+    }
+    fn mouse_input(&mut self, pos: Vector2F, state: ElementState) -> bool {
+        if state != ElementState::Pressed { return false; }
+
+        if let Some(ref map) = self.map {
+            map.print(pos);
+        }
+
+        false
     }
 }
 
@@ -67,5 +78,5 @@ pub fn show(data: &Uint8Array) {
     let view = PdfView::new(file);
 
     info!("showing");
-    pathfinder_view::show(view, Config { zoom: false, pan: true });
+    pathfinder_view::show(view, Config { zoom: false, pan: false });
 }

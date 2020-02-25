@@ -166,7 +166,7 @@ pub struct Page {
     pub trim_box:   Option<Rect>,
     
     #[pdf(key="Contents")]
-    pub contents:   Option<Ref<Content>>
+    pub contents:   Option<Content>
 }
 fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -> Result<Option<T>>
     where F: Fn(&PageTree) -> Option<T>

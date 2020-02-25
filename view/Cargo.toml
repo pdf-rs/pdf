@@ -10,6 +10,7 @@ unstable = ["pdf_render/unstable"]
 pdf = { path = "../pdf" }
 pdf_render = { path = "../render" }
 pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 winit = { git = "https://github.com/s3bk/winit" }
 log = "0.4.8"
