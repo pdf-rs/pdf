@@ -12,7 +12,7 @@ fn render_file(path: &Path) -> Vec<Scene> {
     let mut cache = Cache::new();
     file.pages().map(|page| {
         let p: &Page = &*page.unwrap();
-        cache.render_page(&file, p).unwrap()
+        cache.render_page(&file, p).unwrap().0
     }).collect()
 }
 

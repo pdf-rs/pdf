@@ -43,11 +43,14 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         self.map = Some(map);
         scene
     }
-    fn mouse_input(&mut self, pos: Vector2F, state: ElementState) -> bool {
+    fn mouse_input(&mut self, page: usize, pos: Vector2F, state: ElementState) -> bool {
         if state != ElementState::Pressed { return false; }
+        info!("x={}, y={}", pos.x(), pos.y());
 
         if let Some(ref map) = self.map {
-            map.print(pos);
+            if let Some(text) = map.get_string(pos) {
+                info!("{}", text);
+            }
         }
 
         false

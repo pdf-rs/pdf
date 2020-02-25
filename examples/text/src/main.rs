@@ -104,25 +104,27 @@ fn add_primitive(p: &Primitive, out: &mut String, info: &FontInfo) {
     // println!("p: {:?}", p);
     match p {
         &Primitive::String(ref data) => {
-            match info.font.encoding().base {
-                BaseEncoding::IdentityH => {
-                    for w in data.as_bytes().windows(2) {
-                        let cp = u16::from_be_bytes(w.try_into().unwrap());
-                        if let Some(s) = info.cmap.get(&cp) {
-                            out.push_str(s);
+            if let Some(encoding) = info.font.encoding() {
+                match encoding.base {
+                    BaseEncoding::IdentityH => {
+                        for w in data.as_bytes().windows(2) {
+                            let cp = u16::from_be_bytes(w.try_into().unwrap());
+                            if let Some(s) = info.cmap.get(&cp) {
+                                out.push_str(s);
+                            }
                         }
                     }
-                }
-                _ => {
-                    for &b in data.as_bytes() {
-                        if let Some(s) = info.cmap.get(&(b as u16)) {
-                            out.push_str(s);
-                        } else {
-                            out.push(b as char);
+                    _ => {
+                        for &b in data.as_bytes() {
+                            if let Some(s) = info.cmap.get(&(b as u16)) {
+                                out.push_str(s);
+                            } else {
+                                out.push(b as char);
+                            }
                         }
                     }
-                }
-            };
+                };
+            }
         }
         &Primitive::Array(ref a) => for p in a.iter() {
             add_primitive(p, out, info);
@@ -152,7 +154,7 @@ fn main() {
         }
         let mut current_font = None;
         let page = page.unwrap();
-        let contents = file.get(page.contents.unwrap()).unwrap();
+        let contents = page.contents.as_ref().unwrap();
         for Operation { ref operator, ref operands } in &contents.operations {
             // println!("{} {:?}", operator, operands);
             match operator.as_str() {

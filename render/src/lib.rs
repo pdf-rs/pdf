@@ -354,6 +354,21 @@ impl ItemMap {
             }
         }
     }
+    pub fn get_string(&self, p: Vector2F) -> Option<String> {
+        use itertools::Itertools;
+        let mut iter = self.0.iter().filter_map(|&(rect, ref op)| {
+            if rect.contains_point(p) {
+                Some(op)
+            } else {
+                None
+            }
+        }).peekable();
+        if iter.peek().is_some() {
+            Some(iter.format(", ").to_string())
+        } else {
+            None
+        }
+    }
 }
 
 impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {

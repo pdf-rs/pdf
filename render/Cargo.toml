@@ -12,6 +12,7 @@ log = "0.4.8"
 pdf = { path = "../pdf" }
 font = { git = "https://github.com/pdf-rs/font/" }
 encoding = { git = "https://github.com/pdf-rs/encoding/" }
+itertools = "*"
 
 pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
 vector = { git = "https://github.com/s3bk/vector/", features = ["impl_pathfinder"] }
