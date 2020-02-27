@@ -5,10 +5,9 @@ use pdf::backend::Backend;
 use pdf::error::PdfError;
 use pdf_render::{Cache, ItemMap};
 
-use pathfinder_view::{Interactive, Config};
+use pathfinder_view::{*};
 use pathfinder_renderer::scene::Scene;
 use pathfinder_geometry::vector::Vector2F;
-use winit::event::{ElementState, VirtualKeyCode, ModifiersState};
 
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
@@ -43,8 +42,8 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         self.map = Some(map);
         scene
     }
-    fn mouse_input(&mut self, page: usize, pos: Vector2F, state: ElementState) -> bool {
-        if state != ElementState::Pressed { return false; }
+    fn mouse_input(&mut self, ctx: &mut Context, page: usize, pos: Vector2F, state: ElementState) {
+        if state != ElementState::Pressed { return; }
         info!("x={}, y={}", pos.x(), pos.y());
 
         if let Some(ref map) = self.map {
@@ -52,8 +51,6 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
                 info!("{}", text);
             }
         }
-
-        false
     }
 }
 
@@ -62,6 +59,9 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::Uint8Array;
+
+#[cfg(target_arch = "wasm32")]
+use web_sys::{HtmlCanvasElement};
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
@@ -73,13 +73,16 @@ pub fn run() {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn show(data: &Uint8Array) {
+pub fn show(canvas: HtmlCanvasElement, data: &Uint8Array) -> WasmView {
     let data: Vec<u8> = data.to_vec();
     info!("got {} bytes of data", data.len());
     let file = PdfFile::from_data(data).expect("failed to parse PDF");
     info!("got the file");
     let view = PdfView::new(file);
 
-    info!("showing");
-    pathfinder_view::show(view, Config { zoom: false, pan: false });
+    WasmView::new(
+        canvas,
+        Config { zoom: false, pan: false },
+        Box::new(view) as _
+    )
 }

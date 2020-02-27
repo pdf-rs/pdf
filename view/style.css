@@ -3,6 +3,7 @@ body {
     flex-direction: row;
     align-content: center;
     background-color: rgba(220, 200, 160, 255);
+    padding: 10px;
 }
 #canvas {
     align-self: center;
