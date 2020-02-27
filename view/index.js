@@ -44,7 +44,7 @@ function init_view(data) {
     }
 
     canvas.addEventListener("keydown", e => check(view.key_down(e)));
-    canvas.addEventListener("keydown", e => check(view.key_up(e)));
+    canvas.addEventListener("keyup", e => check(view.key_up(e)));
     canvas.addEventListener("mousemove", e => check(view.mouse_move(e)));
     canvas.addEventListener("mouseup", e => check(view.mouse_up(e)));
     canvas.addEventListener("mousedown", e => check(view.mouse_move(e)));
