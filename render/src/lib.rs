@@ -102,19 +102,28 @@ enum TextMode {
     StrokeAndClip
 }
 
-#[derive(Copy, Clone)]
-struct GraphicsState {
+struct GraphicsState<S: Surface> {
     transform: Transform2F,
     stroke_width: f32,
     fill_color: Rgba8,
-    stroke_color: Rgba8
+    stroke_color: Rgba8,
+    clip_path: Option<S::ClipPath>
 }
-impl GraphicsState {
+impl<S: Surface> Clone for GraphicsState<S> {
+    fn clone(&self) -> Self {
+        GraphicsState {
+            clip_path: self.clip_path.clone(),
+            .. *self
+        }
+    }
+}
+
+impl<S: Surface> GraphicsState<S> {
     fn get_text_style(&self, mode: TextMode) -> PathStyle {
         match mode {
-            TextMode::Fill => self.fill_style(),
+            TextMode::Fill => self.fill_style(FillRule::NonZero),
             TextMode::Stroke => self.stroke_style(),
-            TextMode::FillThenStroke => self.fill_and_stroke_style(),
+            TextMode::FillThenStroke => self.fill_and_stroke_style(FillRule::NonZero),
             _ => PathStyle {
                 fill: None,
                 stroke: None,
@@ -122,11 +131,11 @@ impl GraphicsState {
             }
         }
     }
-    fn fill_style(&self) -> PathStyle {
+    fn fill_style(&self, fill_rule: FillRule) -> PathStyle {
         PathStyle {
             fill: Some(self.fill_color),
             stroke: None,
-            fill_rule: FillRule::NonZero,
+            fill_rule,
         }
     }
     fn stroke_style(&self) -> PathStyle {
@@ -136,11 +145,11 @@ impl GraphicsState {
             fill_rule: FillRule::NonZero,
         }
     }
-    fn fill_and_stroke_style(&self) -> PathStyle {
+    fn fill_and_stroke_style(&self, fill_rule: FillRule) -> PathStyle {
         PathStyle {
             fill: Some(self.fill_color),
             stroke: Some((self.stroke_color, self.stroke_width)),
-            fill_rule: FillRule::NonZero,
+            fill_rule,
         }
     }
 }
@@ -200,7 +209,7 @@ impl<'a, S: Surface> TextState<'a, S> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, surface: &mut S, glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>, style: &S::Style) -> BBox {
+    fn add_glyphs(&mut self, mut draw: impl FnMut(S::Outline), glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
 
@@ -216,7 +225,10 @@ impl<'a, S: Surface> TextState<'a, S> {
             debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
                 Some(gid) => gid,
-                None => GlyphId(cid as u32) // lets hope that works…
+                None => {
+                    warn!("no glyph for cid {}", cid);
+                    GlyphId(0)
+                } // lets hope that works…
             };
             if let Some(glyph) = e.font.glyph(gid) {
                 let transform = self.root_transform * self.text_matrix * tr;
@@ -224,7 +236,7 @@ impl<'a, S: Surface> TextState<'a, S> {
                 if let Some(rect) = path.bounding_box() {
                     bbox.add(rect);
                 }
-                surface.draw_path(path, &style);
+                draw(path);
                 
                 let dx = match cid {
                     0x20 => self.word_space,
@@ -239,7 +251,7 @@ impl<'a, S: Surface> TextState<'a, S> {
         debug!("text: {}", text);
         bbox
     }
-    fn draw_text(&mut self, surface: &mut S, data: &[u8], style: &S::Style) -> BBox {
+    fn draw_text(&mut self, draw: impl FnMut(S::Outline), data: &[u8]) -> BBox {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
             let get_glyph = |cid: u16| {
@@ -251,12 +263,11 @@ impl<'a, S: Surface> TextState<'a, S> {
             };
             if e.is_cid {
                 self.add_glyphs(
-                    surface,
+                    draw,
                     data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
-                    style
                 )
             } else {
-                self.add_glyphs(surface, data.iter().map(|&b| get_glyph(b as u16)), style)
+                self.add_glyphs(draw, data.iter().map(|&b| get_glyph(b as u16)))
             }
         } else {
             warn!("no font set");
@@ -334,7 +345,11 @@ impl<S: Surface> FontEntry<S> {
                 }
             }
             debug!("cmap: {:?}", cmap);
-            TextEncoding::Cmap(cmap)
+            if cmap.is_empty() {
+                TextEncoding::CID
+            } else {
+                TextEncoding::Cmap(cmap)
+            }
         };
         
         FontEntry {
@@ -368,6 +383,14 @@ impl ItemMap {
         } else {
             None
         }
+    }
+}
+
+fn fill_rule(s: &str) -> FillRule {
+    if s.ends_with("*") {
+        FillRule::EvenOdd
+    } else {
+        FillRule::NonZero
     }
 }
 
@@ -430,7 +453,7 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
             fill_rule: FillRule::NonZero,
         });
         path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
-        surface.draw_path(path_builder.take(), &style);
+        surface.draw_path(path_builder.take(), &style, None);
 
         let root_tansformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
         
@@ -445,16 +468,16 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
             }
         }
         
-
-        let mut last = Vector2F::default();
         let mut text_state = TextState::new(root_tansformation);
         let mut stack = vec![];
 
-        let mut graphics_state = GraphicsState {
+        path_builder.move_to(Vector2F::default());
+        let mut graphics_state = GraphicsState::<S> {
             transform: root_tansformation,
             stroke_width: 0.0,
             fill_color: (0, 0, 0, 255),
             stroke_color: (0, 0, 0, 255),
+            clip_path: None
         };
         
         let contents = try_opt!(page.contents.as_ref());
@@ -462,35 +485,32 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         while let Some(op) = iter.next() {
             debug!("{}", op);
             let ref ops = op.operands;
-            match op.operator.as_str() {
+            let s = op.operator.as_str();
+            match s {
                 "m" => { // move x y
                     ops_p!(ops, p => {
                         path_builder.move_to(p);
-                        last = p;
                     })
                 }
                 "l" => { // line x y
                     ops_p!(ops, p => {
                         path_builder.line_to(p);
-                        last = p;
                     })
                 }
                 "c" => { // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
                     ops_p!(ops, c1, c2, p => {
                         path_builder.cubic_curve_to(c1, c2, p);
-                        last = p;
                     })
                 }
                 "v" => { // cubic bezier c2.x c2.y p.x p.y
                     ops_p!(ops, c2, p => {
+                        let last = path_builder.pos().unwrap();
                         path_builder.cubic_curve_to(last, c2, p);
-                        last = p;
                     })
                 }
                 "y" => { // cubic c1.x c1.y p.x p.y
                     ops_p!(ops, c1, p => {
                         path_builder.cubic_curve_to(c1, p, p);
-                        last = p;
                     })
                 }
                 "h" => { // close
@@ -505,40 +525,48 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 "S" => { // stroke
                     let style = surface.build_style(graphics_state.stroke_style());
                     let path = path_builder.take().transform(graphics_state.transform);
-                    surface.draw_path(path, &style);
+                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
                 }
                 "s" => { // close and stroke
                     path_builder.close();
                     let style = surface.build_style(graphics_state.stroke_style());
                     let path = path_builder.take().transform(graphics_state.transform);
-                    surface.draw_path(path, &style);
+                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
                 }
                 "f" | "F" | "f*" => { // close and fill 
                     // TODO: implement windings
                     path_builder.close();
                     let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.fill_style());
-                    surface.draw_path(path, &style);
+                    let style = surface.build_style(graphics_state.fill_style(fill_rule(s)));
+                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
                 }
                 "B" | "B*" => { // fill and stroke
                     path_builder.close();
                     let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.fill_and_stroke_style());
-                    surface.draw_path(path, &style);
+                    let style = surface.build_style(graphics_state.fill_and_stroke_style(fill_rule(s)));
+                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
                 }
                 "b" | "b*" => { // stroke and fill
                     path_builder.close();
                     let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.fill_and_stroke_style());
-                    surface.draw_path(path, &style);
+                    let style = surface.build_style(graphics_state.fill_and_stroke_style(fill_rule(s)));
+                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
                 }
                 "n" => { // clear path
                     path_builder.clear();
                 }
-                "W" | "W*" => { // clipping path
+                "W" | "W*" => {
+                    let path = path_builder.take().transform(graphics_state.transform);
+                    let style = surface.build_style(PathStyle {
+                        fill: Some((0, 0, 200, 50)),
+                        stroke: None,
+                        fill_rule: FillRule::NonZero
+                    });
+                    surface.draw_path(path.clone(), &style, graphics_state.clip_path.as_ref());
+                    graphics_state.clip_path = Some(surface.clip_path(path, fill_rule(s)));
                 }
                 "q" => { // save state
-                    stack.push((graphics_state, text_state));
+                    stack.push((graphics_state.clone(), text_state));
                 }
                 "Q" => { // restore
                     let (g, t) = stack.pop().expect("graphcs stack is empty");
@@ -580,9 +608,6 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                         }
                     }
                 }),
-                "W" | "W*" => { // clipping path
-                
-                }
                 "SC" | "RG" => { // stroke color
                     ops!(ops, r: f32, g: f32, b: f32 => {
                         graphics_state.stroke_color = rgb2fill(r, g, b);
@@ -619,22 +644,22 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 
                 // character spacing
                 "Tc" => ops!(ops, char_space: f32 => {
-                        text_state.char_space = char_space;
+                    text_state.char_space = char_space;
                 }),
                 
                 // word spacing
                 "Tw" => ops!(ops, word_space: f32 => {
-                        text_state.word_space = word_space;
+                    text_state.word_space = word_space;
                 }),
                 
                 // Horizontal scaling (in percent)
                 "Tz" => ops!(ops, scale: f32 => {
-                        text_state.horiz_scale = 0.01 * scale;
+                    text_state.horiz_scale = 0.01 * scale;
                 }),
                 
                 // leading
                 "TL" => ops!(ops, leading: f32 => {
-                        text_state.leading = leading;
+                    text_state.leading = leading;
                 }),
                 
                 // text font
@@ -695,7 +720,10 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 // draw text
                 "Tj" => ops!(ops, text: &[u8] => {
                     let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
-                    let bb = text_state.draw_text(&mut surface, text, &style);
+                    let bb = text_state.draw_text(
+                        |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                        text
+                    );
                     add_item(bb, op);
                 }),
                 
@@ -703,7 +731,10 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 "'" => ops!(ops, text: &[u8] => {
                     let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
                     text_state.next_line();
-                    let bb = text_state.draw_text(&mut surface, text, &style);
+                    let bb = text_state.draw_text(
+                        |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                        text
+                    );
                     add_item(bb, op);
                 }),
                 
@@ -713,7 +744,10 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                     text_state.word_space = word_space;
                     text_state.char_space = char_space;
                     text_state.next_line();
-                    let bb = text_state.draw_text(&mut surface, text, &style);
+                    let bb = text_state.draw_text(
+                        |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                        text
+                    );
                     add_item(bb, op);
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
@@ -722,7 +756,10 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                     for arg in array {
                         match arg {
                             Primitive::String(ref data) => {
-                                let r2 = text_state.draw_text(&mut surface, data.as_bytes(), &style);
+                                let r2 = text_state.draw_text(
+                                    |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                                    data.as_bytes()
+                                );
                                 bb.add_bbox(r2);
                             },
                             p => {

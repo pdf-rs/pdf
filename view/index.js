@@ -43,11 +43,11 @@ function init_view(data) {
         }
     }
 
-    canvas.addEventListener("keydown", e => check(view.key_down(e)));
-    canvas.addEventListener("keyup", e => check(view.key_up(e)));
+    window.addEventListener("keydown", e => check(view.key_down(e)), {capture: true});
+    window.addEventListener("keyup", e => check(view.key_up(e)), {capture: true});
     canvas.addEventListener("mousemove", e => check(view.mouse_move(e)));
     canvas.addEventListener("mouseup", e => check(view.mouse_up(e)));
-    canvas.addEventListener("mousedown", e => check(view.mouse_move(e)));
+    canvas.addEventListener("mousedown", e => check(view.mouse_down(e)));
     window.addEventListener("resize", e => check(view.resize(e)));
     view.render();
 }
