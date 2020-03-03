@@ -31,7 +31,7 @@ fn main() -> Result<(), PdfError> {
         println!("{}", descr);
     }
     
-    let mut images: Vec<Rc<_>> = vec![];
+    let mut images: Vec<_> = vec![];
     let mut fonts = HashMap::new();
     
     for page in file.pages() {
@@ -39,8 +39,8 @@ fn main() -> Result<(), PdfError> {
         for font in resources.fonts.values() {
             fonts.insert(font.name.clone(), font.clone());
         }
-        images.extend(resources.xobjects.iter()
-            .filter_map(|(_, o)| match o { XObject::Image(im) => Some(im.clone()), _ => None })
+        images.extend(resources.xobjects.iter().map(|(name, &r)| file.get(r).unwrap())
+            .filter_map(|o| match &*o { XObject::Image(im) => Some(im.clone()), _ => None })
         );
     }
 

@@ -108,12 +108,12 @@ impl<B: Backend> Resolve for File<B> {
     }
 }
 impl File<Vec<u8>> {
+    /// Opens the file at `path` and uses Vec<u8> as backend.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::from_data(fs::read(path)?)
     }
 }
 impl<B: Backend> File<B> {
-    /// Opens the file at `path` and uses Vec<u8> as backend.
     pub fn from_data(backend: B) -> Result<Self> {
         let (refs, trailer) = t!(backend.read_xref_table_and_trailer());
         

@@ -2,6 +2,7 @@
 
 use std::io;
 use std::rc::Rc;
+use std::collections::HashMap;
 
 use crate as pdf;
 use crate::object::*;
@@ -233,15 +234,15 @@ pub struct PageLabel {
 #[derive(Object, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
-    pub graphics_states: BTreeMap<String, GraphicsStateParameters>,
+    pub graphics_states: HashMap<String, GraphicsStateParameters>,
     // color_space: Option<ColorSpace>,
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    pub xobjects: BTreeMap<String, XObject>,
+    pub xobjects: HashMap<String, Ref<XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: BTreeMap<String, Rc<Font>>,
+    pub fonts: HashMap<String, Rc<Font>>,
 }
 impl Resources {
     pub fn fonts(&self) -> impl Iterator<Item=(&str, &Rc<Font>)> {

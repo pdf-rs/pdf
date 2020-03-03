@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::fs;
 use std::borrow::Cow;
+use std::marker::PhantomData;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
@@ -21,7 +22,7 @@ use pathfinder_geometry::{
     vector::Vector2F, rect::RectF, transform2d::Transform2F,
 };
 use font::{self, Font, GlyphId};
-use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline, FillRule};
+use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline, FillRule, PixelFormat, Paint};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -107,7 +108,8 @@ struct GraphicsState<S: Surface> {
     stroke_width: f32,
     fill_color: Rgba8,
     stroke_color: Rgba8,
-    clip_path: Option<S::ClipPath>
+    clip_path: Option<S::ClipPath>,
+    _m: PhantomData<S>
 }
 impl<S: Surface> Clone for GraphicsState<S> {
     fn clone(&self) -> Self {
@@ -119,7 +121,17 @@ impl<S: Surface> Clone for GraphicsState<S> {
 }
 
 impl<S: Surface> GraphicsState<S> {
-    fn get_text_style(&self, mode: TextMode) -> PathStyle {
+    fn new(root_tansformation: Transform2F) -> Self {
+        GraphicsState::<S> {
+            transform: root_tansformation,
+            stroke_width: 0.0,
+            fill_color: (0, 0, 0, 255),
+            stroke_color: (0, 0, 0, 255),
+            clip_path: None,
+            _m: PhantomData
+        }
+    }
+    fn get_text_style(&self, mode: TextMode) -> PathStyle<S> {
         match mode {
             TextMode::Fill => self.fill_style(FillRule::NonZero),
             TextMode::Stroke => self.stroke_style(),
@@ -127,28 +139,28 @@ impl<S: Surface> GraphicsState<S> {
             _ => PathStyle {
                 fill: None,
                 stroke: None,
-                fill_rule: FillRule::NonZero,
+                fill_rule: FillRule::NonZero,   
             }
         }
     }
-    fn fill_style(&self, fill_rule: FillRule) -> PathStyle {
+    fn fill_style(&self, fill_rule: FillRule) -> PathStyle<S> {
         PathStyle {
-            fill: Some(self.fill_color),
+            fill: Some(Paint::Solid(self.fill_color)),
             stroke: None,
             fill_rule,
         }
     }
-    fn stroke_style(&self) -> PathStyle {
+    fn stroke_style(&self) -> PathStyle<S> {
         PathStyle {
             fill: None,
-            stroke: Some((self.stroke_color, self.stroke_width)),
+            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width)),
             fill_rule: FillRule::NonZero,
         }
     }
-    fn fill_and_stroke_style(&self, fill_rule: FillRule) -> PathStyle {
+    fn fill_and_stroke_style(&self, fill_rule: FillRule) -> PathStyle<S> {
         PathStyle {
-            fill: Some(self.fill_color),
-            stroke: Some((self.stroke_color, self.stroke_width)),
+            fill: Some(Paint::Solid(self.fill_color)),
+            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width)),
             fill_rule,
         }
     }
@@ -433,6 +445,9 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
     }
     
     pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<(S, ItemMap)> {
+        self.render_page_n(file, page, usize::max_value())
+    }
+    pub fn render_page_n<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, num_ops: usize) -> Result<(S, ItemMap)> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
@@ -448,8 +463,8 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
 
         // draw the page
         let style = surface.build_style(PathStyle {
-            fill: Some((255,255,255,255)),
-            stroke: Some(((0,0,0,255), 0.25)),
+            fill: Some(Paint::white()),
+            stroke: Some((Paint::black(), 0.25)),
             fill_rule: FillRule::NonZero,
         });
         path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
@@ -472,17 +487,11 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         let mut stack = vec![];
 
         path_builder.move_to(Vector2F::default());
-        let mut graphics_state = GraphicsState::<S> {
-            transform: root_tansformation,
-            stroke_width: 0.0,
-            fill_color: (0, 0, 0, 255),
-            stroke_color: (0, 0, 0, 255),
-            clip_path: None
-        };
+        let mut graphics_state = GraphicsState::new(root_tansformation);
         
         let contents = try_opt!(page.contents.as_ref());
-        let mut iter = contents.operations.iter();
-        while let Some(op) = iter.next() {
+        
+        for op in contents.operations.iter().take(num_ops) {
             debug!("{}", op);
             let ref ops = op.operands;
             let s = op.operator.as_str();
@@ -558,7 +567,7 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 "W" | "W*" => {
                     let path = path_builder.take().transform(graphics_state.transform);
                     let style = surface.build_style(PathStyle {
-                        fill: Some((0, 0, 200, 50)),
+                        fill: Some(Paint::Solid((0, 0, 200, 50))),
                         stroke: None,
                         fill_rule: FillRule::NonZero
                     });
@@ -769,6 +778,27 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                         }
                     }
                     add_item(bb, op);
+                }),
+                "Do" => ops!(ops, name: &Primitive => {
+                    let name = name.as_name()?;
+                    let &xobject_ref = resources.xobjects.get(name).unwrap();
+                    let xobject = file.get(xobject_ref)?;
+                    match *xobject {
+                        XObject::Image(ref image) => {
+                            let data = image.data()?;
+                            let size = Vector2F::new(image.width as f32, image.height as f32);
+                            let image = surface.texture(image.width as u32, image.height as u32, data, PixelFormat::Rgb24);
+                            let mut path_builder: PathBuilder::<S::Outline> = PathBuilder::new();
+                            path_builder.rect(RectF::new(Vector2F::default(), size));
+                            let style = surface.build_style(PathStyle {
+                                fill: Some(Paint::Image(image)),
+                                stroke: None,
+                                fill_rule: FillRule::NonZero
+                            });
+                            surface.draw_path(path_builder.take().transform(graphics_state.transform), &style, None);
+                        },
+                        _ => {}
+                    }
                 }),
                 _ => {}
             }

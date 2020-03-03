@@ -189,12 +189,19 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     }
 }
 
+fn dct_decode(data: &[u8], params: &DCTDecodeParams) -> Result<Vec<u8>> {
+    use jpeg_decoder::Decoder;
+    let mut decoder = Decoder::new(data);
+    let pixels = decoder.decode()?;
+    Ok(pixels)
+}
 
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
         StreamFilter::ASCII85Decode => decode_85(data),
         StreamFilter::FlateDecode (ref params) => flate_decode(data, params),
+        StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
         _ => unimplemented!(),
     }
 }

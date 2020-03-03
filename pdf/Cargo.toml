@@ -13,6 +13,7 @@ description = "PDF reader"
 [features]
 mmap = ["memmap"]
 dump = ["tempfile"]
+threads = ["jpeg-decoder/default"]
 
 [dependencies.pdf_derive]
 path = "../pdf_derive"
@@ -36,6 +37,7 @@ once_cell = "0.2"
 log = "0.4.8"
 tempfile = { version = "3.1.0", optional = true }
 md5 = "0.6"
+jpeg-decoder = { version = "0.1", default-features = false }
 
 [lib]
 doctest = false

@@ -104,6 +104,9 @@ pub enum PdfError {
     #[snafu(display("Invalid user password"))]
     InvalidPassword,
     
+    #[snafu(display("JPEG"))]
+    Jpeg { source: jpeg_decoder::Error },
+
     #[snafu(display("IO Error"))]
     Io { source: io::Error },
     
@@ -198,6 +201,7 @@ macro_rules! err_from {
 }
 err_from!(std::str::Utf8Error, std::string::FromUtf8Error, std::string::FromUtf16Error => Encoding);
 err_from!(std::num::ParseIntError, std::string::ParseError => Parse);
+err_from!(jpeg_decoder::Error => Jpeg);
 
 macro_rules! err {
     ($e: expr) => ({

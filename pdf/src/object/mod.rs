@@ -15,7 +15,7 @@ use crate::enc::*;
 use std::io;
 use std::fmt;
 use std::marker::PhantomData;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub type ObjNr = u64;
@@ -267,13 +267,13 @@ impl Object for Primitive {
     }
 }
 
-impl<V: Object> Object for BTreeMap<String, V> {
+impl<V: Object> Object for HashMap<String, V> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
-            Primitive::Null => Ok(BTreeMap::new()),
+            Primitive::Null => Ok(HashMap::new()),
             Primitive::Dictionary (dict) => {
                 let mut new = Self::new();
                 for (key, val) in dict.iter() {
@@ -281,7 +281,7 @@ impl<V: Object> Object for BTreeMap<String, V> {
                 }
                 Ok(new)
             }
-            Primitive::Reference (id) => BTreeMap::from_primitive(resolve.resolve(id)?, resolve),
+            Primitive::Reference (id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
             p =>  Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
         }
     }

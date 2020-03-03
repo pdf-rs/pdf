@@ -21,19 +21,26 @@ pub struct Stream<I: Object=()> {
     decoded: OnceCell<Vec<u8>>
 }
 impl<I: Object + fmt::Debug> Stream<I> {
+    /// decode the data.
+    /// does not store the result.
+    /// The caller is responsible for caching the result
+    pub fn decode(&self) -> Result<Cow<[u8]>> {
+        let mut data = Cow::Borrowed(&*self.raw_data);
+        for filter in &self.info.filters {
+            data = match decode(&*data, filter) {
+                Ok(data) => data.into(),
+                Err(e) => {
+                    debug!("Stream Info: {:?}", &self.info);
+                    dump_data(&data);
+                    return Err(e);
+                }
+            };
+        }
+        Ok(data)
+    }
     pub fn data(&self) -> Result<&[u8]> {
         self.decoded.get_or_try_init(|| {
-            let mut data = Cow::Borrowed(&*self.raw_data);
-            for filter in &self.info.filters {
-                data = match decode(&*data, filter) {
-                    Ok(data) => data.into(),
-                    Err(e) => {
-                        debug!("Stream Info: {:?}", &self.info);
-                        dump_data(&data);
-                        return Err(e);
-                    }
-                };
-            }
+            let data = self.decode()?;
             Ok(data.into_owned())
         }).map(|v| v.as_slice())
     }

@@ -13,7 +13,8 @@ pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
     num_pages: usize,
     cache: Cache<Scene>,
-    map: Option<ItemMap>
+    map: Option<ItemMap>,
+    op_count: usize,
 }
 impl<B: Backend> PdfView<B> {
     pub fn new(file: PdfFile<B>) -> Self {
@@ -21,8 +22,13 @@ impl<B: Backend> PdfView<B> {
             num_pages: file.num_pages() as usize,
             file,
             cache: Cache::new(),
-            map: None
+            map: None,
+            op_count: usize::max_value()
         }
+    }
+    fn num_ops(&self, page_nr: usize) -> usize {
+        let page = self.file.get_page(page_nr as u32).unwrap();
+        page.contents.as_ref().map(|c| c.operations.len()).unwrap_or(0)
     }
 }
 impl<B: Backend + 'static> Interactive for PdfView<B> {
@@ -38,8 +44,9 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     fn scene(&mut self, page_nr: usize) -> Scene {
         dbg!(page_nr);
         let page = self.file.get_page(page_nr as u32).unwrap();
-        let (scene, map) = self.cache.render_page(&self.file, &page).unwrap();
+        let (scene, map) = self.cache.render_page_n(&self.file, &page, self.op_count).unwrap();
         self.map = Some(map);
+        self.op_count = self.op_count.min(self.num_ops(page_nr));
         scene
     }
     fn mouse_input(&mut self, ctx: &mut Context, page: usize, pos: Vector2F, state: ElementState) {
@@ -51,6 +58,34 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
                 info!("{}", text);
             }
         }
+    }
+    fn keyboard_input(&mut self, ctx: &mut Context, event: &mut KeyEvent) {
+        if event.state == ElementState::Released {
+            return;
+        }
+        let old = self.op_count;
+        match event.keycode {
+            KeyCode::Right | KeyCode::PageDown => ctx.next_page(),
+            KeyCode::Left | KeyCode::PageUp => ctx.prev_page(),
+            KeyCode::Up => {
+                self.op_count = self.op_count.saturating_add(1);
+            }
+            KeyCode::Down => {
+                self.op_count = self.op_count.saturating_sub(1);
+            }
+            KeyCode::End => {
+                self.op_count = usize::max_value();
+            }
+            KeyCode::Key0 => self.op_count = 0,
+            _ => return
+        }
+        if self.op_count != old && self.op_count > 0 {
+            let page = self.file.get_page(ctx.page_nr() as u32).unwrap();
+            if let Some(op) = page.contents.as_ref().and_then(|c| c.operations.get(self.op_count - 1)) {
+                info!("{}: {}", self.op_count, op);
+            }
+        }
+        ctx.update_scene();
     }
 }
 
