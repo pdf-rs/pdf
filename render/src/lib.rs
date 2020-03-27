@@ -180,13 +180,13 @@ struct TextState<'a, S: Surface> {
     rise: f32, // Text rise
     knockout: f32, //Text knockout
 }
-impl<'a, S: Surface> Clone for TextState<'a, S> {
+impl<'a, S> Clone for TextState<'a, S> where S: Surface + 'static {
     fn clone(&self) -> Self {
         *self
     }
 }
-impl<'a, S: Surface> Copy for TextState<'a, S> {}
-impl<'a, S: Surface> TextState<'a, S> {
+impl<'a, S> Copy for TextState<'a, S> where S: Surface + 'static {}
+impl<'a, S> TextState<'a, S> where S: Surface + 'static {
     fn new(root_transform: Transform2F) -> TextState<'a, S> {
         TextState {
             root_transform,
@@ -297,7 +297,7 @@ pub struct Cache<S: Surface> {
     // shared mapping of fontname -> font
     fonts: HashMap<String, FontEntry<S>>
 }
-impl<S: Surface> FontEntry<S> {
+impl<S> FontEntry<S> where S: Surface + 'static {
     fn build(font: Box<dyn Font<S::Outline>>, pdf_font: &PdfFont) -> FontEntry<S> {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
@@ -566,12 +566,14 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 }
                 "W" | "W*" => {
                     let path = path_builder.take().transform(graphics_state.transform);
+                    /*
                     let style = surface.build_style(PathStyle {
                         fill: Some(Paint::Solid((0, 0, 200, 50))),
                         stroke: None,
                         fill_rule: FillRule::NonZero
                     });
                     surface.draw_path(path.clone(), &style, graphics_state.clip_path.as_ref());
+                    */
                     graphics_state.clip_path = Some(surface.clip_path(path, fill_rule(s)));
                 }
                 "q" => { // save state

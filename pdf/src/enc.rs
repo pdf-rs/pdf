@@ -1,6 +1,5 @@
 use itertools::Itertools;
 use tuple::*;
-use inflate::inflate_bytes_zlib;
 use std::mem;
 
 use crate as pdf;
@@ -139,12 +138,14 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 
 
 fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+    use std::io::Read;
     let predictor = params.predictor as usize;;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
 
     // First flate decode
-    let decoded = inflate_bytes_zlib(data)?;
+    let mut decoded = Vec::with_capacity(data.len() * 2);
+    libflate::zlib::Decoder::new(data)?.read_to_end(&mut decoded)?;
 
     // Then unfilter (PNG)
     // For this, take the old out as input, and write output to out

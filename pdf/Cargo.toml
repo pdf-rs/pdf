@@ -24,7 +24,7 @@ git = "https://github.com/pdf-rs/encoding/"
 [dependencies]
 snafu = "0.4"
 num-traits = "0.1.36"
-inflate = "0.4.5"
+libflate = "0.1.27"
 byteorder = "1.0.0"
 itertools = "0.6.0"
 ordermap = "0.2.9"
