@@ -124,7 +124,7 @@ impl<S: Surface> GraphicsState<S> {
     fn new(root_tansformation: Transform2F) -> Self {
         GraphicsState::<S> {
             transform: root_tansformation,
-            stroke_width: 0.0,
+            stroke_width: 1.0,
             fill_color: (0, 0, 0, 255),
             stroke_color: (0, 0, 0, 255),
             clip_path: None,
@@ -153,14 +153,14 @@ impl<S: Surface> GraphicsState<S> {
     fn stroke_style(&self) -> PathStyle<S> {
         PathStyle {
             fill: None,
-            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width)),
+            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width * self.transform.matrix.m11())),
             fill_rule: FillRule::NonZero,
         }
     }
     fn fill_and_stroke_style(&self, fill_rule: FillRule) -> PathStyle<S> {
         PathStyle {
             fill: Some(Paint::Solid(self.fill_color)),
-            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width)),
+            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width * self.transform.matrix.m11())),
             fill_rule,
         }
     }
