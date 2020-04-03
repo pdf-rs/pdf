@@ -791,9 +791,12 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                             let size = Vector2F::new(image.width as f32, image.height as f32);
                             let image = surface.texture(image.width as u32, image.height as u32, data, PixelFormat::Rgb24);
                             let mut path_builder: PathBuilder::<S::Outline> = PathBuilder::new();
-                            path_builder.rect(RectF::new(Vector2F::default(), size));
+                            path_builder.rect(RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
+                            let im_tr = graphics_state.transform
+                                * Transform2F::from_scale(Vector2F::new(1.0 / size.x(), -1.0 / size.y()))
+                                * Transform2F::from_translation(Vector2F::new(0.0, -size.y()));
                             let style = surface.build_style(PathStyle {
-                                fill: Some(Paint::Image(image)),
+                                fill: Some(Paint::Image(image, im_tr)),
                                 stroke: None,
                                 fill_rule: FillRule::NonZero
                             });
