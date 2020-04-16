@@ -22,7 +22,7 @@ use pathfinder_geometry::{
     vector::Vector2F, rect::RectF, transform2d::Transform2F,
 };
 use font::{self, Font, GlyphId};
-use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline, FillRule, PixelFormat, Paint};
+use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline, FillRule, PixelFormat, Paint, LineStyle, LineCap, LineJoin};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -143,6 +143,14 @@ impl<S: Surface> GraphicsState<S> {
             }
         }
     }
+    fn line_style(&self) -> LineStyle {
+        let width = self.stroke_width * self.transform.matrix.m11();
+        LineStyle {
+            cap: LineCap::Butt,
+            join: LineJoin::Miter(width),
+            width
+        }
+    }
     fn fill_style(&self, fill_rule: FillRule) -> PathStyle<S> {
         PathStyle {
             fill: Some(Paint::Solid(self.fill_color)),
@@ -153,14 +161,14 @@ impl<S: Surface> GraphicsState<S> {
     fn stroke_style(&self) -> PathStyle<S> {
         PathStyle {
             fill: None,
-            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width * self.transform.matrix.m11())),
+            stroke: Some((Paint::Solid(self.stroke_color), self.line_style())),
             fill_rule: FillRule::NonZero,
         }
     }
     fn fill_and_stroke_style(&self, fill_rule: FillRule) -> PathStyle<S> {
         PathStyle {
             fill: Some(Paint::Solid(self.fill_color)),
-            stroke: Some((Paint::Solid(self.stroke_color), self.stroke_width * self.transform.matrix.m11())),
+            stroke: Some((Paint::Solid(self.stroke_color), self.line_style())),
             fill_rule,
         }
     }
@@ -464,7 +472,7 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         // draw the page
         let style = surface.build_style(PathStyle {
             fill: Some(Paint::white()),
-            stroke: Some((Paint::black(), 0.25)),
+            stroke: Some((Paint::black(), LineStyle::default(0.25))),
             fill_rule: FillRule::NonZero,
         });
         path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
