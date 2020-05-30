@@ -12,7 +12,7 @@ use pathfinder_geometry::vector::Vector2F;
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
     num_pages: usize,
-    cache: Cache<Scene>,
+    cache: Cache,
     map: Option<ItemMap>,
 }
 impl<B: Backend> PdfView<B> {

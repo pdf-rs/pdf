@@ -2,9 +2,10 @@ use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::error::PdfError;
 use std::env;
-use std::fs;
+use std::fs::File;
+use std::io::BufWriter;
 use pdf_render::Cache;
-use vector::Svg;
+use pathfinder_export::{FileFormat, Export};
 
 fn main() -> Result<(), PdfError> {
     env_logger::init();
@@ -20,8 +21,9 @@ fn main() -> Result<(), PdfError> {
     for (i, page) in file.pages().enumerate().skip(first_page).take(last_page + 1 - first_page) {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
-        let (svg, _): (Svg, _) = cache.render_page(&file, p)?;
-        fs::write(format!("{}_{}.svg", path, i), svg.finish())?;
+        let (scene, _) = cache.render_page(&file, p)?;
+        let mut writer = BufWriter::new(File::create(&format!("{}_{}.svg", path, i))?);
+        scene.export(&mut writer, FileFormat::SVG)?;
     }
     Ok(())
 }
