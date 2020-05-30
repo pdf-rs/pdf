@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::fs;
 use std::borrow::Cow;
-use std::marker::PhantomData;
+use std::sync::Arc;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
@@ -19,10 +19,24 @@ use pdf::content::Operation;
 use encoding::{Encoding};
 
 use pathfinder_geometry::{
-    vector::Vector2F, rect::RectF, transform2d::Transform2F,
+    vector::{Vector2F, Vector2I},
+    rect::RectF, transform2d::Transform2F,
 };
+use pathfinder_content::{
+    fill::FillRule,
+    stroke::{LineCap, LineJoin, StrokeStyle, OutlineStrokeToFill},
+    outline::Outline,
+    pattern::{Pattern, Image},
+};
+use pathfinder_color::ColorU;
+use pathfinder_renderer::{
+    scene::{DrawPath, ClipPath, ClipPathId},
+    paint::{Paint, PaintId},
+    scene::Scene,
+};
+use pathfinder_builder::PathBuilder;
+
 use font::{self, Font, GlyphId};
-use vector::{Surface, Rgba8, PathStyle, PathBuilder, Outline, FillRule, PixelFormat, Paint, LineStyle, LineCap, LineJoin};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -45,14 +59,14 @@ macro_rules! ops {
     })
 }
 
-fn rgb2fill(r: f32, g: f32, b: f32) -> Rgba8 {
+fn rgb2fill(r: f32, g: f32, b: f32) -> Paint {
     let c = |v: f32| (v * 255.) as u8;
-    (c(r), c(g), c(b), 255)
+    Paint::from_color(ColorU::new(c(r), c(g), c(b), 255))
 }
-fn gray2fill(g: f32) -> Rgba8 {
+fn gray2fill(g: f32) -> Paint {
     rgb2fill(g, g, g)
 }
-fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> Rgba8 {
+fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> Paint {
     rgb2fill(
         (1.0 - c) * (1.0 - k),
         (1.0 - m) * (1.0 - k),
@@ -88,8 +102,8 @@ enum TextEncoding {
     Cmap(HashMap<u16, GlyphId>)
 }
 
-struct FontEntry<S: Surface> {
-    font: Box<dyn Font<S::Outline>>,
+struct FontEntry {
+    font: Box<dyn Font>,
     encoding: TextEncoding,
     is_cid: bool,
 }
@@ -103,78 +117,125 @@ enum TextMode {
     StrokeAndClip
 }
 
-struct GraphicsState<S: Surface> {
+#[derive(Copy, Clone)]
+struct GraphicsState {
     transform: Transform2F,
     stroke_width: f32,
-    fill_color: Rgba8,
-    stroke_color: Rgba8,
-    clip_path: Option<S::ClipPath>,
-    _m: PhantomData<S>
+    fill_paint: PaintId,
+    stroke_paint: PaintId,
+    clip_path: Option<ClipPathId>,
 }
-impl<S: Surface> Clone for GraphicsState<S> {
-    fn clone(&self) -> Self {
-        GraphicsState {
-            clip_path: self.clip_path.clone(),
-            .. *self
+
+#[derive(Copy, Clone)]
+enum DrawMode {
+    None,
+    Fill(PaintId),
+    Stroke(PaintId, StrokeStyle),
+    StrokeThenFill(PaintId, StrokeStyle, PaintId),
+    FillThenStroke(PaintId, PaintId, StrokeStyle)
+}
+
+struct PathStyle {
+    mode: DrawMode,
+    fill_rule: FillRule
+}
+fn draw(scene: &mut Scene, path: Outline, style: &PathStyle, clip: Option<ClipPathId>) {
+    let build_stroke = |path, paint, stroke| {
+        let mut stroke_to_fill = OutlineStrokeToFill::new(path, stroke);
+        stroke_to_fill.offset();
+        let outline = stroke_to_fill.into_outline();
+        let mut draw_path = DrawPath::new(outline, paint);
+        draw_path.set_fill_rule(style.fill_rule);
+        draw_path.set_clip_path(clip);
+        draw_path
+    };
+    let build_fill = |path, paint| {
+        let mut draw_path = DrawPath::new(path, paint);
+        draw_path.set_fill_rule(style.fill_rule);
+        draw_path.set_clip_path(clip);
+        draw_path
+    };
+    
+    match style.mode {
+        DrawMode::None => {},
+        DrawMode::Fill(paint) => {
+            scene.push_path(build_fill(path, paint));
+        }
+        DrawMode::Stroke(paint, stroke) => {
+            scene.push_path(build_stroke(&path, paint, stroke));
+        }
+        DrawMode::FillThenStroke(fill_paint, stroke_paint, stroke) => {
+            scene.push_path(build_fill(path.clone(), fill_paint));
+            scene.push_path(build_stroke(&path, stroke_paint, stroke));
+        }
+        DrawMode::StrokeThenFill(fill_paint, stroke, stroke_paint) => {
+            scene.push_path(build_stroke(&path, stroke_paint, stroke));
+            scene.push_path(build_fill(path, fill_paint));
         }
     }
 }
 
-impl<S: Surface> GraphicsState<S> {
-    fn new(root_tansformation: Transform2F) -> Self {
-        GraphicsState::<S> {
-            transform: root_tansformation,
-            stroke_width: 1.0,
-            fill_color: (0, 0, 0, 255),
-            stroke_color: (0, 0, 0, 255),
-            clip_path: None,
-            _m: PhantomData
-        }
-    }
-    fn get_text_style(&self, mode: TextMode) -> PathStyle<S> {
+impl GraphicsState {
+    fn get_text_style(&self, mode: TextMode) -> PathStyle {
         match mode {
-            TextMode::Fill => self.fill_style(FillRule::NonZero),
+            TextMode::Fill => self.fill_style(FillRule::Winding),
             TextMode::Stroke => self.stroke_style(),
-            TextMode::FillThenStroke => self.fill_and_stroke_style(FillRule::NonZero),
+            TextMode::FillThenStroke => self.fill_then_stroke_style(FillRule::Winding),
             _ => PathStyle {
-                fill: None,
-                stroke: None,
-                fill_rule: FillRule::NonZero,   
+                mode: DrawMode::None,
+                fill_rule: FillRule::Winding,
             }
         }
     }
-    fn line_style(&self) -> LineStyle {
-        let width = self.stroke_width * self.transform.matrix.m11();
-        LineStyle {
-            cap: LineCap::Butt,
-            join: LineJoin::Miter(width),
-            width
+    fn line_style(&self) -> StrokeStyle {
+        let line_width = self.stroke_width * self.transform.matrix.m11();
+        StrokeStyle {
+            line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter(line_width),
+            line_width
         }
     }
-    fn fill_style(&self, fill_rule: FillRule) -> PathStyle<S> {
+    fn fill_style(&self, fill_rule: FillRule) -> PathStyle {
         PathStyle {
-            fill: Some(Paint::Solid(self.fill_color)),
-            stroke: None,
+            mode: DrawMode::Fill(
+                self.fill_paint,
+            ),
             fill_rule,
         }
     }
-    fn stroke_style(&self) -> PathStyle<S> {
+    fn stroke_style(&self) -> PathStyle {
         PathStyle {
-            fill: None,
-            stroke: Some((Paint::Solid(self.stroke_color), self.line_style())),
-            fill_rule: FillRule::NonZero,
+            mode: DrawMode::Stroke(
+                self.stroke_paint,
+                self.line_style()
+            ),
+            fill_rule: FillRule::Winding,
         }
     }
-    fn fill_and_stroke_style(&self, fill_rule: FillRule) -> PathStyle<S> {
+    fn fill_then_stroke_style(&self, fill_rule: FillRule) -> PathStyle {
         PathStyle {
-            fill: Some(Paint::Solid(self.fill_color)),
-            stroke: Some((Paint::Solid(self.stroke_color), self.line_style())),
+            mode: DrawMode::FillThenStroke(
+                self.fill_paint,
+                self.stroke_paint,
+                self.line_style(),
+            ),
+            fill_rule,
+        }
+    }
+    fn stroke_then_fill_style(&self, fill_rule: FillRule) -> PathStyle {
+        PathStyle {
+            mode: DrawMode::StrokeThenFill(
+                self.stroke_paint,
+                self.line_style(),
+                self.fill_paint,
+            ),
             fill_rule,
         }
     }
 }
 
-struct TextState<'a, S: Surface> {
+#[derive(Copy, Clone)]
+struct TextState<'a> {
     root_transform: Transform2F,
     text_matrix: Transform2F, // tracks current glyph
     line_matrix: Transform2F, // tracks current line
@@ -182,20 +243,14 @@ struct TextState<'a, S: Surface> {
     word_space: f32, // Word spacing
     horiz_scale: f32, // Horizontal scaling
     leading: f32, // Leading
-    font_entry: Option<&'a FontEntry<S>>, // Text font
+    font_entry: Option<&'a FontEntry>, // Text font
     font_size: f32, // Text font size
     mode: TextMode, // Text rendering mode
     rise: f32, // Text rise
     knockout: f32, //Text knockout
 }
-impl<'a, S> Clone for TextState<'a, S> where S: Surface + 'static {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<'a, S> Copy for TextState<'a, S> where S: Surface + 'static {}
-impl<'a, S> TextState<'a, S> where S: Surface + 'static {
-    fn new(root_transform: Transform2F) -> TextState<'a, S> {
+impl<'a> TextState<'a> {
+    fn new(root_transform: Transform2F) -> TextState<'a> {
         TextState {
             root_transform,
             text_matrix: Transform2F::default(),
@@ -229,13 +284,14 @@ impl<'a, S> TextState<'a, S> where S: Surface + 'static {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, mut draw: impl FnMut(S::Outline), glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
+    fn add_glyphs(&mut self, mut draw: impl FnMut(Outline), glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
 
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
-            self.font_size, 0., self.rise) * e.font.font_matrix();
+            0., self.font_size, self.rise
+        ) * e.font.font_matrix();
         
         let mut text = String::with_capacity(32);
         for (cid, gid) in glyphs {
@@ -252,11 +308,11 @@ impl<'a, S> TextState<'a, S> where S: Surface + 'static {
             };
             if let Some(glyph) = e.font.glyph(gid) {
                 let transform = self.root_transform * self.text_matrix * tr;
-                let path = glyph.path.transform(transform);
-                if let Some(rect) = path.bounding_box() {
-                    bbox.add(rect);
+                let path = glyph.path.transformed(&transform);
+                if path.len() != 0 {
+                    bbox.add(path.bounds());
+                    draw(path);
                 }
-                draw(path);
                 
                 let dx = match cid {
                     0x20 => self.word_space,
@@ -271,7 +327,7 @@ impl<'a, S> TextState<'a, S> where S: Surface + 'static {
         debug!("text: {}", text);
         bbox
     }
-    fn draw_text(&mut self, draw: impl FnMut(S::Outline), data: &[u8]) -> BBox {
+    fn draw_text(&mut self, draw: impl FnMut(Outline), data: &[u8]) -> BBox {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
             let get_glyph = |cid: u16| {
@@ -301,12 +357,12 @@ impl<'a, S> TextState<'a, S> where S: Surface + 'static {
     }
 }
 
-pub struct Cache<S: Surface> {
+pub struct Cache {
     // shared mapping of fontname -> font
-    fonts: HashMap<String, FontEntry<S>>
+    fonts: HashMap<String, FontEntry>
 }
-impl<S> FontEntry<S> where S: Surface + 'static {
-    fn build(font: Box<dyn Font<S::Outline>>, pdf_font: &PdfFont) -> FontEntry<S> {
+impl FontEntry {
+    fn build(font: Box<dyn Font>, pdf_font: &PdfFont) -> FontEntry {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
@@ -410,12 +466,12 @@ fn fill_rule(s: &str) -> FillRule {
     if s.ends_with("*") {
         FillRule::EvenOdd
     } else {
-        FillRule::NonZero
+        FillRule::Winding
     }
 }
 
-impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
-    pub fn new() -> Cache<S> {
+impl Cache {
+    pub fn new() -> Cache {
         Cache {
             fonts: HashMap::new()
         }
@@ -448,21 +504,25 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
             
         self.fonts.insert(pdf_font.name.clone(), entry);
     }
-    fn get_font(&self, font_name: &str) -> Option<&FontEntry<S>> {
+    fn get_font(&self, font_name: &str) -> Option<&FontEntry> {
         self.fonts.get(font_name)
     }
     
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<(S, ItemMap)> {
+    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<(Scene, ItemMap)> {
         self.render_page_n(file, page, usize::max_value())
     }
-    pub fn render_page_n<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, num_ops: usize) -> Result<(S, ItemMap)> {
+    pub fn render_page_n<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, num_ops: usize) -> Result<(Scene, ItemMap)> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
         let scale = Vector2F::splat(0.5);
-        let mut surface = S::new(rect.size() * scale);
+        let mut scene = Scene::new();
+        scene.set_view_box(RectF::new(Vector2F::default(), rect.size() * scale));
         
-        let mut path_builder = PathBuilder::<S::Outline>::new();
+        let black = scene.push_paint(&Paint::from_color(ColorU::black()));
+        let white = scene.push_paint(&Paint::from_color(ColorU::white()));
+
+        let mut path_builder = PathBuilder::new();
 
         let mut items = Vec::new();
         let mut add_item = |bbox: BBox, op: &Operation| if let Some(r) = bbox.rect() {
@@ -470,15 +530,22 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         };
 
         // draw the page
-        let style = surface.build_style(PathStyle {
-            fill: Some(Paint::white()),
-            stroke: Some((Paint::black(), LineStyle::default(0.25))),
-            fill_rule: FillRule::NonZero,
-        });
+        let style = PathStyle {
+            mode: DrawMode::FillThenStroke(
+                white,
+                black,
+                StrokeStyle {
+                    line_cap: LineCap::Round,
+                    line_join: LineJoin::Round,
+                    line_width: 0.25
+                },
+            ),
+            fill_rule: FillRule::Winding,
+        };
         path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
-        surface.draw_path(path_builder.take(), &style, None);
+        draw(&mut scene, path_builder.take(), &style, None);
 
-        let root_tansformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, 0.0, -1.0, -left, top);
+        let root_tansformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
         
         let resources = page.resources(file)?;
         // make sure all fonts are in the cache, so we can reference them
@@ -495,7 +562,13 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
         let mut stack = vec![];
 
         path_builder.move_to(Vector2F::default());
-        let mut graphics_state = GraphicsState::new(root_tansformation);
+        let mut graphics_state = GraphicsState {
+            transform: root_tansformation,
+            stroke_width: 1.0,
+            fill_paint: black,
+            stroke_paint: black,
+            clip_path: None,
+        };
         
         let contents = try_opt!(page.contents.as_ref());
         
@@ -540,40 +613,40 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                     })
                 }
                 "S" => { // stroke
-                    let style = surface.build_style(graphics_state.stroke_style());
-                    let path = path_builder.take().transform(graphics_state.transform);
-                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
+                    let style = graphics_state.stroke_style();
+                    let path = path_builder.take().transformed(&graphics_state.transform);
+                    draw(&mut scene, path, &style, graphics_state.clip_path);
                 }
                 "s" => { // close and stroke
                     path_builder.close();
-                    let style = surface.build_style(graphics_state.stroke_style());
-                    let path = path_builder.take().transform(graphics_state.transform);
-                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
+                    let style = graphics_state.stroke_style();
+                    let path = path_builder.take().transformed(&graphics_state.transform);
+                    draw(&mut scene, path, &style, graphics_state.clip_path);
                 }
                 "f" | "F" | "f*" => { // close and fill 
                     // TODO: implement windings
                     path_builder.close();
-                    let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.fill_style(fill_rule(s)));
-                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
+                    let path = path_builder.take().transformed(&graphics_state.transform);
+                    let style = graphics_state.fill_style(fill_rule(s));
+                    draw(&mut scene, path, &style, graphics_state.clip_path);
                 }
                 "B" | "B*" => { // fill and stroke
                     path_builder.close();
-                    let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.fill_and_stroke_style(fill_rule(s)));
-                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
+                    let path = path_builder.take().transformed(&graphics_state.transform);
+                    let style = graphics_state.fill_then_stroke_style(fill_rule(s));
+                    draw(&mut scene, path, &style, graphics_state.clip_path);
                 }
                 "b" | "b*" => { // stroke and fill
                     path_builder.close();
-                    let path = path_builder.take().transform(graphics_state.transform);
-                    let style = surface.build_style(graphics_state.fill_and_stroke_style(fill_rule(s)));
-                    surface.draw_path(path, &style, graphics_state.clip_path.as_ref());
+                    let path = path_builder.take().transformed(&graphics_state.transform);
+                    let style = graphics_state.fill_then_stroke_style(fill_rule(s));
+                    draw(&mut scene, path, &style, graphics_state.clip_path);
                 }
                 "n" => { // clear path
                     path_builder.clear();
                 }
                 "W" | "W*" => {
-                    let path = path_builder.take().transform(graphics_state.transform);
+                    let path = path_builder.take().transformed(&graphics_state.transform);
                     /*
                     let style = surface.build_style(PathStyle {
                         fill: Some(Paint::Solid((0, 0, 200, 50))),
@@ -582,7 +655,10 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                     });
                     surface.draw_path(path.clone(), &style, graphics_state.clip_path.as_ref());
                     */
-                    graphics_state.clip_path = Some(surface.clip_path(path, fill_rule(s)));
+                    let mut clip_path = ClipPath::new(path);
+                    clip_path.set_fill_rule(fill_rule(s));
+                    let clip_path_id = scene.push_clip_path(clip_path);
+                    graphics_state.clip_path = Some(clip_path_id);
                 }
                 "q" => { // save state
                     stack.push((graphics_state.clone(), text_state));
@@ -594,7 +670,7 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 }
                 "cm" => { // modify transformation matrix 
                     ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                        graphics_state.transform = graphics_state.transform * Transform2F::row_major(a, b, c, d, e, f);
+                        graphics_state.transform = graphics_state.transform * Transform2F::row_major(a, b, e, c, d, f);
                     })
                 }
                 "w" => { // line width
@@ -629,27 +705,27 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 }),
                 "SC" | "RG" => { // stroke color
                     ops!(ops, r: f32, g: f32, b: f32 => {
-                        graphics_state.stroke_color = rgb2fill(r, g, b);
+                        graphics_state.stroke_paint = scene.push_paint(&rgb2fill(r, g, b));
                     });
                 }
                 "sc" | "rg" => { // fill color
                     ops!(ops, r: f32, g: f32, b: f32 => {
-                        graphics_state.fill_color = rgb2fill(r, g, b);
+                        graphics_state.fill_paint = scene.push_paint(&rgb2fill(r, g, b));
                     });
                 }
                 "G" => { // stroke gray
                     ops!(ops, gray: f32 => {
-                        graphics_state.stroke_color = gray2fill(gray);
+                        graphics_state.stroke_paint = scene.push_paint(&gray2fill(gray));
                     })
                 }
                 "g" => { // fill gray
                     ops!(ops, gray: f32 => {
-                        graphics_state.fill_color = gray2fill(gray);
+                        graphics_state.fill_paint = scene.push_paint(&gray2fill(gray));
                     })
                 }
                 "k" => { // fill color
                     ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
-                        graphics_state.fill_color = cymk2fill(c, y, m, k);
+                        graphics_state.fill_paint = scene.push_paint(&cymk2fill(c, y, m, k));
                     });
                 }
                 "cs" => { // color space
@@ -728,7 +804,7 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 
                 // Set the text matrix and the text line matrix
                 "Tm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                    text_state.set_matrix(Transform2F::row_major(a, b, c, d, e, f));
+                    text_state.set_matrix(Transform2F::row_major(a, b, e, c, d, f));
                 }),
                 
                 // Move to the start of the next line
@@ -738,9 +814,9 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 
                 // draw text
                 "Tj" => ops!(ops, text: &[u8] => {
-                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    let style = graphics_state.get_text_style(text_state.mode);
                     let bb = text_state.draw_text(
-                        |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                        |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
                     add_item(bb, op);
@@ -748,10 +824,10 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 
                 // move to the next line and draw text
                 "'" => ops!(ops, text: &[u8] => {
-                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    let style = graphics_state.get_text_style(text_state.mode);
                     text_state.next_line();
                     let bb = text_state.draw_text(
-                        |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                        |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
                     add_item(bb, op);
@@ -759,24 +835,24 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                 
                 // set word and charactr spacing, move to the next line and draw text
                 "\"" => ops!(ops, word_space: f32, char_space: f32, text: &[u8] => {
-                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    let style = graphics_state.get_text_style(text_state.mode);
                     text_state.word_space = word_space;
                     text_state.char_space = char_space;
                     text_state.next_line();
                     let bb = text_state.draw_text(
-                        |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                        |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
                     add_item(bb, op);
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
                     let mut bb = BBox::empty();
-                    let style = surface.build_style(graphics_state.get_text_style(text_state.mode));
+                    let style = graphics_state.get_text_style(text_state.mode);
                     for arg in array {
                         match arg {
                             Primitive::String(ref data) => {
                                 let r2 = text_state.draw_text(
-                                    |path| surface.draw_path(path, &style, graphics_state.clip_path.as_ref()),
+                                    |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                                     data.as_bytes()
                                 );
                                 bb.add_bbox(r2);
@@ -795,20 +871,24 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
                     let xobject = file.get(xobject_ref)?;
                     match *xobject {
                         XObject::Image(ref image) => {
-                            let data = image.data()?;
-                            let size = Vector2F::new(image.width as f32, image.height as f32);
-                            let image = surface.texture(image.width as u32, image.height as u32, data, PixelFormat::Rgb24);
-                            let mut path_builder: PathBuilder::<S::Outline> = PathBuilder::new();
+                            let data = image.data()?.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect();
+                            let size = Vector2I::new(image.width as _, image.height as _);
+                            let size_f = size.to_f32();
+                            let mut path_builder: PathBuilder = PathBuilder::new();
                             path_builder.rect(RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
                             let im_tr = graphics_state.transform
-                                * Transform2F::from_scale(Vector2F::new(1.0 / size.x(), -1.0 / size.y()))
-                                * Transform2F::from_translation(Vector2F::new(0.0, -size.y()));
-                            let style = surface.build_style(PathStyle {
-                                fill: Some(Paint::Image(image, im_tr)),
-                                stroke: None,
-                                fill_rule: FillRule::NonZero
-                            });
-                            surface.draw_path(path_builder.take().transform(graphics_state.transform), &style, None);
+                                * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
+                                * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
+                            let image = Image::new(size, Arc::new(data));
+                            let mut pattern = Pattern::from_image(image);
+                            pattern.apply_transform(im_tr);
+                            let style = PathStyle {
+                                mode: DrawMode::Fill(
+                                    scene.push_paint(&Paint::from_pattern(pattern))
+                                ),
+                                fill_rule: FillRule::Winding
+                            };
+                            draw(&mut scene, path_builder.take().transformed(&graphics_state.transform), &style, None);
                         },
                         _ => {}
                     }
@@ -817,6 +897,6 @@ impl<S> Cache<S> where S: Surface + 'static, S::Outline: Sync + Send {
             }
         }
         
-        Ok((surface, ItemMap(items)))
+        Ok((scene, ItemMap(items)))
     }
 }

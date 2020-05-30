@@ -21,16 +21,5 @@ default-members = [
 #[patch."https://github.com/pdf-rs/font"]
 #font = { path = "../font" }
 
-[patch."https://github.com/s3bk/pathfinder_view"]
-pathfinder_view = { path = "../pathfinder_view" }
-
-[patch."https://github.com/s3bk/pathfinder"]
-pathfinder_gl = { path = "../pathfinder/gl" }
-pathfinder_simd = { path = "../pathfinder/simd" }
-pathfinder_webgl = { path = "../pathfinder/webgl" }
-pathfinder_renderer = { path = "../pathfinder/renderer" }
-pathfinder_gpu = { path = "../pathfinder/gpu" }
-pathfinder_content = { path = "../pathfinder/content" }
-pathfinder_geometry = { path = "../pathfinder/geometry" }
-pathfinder_resources = { path = "../pathfinder/resources" }
-pathfinder_color = { path = "../pathfinder/color" }
+#[patch."https://github.com/s3bk/pathfinder_view"]
+#pathfinder_view = { path = "../pathfinder_view" }
