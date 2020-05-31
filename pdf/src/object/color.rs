@@ -19,6 +19,7 @@ pub struct IccInfo {
 
 #[derive(Debug)]
 pub enum ColorSpace {
+    DeviceRGB,
     Separation(String, Rc<ColorSpace>, Function),
     Icc(Stream<IccInfo>),
     Other(Vec<Primitive>)
@@ -34,7 +35,13 @@ impl Object for ColorSpace {
         unimplemented!()
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<ColorSpace> {
-        dbg!(&p);
+        if let Ok(name) = p.as_name() {
+            let cs = match name {
+                "DeviceRGB" => ColorSpace::DeviceRGB,
+                _ => unimplemented!()
+            };
+            return Ok(cs);
+        }
         let arr = t!(p.to_array(resolve));
         dbg!(&arr);
         let typ = t!(t!(get_index(&arr, 0)).as_name());

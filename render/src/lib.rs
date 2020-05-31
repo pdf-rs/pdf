@@ -117,9 +117,6 @@ enum TextMode {
     StrokeAndClip
 }
 
-type ColorSpaceMapBox<'a> = Box<dyn Fn(&[Primitive]) -> Result<Paint> + 'a>;
-type ColorSpaceMap<'a> = &'a dyn Fn(&[Primitive]) -> Result<Paint>;
-
 #[derive(Copy, Clone)]
 enum ColorMap<'a> {
     RGB,
@@ -262,7 +259,6 @@ impl<'a> GraphicsState<'a> {
 
 #[derive(Copy, Clone)]
 struct TextState<'a> {
-    root_transform: Transform2F,
     text_matrix: Transform2F, // tracks current glyph
     line_matrix: Transform2F, // tracks current line
     char_space: f32, // Character spacing
@@ -276,9 +272,8 @@ struct TextState<'a> {
     knockout: f32, //Text knockout
 }
 impl<'a> TextState<'a> {
-    fn new(root_transform: Transform2F) -> TextState<'a> {
+    fn new() -> TextState<'a> {
         TextState {
-            root_transform,
             text_matrix: Transform2F::default(),
             line_matrix: Transform2F::default(),
             char_space: 0.,
@@ -292,8 +287,7 @@ impl<'a> TextState<'a> {
             knockout: 0.
         }
     }
-    fn reset_matrix(&mut self, root_tansformation: Transform2F) {
-        self.root_transform = root_tansformation;
+    fn reset_matrix(&mut self) {
         self.set_matrix(Transform2F::default());
     }
     fn translate(&mut self, v: Vector2F) {
@@ -310,7 +304,7 @@ impl<'a> TextState<'a> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, mut draw: impl FnMut(Outline), glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
+    fn add_glyphs(&mut self, root_tr: Transform2F, mut draw: impl FnMut(Outline), glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
 
@@ -333,7 +327,7 @@ impl<'a> TextState<'a> {
                 } // lets hope that works…
             };
             if let Some(glyph) = e.font.glyph(gid) {
-                let transform = self.root_transform * self.text_matrix * tr;
+                let transform = root_tr * self.text_matrix * tr;
                 let path = glyph.path.transformed(&transform);
                 if path.len() != 0 {
                     bbox.add(path.bounds());
@@ -353,7 +347,7 @@ impl<'a> TextState<'a> {
         debug!("text: {}", text);
         bbox
     }
-    fn draw_text(&mut self, draw: impl FnMut(Outline), data: &[u8]) -> BBox {
+    fn draw_text(&mut self, root_tr: Transform2F, draw: impl FnMut(Outline), data: &[u8]) -> BBox {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
             let get_glyph = |cid: u16| {
@@ -365,11 +359,16 @@ impl<'a> TextState<'a> {
             };
             if e.is_cid {
                 self.add_glyphs(
+                    root_tr,
                     draw,
                     data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
                 )
             } else {
-                self.add_glyphs(draw, data.iter().map(|&b| get_glyph(b as u16)))
+                self.add_glyphs(
+                    root_tr,
+                    draw,
+                    data.iter().map(|&b| get_glyph(b as u16))
+                )
             }
         } else {
             warn!("no font set");
@@ -546,7 +545,6 @@ impl Cache {
         scene.set_view_box(RectF::new(Vector2F::default(), rect.size() * scale));
         
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
-        let transparent_black = scene.push_paint(&Paint::from_color(ColorU::new(0, 0, 0, 50)));
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
 
         let mut path_builder = PathBuilder::new();
@@ -572,7 +570,7 @@ impl Cache {
         path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
         draw(&mut scene, path_builder.take(), &style, None);
 
-        let root_tansformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
+        let root_transformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
         
         let resources = page.resources(file)?;
         // make sure all fonts are in the cache, so we can reference them
@@ -587,27 +585,22 @@ impl Cache {
         let color_spaces: HashMap<&str, ColorMap> = resources.color_spaces.iter().map(|(name, cs)| {
             dbg!(cs);
             let map = match *cs {
-                ColorSpace::Icc(_) => ColorMap::RGB,
+                ColorSpace::Icc(_) | ColorSpace::DeviceRGB => ColorMap::RGB,
                 ColorSpace::Separation(_, _, ref f) => ColorMap::Tint(f),
                 _ => unimplemented!()
             };
             (&**name, map)
         }).collect();
         
-        let mut text_state = TextState::new(root_tansformation);
+        let mut text_state = TextState::new();
         let mut stack = vec![];
-        let default_color_space: ColorSpaceMapBox = Box::new(|ops: &[Primitive]| -> Result<Paint> {
-            ops!(ops, r: f32, g: f32, b: f32 => {
-                Ok(rgb2fill(r, g, b))
-            })
-        }) as _;
 
         path_builder.move_to(Vector2F::default());
         let mut graphics_state = GraphicsState {
-            transform: root_tansformation,
+            transform: root_transformation,
             stroke_width: 1.0,
-            fill_paint: transparent_black,
-            stroke_paint: transparent_black,
+            fill_paint: black,
+            stroke_paint: black,
             clip_path: None,
             fill_color_space: ColorMap::RGB,
             stroke_color_space: ColorMap::RGB,
@@ -713,7 +706,7 @@ impl Cache {
                 }
                 "cm" => { // modify transformation matrix 
                     ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                        graphics_state.transform = graphics_state.transform * Transform2F::row_major(a, b, e, c, d, f);
+                        graphics_state.transform = graphics_state.transform * Transform2F::row_major(a, c, e, b, d, f);
                     })
                 }
                 "w" => { // line width
@@ -786,7 +779,7 @@ impl Cache {
                     });
                 }
                 "BT" => {
-                    text_state.reset_matrix(graphics_state.transform);
+                    text_state.reset_matrix();
                 }
                 "ET" => {
                 }
@@ -859,7 +852,7 @@ impl Cache {
                 
                 // Set the text matrix and the text line matrix
                 "Tm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
-                    text_state.set_matrix(Transform2F::row_major(a, b, e, c, d, f));
+                    text_state.set_matrix(Transform2F::row_major(a, c, e, b, d, f));
                 }),
                 
                 // Move to the start of the next line
@@ -871,6 +864,7 @@ impl Cache {
                 "Tj" => ops!(ops, text: &[u8] => {
                     let style = graphics_state.get_text_style(text_state.mode);
                     let bb = text_state.draw_text(
+                        graphics_state.transform,
                         |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
@@ -882,6 +876,7 @@ impl Cache {
                     let style = graphics_state.get_text_style(text_state.mode);
                     text_state.next_line();
                     let bb = text_state.draw_text(
+                        graphics_state.transform,
                         |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
@@ -895,6 +890,7 @@ impl Cache {
                     text_state.char_space = char_space;
                     text_state.next_line();
                     let bb = text_state.draw_text(
+                        graphics_state.transform,
                         |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
@@ -907,6 +903,7 @@ impl Cache {
                         match arg {
                             Primitive::String(ref data) => {
                                 let r2 = text_state.draw_text(
+                                    graphics_state.transform,
                                     |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                                     data.as_bytes()
                                 );
