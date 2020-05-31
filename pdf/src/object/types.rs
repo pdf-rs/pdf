@@ -235,7 +235,10 @@ pub struct PageLabel {
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<String, GraphicsStateParameters>,
-    // color_space: Option<ColorSpace>,
+
+    #[pdf(key="ColorSpace")]
+    pub color_spaces: HashMap<String, ColorSpace>,
+
     // pattern: Option<Pattern>,
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
@@ -249,6 +252,7 @@ impl Resources {
         self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
+
 
 #[derive(Object, Debug)]
 pub enum LineCap {
@@ -284,7 +288,10 @@ pub struct GraphicsStateParameters {
     pub rendering_intent: Option<String>,
     
     #[pdf(key="Font")]
-    pub font: Option<(Rc<Font>, f32)>
+    pub font: Option<(Rc<Font>, f32)>,
+
+    #[pdf(other)]
+    _other: Dictionary
 }
 
 #[derive(Object, Debug)]

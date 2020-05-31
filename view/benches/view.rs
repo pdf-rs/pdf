@@ -4,7 +4,7 @@ extern crate test;
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use std::path::Path;
-use pdf_render::Cache;
+use view::Cache;
 use pathfinder_renderer::scene::Scene;
 use test::Bencher;
 
@@ -14,7 +14,7 @@ fn render_file(path: &Path) -> Vec<Scene> {
     let mut cache = Cache::new();
     file.pages().map(|page| {
         let p: &Page = &*page.unwrap();
-        cache.render_page(&file, p).unwrap().0
+        cache.render_page(&file, p).unwrap()
     }).collect()
 }
 

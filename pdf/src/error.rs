@@ -16,6 +16,9 @@ pub enum PdfError {
     #[snafu(display("Invalid encoding: {}", source))]
     Encoding { source: Box<dyn Error> },
 
+    #[snafu(display("Out of bounds: index {}, but len is {}", index, len))]
+    Bounds { index: usize, len: usize },
+
     #[snafu(display("Unexpected token '{}' at {} - expected '{}'", lexeme, pos, expected))]
     UnexpectedLexeme {pos: usize, lexeme: String, expected: &'static str},
     

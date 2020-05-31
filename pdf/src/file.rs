@@ -116,13 +116,19 @@ impl File<Vec<u8>> {
 impl<B: Backend> File<B> {
     pub fn from_data(backend: B) -> Result<Self> {
         let (refs, trailer) = t!(backend.read_xref_table_and_trailer());
-        
         let mut storage = Storage::new(backend, refs);
 
-        let trailer = t!(Trailer::from_primitive(Primitive::Dictionary(trailer), &storage));
-        if let Some(ref dict) = trailer.encrypt_dict {
-            storage.decoder = Some(t!(Decoder::default(&dict, trailer.id[0].as_bytes())));
+        if let Some(crypt) = trailer.get("Encrypt") {
+            let key = trailer.get("ID").ok_or(
+                PdfError::MissingEntry { typ: "Trailer", field: "ID".into() }
+            )?
+            .as_array()?[0]
+            .as_string()?
+            .as_bytes();
+            let dict = CryptDict::from_primitive(crypt.clone(), &storage)?;
+            storage.decoder = Some(t!(Decoder::default(&dbg!(dict), key)));
         }
+        let trailer = t!(Trailer::from_primitive(Primitive::Dictionary(trailer), &storage));
         
         Ok(File {
             storage,

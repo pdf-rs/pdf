@@ -21,6 +21,12 @@ pub struct Stream<I: Object=()> {
     decoded: OnceCell<Vec<u8>>
 }
 impl<I: Object + fmt::Debug> Stream<I> {
+    pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
+        let PdfStream {info, data} = s;
+        let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
+        Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
+    }
+
     /// decode the data.
     /// does not store the result.
     /// The caller is responsible for caching the result
@@ -30,7 +36,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
             data = match decode(&*data, filter) {
                 Ok(data) => data.into(),
                 Err(e) => {
-                    debug!("Stream Info: {:?}", &self.info);
+                    info!("Stream Info: {:?}", &self.info);
                     dump_data(&data);
                     return Err(e);
                 }
@@ -65,10 +71,8 @@ impl<I: Object + fmt::Debug> Object for Stream<I> {
     fn serialize<W: io::Write>(&self, _: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, data} = PdfStream::from_primitive(p, resolve)?;
-        let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        
-        Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
+        let s = PdfStream::from_primitive(p, resolve)?;
+        Stream::from_stream(s, resolve)
     }
 }
 

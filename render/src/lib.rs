@@ -55,7 +55,7 @@ macro_rules! ops {
         $(
             let $var: $typ = iter.next().ok_or(PdfError::EOF)?.try_into()?;
         )*
-        $block;
+        $block
     })
 }
 
@@ -117,13 +117,39 @@ enum TextMode {
     StrokeAndClip
 }
 
+type ColorSpaceMapBox<'a> = Box<dyn Fn(&[Primitive]) -> Result<Paint> + 'a>;
+type ColorSpaceMap<'a> = &'a dyn Fn(&[Primitive]) -> Result<Paint>;
+
 #[derive(Copy, Clone)]
-struct GraphicsState {
+enum ColorMap<'a> {
+    RGB,
+    Tint(&'a Function)
+}
+impl<'a> ColorMap<'a> {
+    fn convert(&self, ops: &[Primitive]) -> Result<Paint> {
+        match *self {
+            ColorMap::RGB => ops!(ops, r: f32, g: f32, b: f32 => {
+                Ok(rgb2fill(r, g, b))
+            }),
+            ColorMap::Tint(ref f) => ops!(ops, x: f32 => {
+                let mut rgb = [0.0, 0.0, 0.0];
+                f.apply(x, &mut rgb);
+                let [r, g, b] = rgb;
+                Ok(rgb2fill(r, g, b))
+            })
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct GraphicsState<'a> {
     transform: Transform2F,
     stroke_width: f32,
     fill_paint: PaintId,
     stroke_paint: PaintId,
     clip_path: Option<ClipPathId>,
+    fill_color_space: ColorMap<'a>,
+    stroke_color_space: ColorMap<'a>,
 }
 
 #[derive(Copy, Clone)]
@@ -175,7 +201,7 @@ fn draw(scene: &mut Scene, path: Outline, style: &PathStyle, clip: Option<ClipPa
     }
 }
 
-impl GraphicsState {
+impl<'a> GraphicsState<'a> {
     fn get_text_style(&self, mode: TextMode) -> PathStyle {
         match mode {
             TextMode::Fill => self.fill_style(FillRule::Winding),
@@ -520,6 +546,7 @@ impl Cache {
         scene.set_view_box(RectF::new(Vector2F::default(), rect.size() * scale));
         
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
+        let transparent_black = scene.push_paint(&Paint::from_color(ColorU::new(0, 0, 0, 50)));
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
 
         let mut path_builder = PathBuilder::new();
@@ -557,17 +584,33 @@ impl Cache {
                 self.load_font(font);
             }
         }
+        let color_spaces: HashMap<&str, ColorMap> = resources.color_spaces.iter().map(|(name, cs)| {
+            dbg!(cs);
+            let map = match *cs {
+                ColorSpace::Icc(_) => ColorMap::RGB,
+                ColorSpace::Separation(_, _, ref f) => ColorMap::Tint(f),
+                _ => unimplemented!()
+            };
+            (&**name, map)
+        }).collect();
         
         let mut text_state = TextState::new(root_tansformation);
         let mut stack = vec![];
+        let default_color_space: ColorSpaceMapBox = Box::new(|ops: &[Primitive]| -> Result<Paint> {
+            ops!(ops, r: f32, g: f32, b: f32 => {
+                Ok(rgb2fill(r, g, b))
+            })
+        }) as _;
 
         path_builder.move_to(Vector2F::default());
         let mut graphics_state = GraphicsState {
             transform: root_tansformation,
             stroke_width: 1.0,
-            fill_paint: black,
-            stroke_paint: black,
+            fill_paint: transparent_black,
+            stroke_paint: transparent_black,
             clip_path: None,
+            fill_color_space: ColorMap::RGB,
+            stroke_color_space: ColorMap::RGB,
         };
         
         let contents = try_opt!(page.contents.as_ref());
@@ -689,7 +732,6 @@ impl Cache {
                 "gs" => ops!(ops, gs: &Primitive => { // set from graphic state dictionary
                     let gs = gs.as_name()?;
                     let gs = try_opt!(resources.graphics_states.get(gs));
-                    
                     if let Some(lw) = gs.line_width {
                         graphics_state.stroke_width = lw;
                     }
@@ -703,15 +745,13 @@ impl Cache {
                         }
                     }
                 }),
-                "SC" | "RG" => { // stroke color
-                    ops!(ops, r: f32, g: f32, b: f32 => {
-                        graphics_state.stroke_paint = scene.push_paint(&rgb2fill(r, g, b));
-                    });
+                "SC" | "SCN" | "RG" => { // stroke color
+                    let paint = graphics_state.stroke_color_space.convert(&*ops)?;
+                    graphics_state.stroke_paint = scene.push_paint(&paint);
                 }
-                "sc" | "rg" => { // fill color
-                    ops!(ops, r: f32, g: f32, b: f32 => {
-                        graphics_state.fill_paint = scene.push_paint(&rgb2fill(r, g, b));
-                    });
+                "sc" | "scn" | "rg" => { // fill color
+                    let paint = graphics_state.fill_color_space.convert(&*ops)?;
+                    graphics_state.fill_paint = scene.push_paint(&paint);
                 }
                 "G" => { // stroke gray
                     ops!(ops, gray: f32 => {
@@ -723,12 +763,27 @@ impl Cache {
                         graphics_state.fill_paint = scene.push_paint(&gray2fill(gray));
                     })
                 }
+                "K" => { // stroke color
+                    ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
+                        graphics_state.stroke_paint = scene.push_paint(&cymk2fill(c, y, m, k));
+                    });
+                }
                 "k" => { // fill color
                     ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
                         graphics_state.fill_paint = scene.push_paint(&cymk2fill(c, y, m, k));
                     });
                 }
                 "cs" => { // color space
+                    ops!(ops, name: &Primitive => {
+                        let name = name.as_name()?;
+                        graphics_state.fill_color_space = color_spaces.get(name).unwrap().clone();
+                    });
+                }
+                "CS" => { // color space
+                    ops!(ops, name: &Primitive => {
+                        let name = name.as_name()?;
+                        graphics_state.stroke_color_space = color_spaces.get(name).unwrap().clone();
+                    });
                 }
                 "BT" => {
                     text_state.reset_matrix(graphics_state.transform);

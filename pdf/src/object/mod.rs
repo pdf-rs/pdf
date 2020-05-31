@@ -4,9 +4,13 @@
 
 mod types;
 mod stream;
+mod color;
+mod function;
 
 pub use self::types::*;
 pub use self::stream::*;
+pub use self::color::*;
+pub use self::function::*;
 
 use crate::primitive::*;
 use crate::error::*;

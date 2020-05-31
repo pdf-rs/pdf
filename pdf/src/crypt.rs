@@ -2,7 +2,8 @@
 
 use crate as pdf;
 use std::fmt;
-use crate::primitive::PdfString;
+use std::collections::HashMap;
+use crate::primitive::{PdfString, Dictionary};
 use crate::error::{PdfError, Result};
 
 const PADDING: [u8; 32] = [
@@ -65,9 +66,54 @@ pub struct CryptDict {
     #[pdf(key="P")]
     p: i32,
     
+    #[pdf(key="V")]
+    v: i32,
+
     #[pdf(key="Length", default="40")]
     bits: u32,
+
+    #[pdf(key="CF")]
+    crypt_filters: HashMap<String, CryptFilter>,
+
+    #[pdf(key="StmF")]
+    default_crypt_filter: Option<String>,
+
+    #[pdf(key="EncryptMetadata", default="true")]
+    encrypt_metadata: bool,
+
+    #[pdf(other)]
+    _other: Dictionary
 }
+
+#[derive(Object, Debug, Clone, Copy)]
+pub enum CryptMethod {
+    None,
+    V2,
+    AESV2
+}
+
+#[derive(Object, Debug, Clone, Copy)]
+pub enum AuthEvent {
+    DocOpen,
+    EFOpen
+}
+
+#[derive(Object, Debug, Clone)]
+#[pdf(Type="CryptFilter?")]
+pub struct CryptFilter {
+    #[pdf(key="CFM", default="CryptMethod::None")]
+    pub method: CryptMethod,
+
+    #[pdf(key="AuthEvent", default="AuthEvent::DocOpen")]
+    pub auth_event: AuthEvent,
+
+    #[pdf(key="Length")]
+    pub length: Option<u32>,
+
+    #[pdf(other)]
+    _other: Dictionary
+}
+
 
 pub struct Decoder {
     key_size: usize,
@@ -81,10 +127,23 @@ impl Decoder {
         &self.key[.. self.key_size]
     }
     pub fn from_password(dict: &CryptDict, id: &[u8], pass: &[u8]) -> Result<Decoder> {
+        let key_bits = match dict.v {
+            1 | 2 | 3 => dict.bits,
+            4 => {
+                let default = dict.crypt_filters.get(dict.default_crypt_filter.as_ref().unwrap().as_str()).unwrap();
+                match default.method {
+                    CryptMethod::V2 => {
+                        default.length.map(|n| 8 * n).unwrap_or(dict.bits)
+                    },
+                    m => panic!("unimplemented crypt method {:?}", m),
+                }
+            },
+            v => panic!("unsupported V value {}", v),
+        };
         // 7.6.3.3 - Algorithm 2
         // get important data first
         let level = dict.r;
-        let key_size = dict.bits as usize / 8;
+        let key_size = dbg!(key_bits as usize / 8);
         let o = dict.o.as_bytes();
         //let u = dict.u.as_bytes();
         let p = dict.p;
@@ -108,8 +167,12 @@ impl Decoder {
         hash.consume(id);
         
         // f) 
-        if level >= 4 {
+        if level >= 4 && !dict.encrypt_metadata {
             hash.consume([0xff, 0xff, 0xff, 0xff]);
+        }
+
+        if !dict.encrypt_metadata {
+            warn!("metadata not encrypted. this is not implemented yet!");
         }
         
         // g) 
