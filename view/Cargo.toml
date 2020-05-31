@@ -7,7 +7,7 @@ edition = "2018"
 unstable = ["pdf_render/unstable"]
 
 [dependencies]
-pdf = { path = "../pdf", features=["dump"] }
+pdf = { path = "../pdf", default-features=false }
 pdf_render = { path = "../render" }
 pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder" }
@@ -23,6 +23,7 @@ console_log = "*"
 console_error_panic_hook = "*"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pdf = { path = "../pdf", features=["mmap", "dump"] }
 pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 env_logger = "*"
 

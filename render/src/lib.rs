@@ -66,7 +66,7 @@ fn rgb2fill(r: f32, g: f32, b: f32) -> Paint {
 fn gray2fill(g: f32) -> Paint {
     rgb2fill(g, g, g)
 }
-fn cymk2fill(c: f32, y: f32, m: f32, k: f32) -> Paint {
+fn cmyk2fill(c: f32, m: f32, y: f32, k: f32) -> Paint {
     rgb2fill(
         (1.0 - c) * (1.0 - k),
         (1.0 - m) * (1.0 - k),
@@ -118,35 +118,14 @@ enum TextMode {
 }
 
 #[derive(Copy, Clone)]
-enum ColorMap<'a> {
-    RGB,
-    Tint(&'a Function)
-}
-impl<'a> ColorMap<'a> {
-    fn convert(&self, ops: &[Primitive]) -> Result<Paint> {
-        match *self {
-            ColorMap::RGB => ops!(ops, r: f32, g: f32, b: f32 => {
-                Ok(rgb2fill(r, g, b))
-            }),
-            ColorMap::Tint(ref f) => ops!(ops, x: f32 => {
-                let mut rgb = [0.0, 0.0, 0.0];
-                f.apply(x, &mut rgb);
-                let [r, g, b] = rgb;
-                Ok(rgb2fill(r, g, b))
-            })
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
 struct GraphicsState<'a> {
     transform: Transform2F,
     stroke_width: f32,
     fill_paint: PaintId,
     stroke_paint: PaintId,
     clip_path: Option<ClipPathId>,
-    fill_color_space: ColorMap<'a>,
-    stroke_color_space: ColorMap<'a>,
+    fill_color_space: &'a ColorSpace,
+    stroke_color_space: &'a ColorSpace,
 }
 
 #[derive(Copy, Clone)]
@@ -495,6 +474,38 @@ fn fill_rule(s: &str) -> FillRule {
     }
 }
 
+fn convert_color(cs: &ColorSpace, ops: &[Primitive]) -> Result<Paint> {
+    match *cs {
+        ColorSpace::DeviceRGB | ColorSpace::Icc(_) => ops!(ops, r: f32, g: f32, b: f32 => {
+            Ok(rgb2fill(r, g, b))
+        }),
+        ColorSpace::DeviceCMYK => ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
+            Ok(cmyk2fill(c, m, y, k))
+        }),
+        ColorSpace::Separation(_, _, ref f) => ops!(ops, x: f32 => {
+            let mut rgb = [0.0, 0.0, 0.0];
+            f.apply(x, &mut rgb);
+            let [r, g, b] = rgb;
+            Ok(rgb2fill(r, g, b))
+        }),
+        ColorSpace::Indexed(ref cs, ref lut) => ops!(ops, i: i32 => {
+            match **cs {
+                ColorSpace::DeviceRGB => {
+                    let c = &lut[3 * i as usize ..];
+                    Ok(Paint::from_color(ColorU::new(c[0], c[1], c[2], 255)))
+                }
+                ColorSpace::DeviceCMYK => {
+                    let c = &lut[4 * i as usize ..];
+                    let cvt = |b: u8| b as f32 * 255.;
+                    Ok(cmyk2fill(cvt(c[0]), cvt(c[1]), cvt(c[2]), cvt(c[3])))
+                }
+                _ => unimplemented!()
+            }
+        }),
+        _ => unimplemented!()
+    }
+}
+
 impl Cache {
     pub fn new() -> Cache {
         Cache {
@@ -582,15 +593,8 @@ impl Cache {
                 self.load_font(font);
             }
         }
-        let color_spaces: HashMap<&str, ColorMap> = resources.color_spaces.iter().map(|(name, cs)| {
-            dbg!(cs);
-            let map = match *cs {
-                ColorSpace::Icc(_) | ColorSpace::DeviceRGB => ColorMap::RGB,
-                ColorSpace::Separation(_, _, ref f) => ColorMap::Tint(f),
-                _ => unimplemented!()
-            };
-            (&**name, map)
-        }).collect();
+
+        let device_rgb = ColorSpace::DeviceRGB;
         
         let mut text_state = TextState::new();
         let mut stack = vec![];
@@ -602,8 +606,8 @@ impl Cache {
             fill_paint: black,
             stroke_paint: black,
             clip_path: None,
-            fill_color_space: ColorMap::RGB,
-            stroke_color_space: ColorMap::RGB,
+            fill_color_space: &device_rgb,
+            stroke_color_space: &device_rgb,
         };
         
         let contents = try_opt!(page.contents.as_ref());
@@ -675,7 +679,7 @@ impl Cache {
                 "b" | "b*" => { // stroke and fill
                     path_builder.close();
                     let path = path_builder.take().transformed(&graphics_state.transform);
-                    let style = graphics_state.fill_then_stroke_style(fill_rule(s));
+                    let style = graphics_state.stroke_then_fill_style(fill_rule(s));
                     draw(&mut scene, path, &style, graphics_state.clip_path);
                 }
                 "n" => { // clear path
@@ -739,11 +743,11 @@ impl Cache {
                     }
                 }),
                 "SC" | "SCN" | "RG" => { // stroke color
-                    let paint = graphics_state.stroke_color_space.convert(&*ops)?;
+                    let paint = convert_color(graphics_state.stroke_color_space, &*ops)?;
                     graphics_state.stroke_paint = scene.push_paint(&paint);
                 }
                 "sc" | "scn" | "rg" => { // fill color
-                    let paint = graphics_state.fill_color_space.convert(&*ops)?;
+                    let paint = convert_color(graphics_state.fill_color_space, &*ops)?;
                     graphics_state.fill_paint = scene.push_paint(&paint);
                 }
                 "G" => { // stroke gray
@@ -757,25 +761,25 @@ impl Cache {
                     })
                 }
                 "K" => { // stroke color
-                    ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
-                        graphics_state.stroke_paint = scene.push_paint(&cymk2fill(c, y, m, k));
+                    ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
+                        graphics_state.stroke_paint = scene.push_paint(&cmyk2fill(c, m, y, k));
                     });
                 }
                 "k" => { // fill color
-                    ops!(ops, c: f32, y: f32, m: f32, k: f32 => {
-                        graphics_state.fill_paint = scene.push_paint(&cymk2fill(c, y, m, k));
+                    ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
+                        graphics_state.fill_paint = scene.push_paint(&cmyk2fill(c, m, y, k));
                     });
                 }
                 "cs" => { // color space
                     ops!(ops, name: &Primitive => {
                         let name = name.as_name()?;
-                        graphics_state.fill_color_space = color_spaces.get(name).unwrap().clone();
+                        graphics_state.fill_color_space = resources.color_spaces.get(name).unwrap().clone();
                     });
                 }
                 "CS" => { // color space
                     ops!(ops, name: &Primitive => {
                         let name = name.as_name()?;
-                        graphics_state.stroke_color_space = color_spaces.get(name).unwrap().clone();
+                        graphics_state.stroke_color_space = resources.color_spaces.get(name).unwrap().clone();
                     });
                 }
                 "BT" => {
@@ -918,12 +922,19 @@ impl Cache {
                     add_item(bb, op);
                 }),
                 "Do" => ops!(ops, name: &Primitive => {
+                    (|| -> Result<()> {
                     let name = name.as_name()?;
                     let &xobject_ref = resources.xobjects.get(name).unwrap();
                     let xobject = file.get(xobject_ref)?;
                     match *xobject {
                         XObject::Image(ref image) => {
-                            let data = image.data()?.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect();
+                            let raw_data = image.data()?;
+                            let data = match raw_data.len() / (image.width as usize * image.height as usize) {
+                                1 => raw_data.iter().map(|&l| ColorU { r: l, g: l, b: l, a: 255 }).collect(),
+                                3 => raw_data.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
+                                4 => raw_data.chunks(4).map(|c| ColorU{ r: c[0], g: c[1], b: c[2], a: c[3] }).collect(),
+                                n => panic!("unimplemented {} bytes/pixel", n)
+                            };
                             let size = Vector2I::new(image.width as _, image.height as _);
                             let size_f = size.to_f32();
                             let mut path_builder: PathBuilder = PathBuilder::new();
@@ -944,6 +955,8 @@ impl Cache {
                         },
                         _ => {}
                     }
+                    Ok(())
+                    })();
                 }),
                 _ => {}
             }

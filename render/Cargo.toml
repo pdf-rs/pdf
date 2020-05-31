@@ -9,7 +9,7 @@ unstable = ["font/unstable"]
 
 [dependencies]
 log = "0.4.8"
-pdf = { path = "../pdf" }
+pdf = { path = "../pdf", default-features=false }
 font = { git = "https://github.com/pdf-rs/font/" }
 encoding = { git = "https://github.com/pdf-rs/encoding/" }
 itertools = "*"
