@@ -36,7 +36,6 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         self.num_pages
     }
     fn scene(&mut self, page_nr: usize) -> Scene {
-        dbg!(page_nr);
         let page = self.file.get_page(page_nr as u32).unwrap();
         let (scene, map) = self.cache.render_page(&self.file, &page).unwrap();
         self.map = Some(map);

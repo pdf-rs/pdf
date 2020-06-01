@@ -105,6 +105,7 @@ enum TextEncoding {
 struct FontEntry {
     font: Box<dyn Font>,
     encoding: TextEncoding,
+    widths: Option<Box<[f32; 256]>>,
     is_cid: bool,
 }
 #[derive(Copy, Clone)]
@@ -297,6 +298,7 @@ impl<'a> TextState<'a> {
             if let Some(c) = std::char::from_u32(cid as u32) {
                 text.push(c);
             }
+
             debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
                 Some(gid) => gid,
@@ -305,23 +307,28 @@ impl<'a> TextState<'a> {
                     GlyphId(0)
                 } // lets hope that works…
             };
-            if let Some(glyph) = e.font.glyph(gid) {
+            let glyph = e.font.glyph(gid);
+            let width: f32 = e.widths.as_ref().and_then(|w| w.get(cid as usize).cloned())
+                .or_else(|| glyph.as_ref().map(|g| g.metrics.advance.x()))
+                .unwrap_or(0.0);
+            
+            if cid == 0x20 {
+                let advance = self.word_space * self.horiz_scale * self.font_size + tr.m11() * width;
+                self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+                continue;
+            }
+            if let Some(glyph) = glyph {
                 let transform = root_tr * self.text_matrix * tr;
                 let path = glyph.path.transformed(&transform);
                 if path.len() != 0 {
                     bbox.add(path.bounds());
                     draw(path);
                 }
-                
-                let dx = match cid {
-                    0x20 => self.word_space,
-                    _ => self.char_space
-                };
-                let advance = dx * self.horiz_scale * self.font_size + tr.m11() * glyph.metrics.advance.x();
-                self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
             } else {
                 info!("no glyph for gid {:?}", gid);
             }
+            let advance = self.char_space * self.horiz_scale * self.font_size + tr.m11() * width;
+            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
         debug!("text: {}", text);
         bbox
@@ -432,14 +439,18 @@ impl FontEntry {
             }
         };
         
+        let widths = pdf_font.widths().unwrap();
+
         FontEntry {
             font: font,
             encoding,
             is_cid,
+            widths,
         }
     }
 }
 
+#[derive(Debug)]
 pub struct ItemMap(Vec<(RectF, Operation)>);
 impl ItemMap {
     pub fn print(&self, p: Vector2F) {
@@ -922,41 +933,45 @@ impl Cache {
                     add_item(bb, op);
                 }),
                 "Do" => ops!(ops, name: &Primitive => {
-                    (|| -> Result<()> {
-                    let name = name.as_name()?;
-                    let &xobject_ref = resources.xobjects.get(name).unwrap();
-                    let xobject = file.get(xobject_ref)?;
-                    match *xobject {
-                        XObject::Image(ref image) => {
-                            let raw_data = image.data()?;
-                            let data = match raw_data.len() / (image.width as usize * image.height as usize) {
-                                1 => raw_data.iter().map(|&l| ColorU { r: l, g: l, b: l, a: 255 }).collect(),
-                                3 => raw_data.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
-                                4 => raw_data.chunks(4).map(|c| ColorU{ r: c[0], g: c[1], b: c[2], a: c[3] }).collect(),
-                                n => panic!("unimplemented {} bytes/pixel", n)
-                            };
-                            let size = Vector2I::new(image.width as _, image.height as _);
-                            let size_f = size.to_f32();
-                            let mut path_builder: PathBuilder = PathBuilder::new();
-                            path_builder.rect(RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
-                            let im_tr = graphics_state.transform
-                                * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
-                                * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
-                            let image = Image::new(size, Arc::new(data));
-                            let mut pattern = Pattern::from_image(image);
-                            pattern.apply_transform(im_tr);
-                            let style = PathStyle {
-                                mode: DrawMode::Fill(
-                                    scene.push_paint(&Paint::from_pattern(pattern))
-                                ),
-                                fill_rule: FillRule::Winding
-                            };
-                            draw(&mut scene, path_builder.take().transformed(&graphics_state.transform), &style, None);
-                        },
-                        _ => {}
+                    let mut closure = || -> Result<()> {
+                        let name = name.as_name()?;
+                        let &xobject_ref = resources.xobjects.get(name).unwrap();
+                        let xobject = file.get(xobject_ref)?;
+                        match *xobject {
+                            XObject::Image(ref image) => {
+                                let raw_data = image.data()?;
+                                let data = match raw_data.len() / (image.width as usize * image.height as usize) {
+                                    1 => raw_data.iter().map(|&l| ColorU { r: l, g: l, b: l, a: 255 }).collect(),
+                                    3 => raw_data.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
+                                    4 => raw_data.chunks(4).map(|c| ColorU{ r: c[0], g: c[1], b: c[2], a: c[3] }).collect(),
+                                    n => panic!("unimplemented {} bytes/pixel", n)
+                                };
+                                let size = Vector2I::new(image.width as _, image.height as _);
+                                let size_f = size.to_f32();
+                                let mut path_builder: PathBuilder = PathBuilder::new();
+                                path_builder.rect(RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
+                                let im_tr = graphics_state.transform
+                                    * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
+                                    * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
+                                let image = Image::new(size, Arc::new(data));
+                                let mut pattern = Pattern::from_image(image);
+                                pattern.apply_transform(im_tr);
+                                let style = PathStyle {
+                                    mode: DrawMode::Fill(
+                                        scene.push_paint(&Paint::from_pattern(pattern))
+                                    ),
+                                    fill_rule: FillRule::Winding
+                                };
+                                draw(&mut scene, path_builder.take().transformed(&graphics_state.transform), &style, None);
+                            },
+                            _ => {}
+                        }
+                        Ok(())
+                    };
+                    match closure() {
+                        Ok(()) => {},
+                        Err(e) => warn!("failed to decode image: {}", e)
                     }
-                    Ok(())
-                    })();
                 }),
                 _ => {}
             }
