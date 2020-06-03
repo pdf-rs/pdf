@@ -66,12 +66,42 @@ fn rgb2fill(r: f32, g: f32, b: f32) -> Paint {
 fn gray2fill(g: f32) -> Paint {
     rgb2fill(g, g, g)
 }
+
 fn cmyk2fill(c: f32, m: f32, y: f32, k: f32) -> Paint {
+    let clamp = |f| if f > 1.0 { 1.0 } else { f };
     rgb2fill(
-        (1.0 - c) * (1.0 - k),
-        (1.0 - m) * (1.0 - k),
-        (1.0 - y) * (1.0 - k)
+        1.0 - clamp(c + k),
+        1.0 - clamp(m + k),
+        1.0 - clamp(y + k),
     )
+}
+
+fn cmyk2color(data: &[u8]) -> Vec<ColorU> {
+    data.chunks_exact(4).map(|c| {
+        let mut buf = [0; 4];
+        buf.copy_from_slice(c);
+
+        let [c, m, y, k] = buf;
+        let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
+        let r = 255 - c.saturating_add(k);
+        let g = 255 - m.saturating_add(k);
+        let b = 255 - y.saturating_add(k);
+        ColorU::new(r, g, b, 255)
+        
+        /*
+        let clamp = |f| if f > 1.0 { 1.0 } else { f };
+        let i = |b| 1.0 - (b as f32 / 255.);
+        let o = |f| (f * 255.) as u8;
+        let (c, m, y, k) = (i(c), i(m), i(y), i(k));
+        let (r, g, b) = (
+            1.0 - clamp(c + k),
+            1.0 - clamp(m + k),
+            1.0 - clamp(y + k),
+        );
+        let (r, g, b) = (o(r), o(g), o(b));
+        ColorU::new(r, g, b, 255)
+        */
+    }).collect()
 }
 
 #[derive(Copy, Clone)]
@@ -308,12 +338,12 @@ impl<'a> TextState<'a> {
                 } // lets hope that works…
             };
             let glyph = e.font.glyph(gid);
-            let width: f32 = e.widths.as_ref().and_then(|w| w.get(cid as usize).cloned())
-                .or_else(|| glyph.as_ref().map(|g| g.metrics.advance.x()))
+            let width: f32 = e.widths.as_ref().and_then(|w| w.get(cid as usize).map(|&w| w * 0.001 * self.horiz_scale * self.font_size))
+                .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance.x()))
                 .unwrap_or(0.0);
             
             if cid == 0x20 {
-                let advance = self.word_space * self.horiz_scale * self.font_size + tr.m11() * width;
+                let advance = self.word_space * self.horiz_scale * self.font_size + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
                 continue;
             }
@@ -327,7 +357,7 @@ impl<'a> TextState<'a> {
             } else {
                 info!("no glyph for gid {:?}", gid);
             }
-            let advance = self.char_space * self.horiz_scale * self.font_size + tr.m11() * width;
+            let advance = self.char_space * self.horiz_scale * self.font_size + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
         debug!("text: {}", text);
@@ -451,12 +481,12 @@ impl FontEntry {
 }
 
 #[derive(Debug)]
-pub struct ItemMap(Vec<(RectF, Operation)>);
+pub struct ItemMap(Vec<(RectF, Box<dyn std::fmt::Debug>)>);
 impl ItemMap {
     pub fn print(&self, p: Vector2F) {
         for &(rect, ref op) in self.0.iter() {
             if rect.contains_point(p) {
-                println!("{}", op);
+                println!("{:?}", op);
             }
         }
     }
@@ -470,9 +500,20 @@ impl ItemMap {
             }
         }).peekable();
         if iter.peek().is_some() {
-            Some(iter.format(", ").to_string())
+            Some(format!("{:?}", iter.format(", ")))
         } else {
             None
+        }
+    }
+    fn new() -> Self {
+        ItemMap(Vec::new())
+    }
+    fn add_rect(&mut self, rect: RectF, item: impl std::fmt::Debug + 'static) {
+        self.0.push((rect, Box::new(item) as _));
+    }
+    fn add_bbox(&mut self, bbox: BBox, item: impl std::fmt::Debug + 'static) {
+        if let Some(r) = bbox.rect() {
+            self.add_rect(r, item);
         }
     }
 }
@@ -571,10 +612,7 @@ impl Cache {
 
         let mut path_builder = PathBuilder::new();
 
-        let mut items = Vec::new();
-        let mut add_item = |bbox: BBox, op: &Operation| if let Some(r) = bbox.rect() {
-            items.push((r, op.clone()));
-        };
+        let mut items = ItemMap::new();
 
         // draw the page
         let style = PathStyle {
@@ -883,7 +921,7 @@ impl Cache {
                         |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
-                    add_item(bb, op);
+                    items.add_bbox(bb, op.clone());
                 }),
                 
                 // move to the next line and draw text
@@ -895,7 +933,7 @@ impl Cache {
                         |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
-                    add_item(bb, op);
+                    items.add_bbox(bb, op.clone());
                 }),
                 
                 // set word and charactr spacing, move to the next line and draw text
@@ -909,7 +947,7 @@ impl Cache {
                         |path| draw(&mut scene, path, &style, graphics_state.clip_path),
                         text
                     );
-                    add_item(bb, op);
+                    items.add_bbox(bb, op.clone());
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
                     let mut bb = BBox::empty();
@@ -930,7 +968,7 @@ impl Cache {
                             }
                         }
                     }
-                    add_item(bb, op);
+                    items.add_bbox(bb, op.clone());
                 }),
                 "Do" => ops!(ops, name: &Primitive => {
                     let mut closure = || -> Result<()> {
@@ -943,7 +981,7 @@ impl Cache {
                                 let data = match raw_data.len() / (image.width as usize * image.height as usize) {
                                     1 => raw_data.iter().map(|&l| ColorU { r: l, g: l, b: l, a: 255 }).collect(),
                                     3 => raw_data.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
-                                    4 => raw_data.chunks(4).map(|c| ColorU{ r: c[0], g: c[1], b: c[2], a: c[3] }).collect(),
+                                    4 => cmyk2color(raw_data),
                                     n => panic!("unimplemented {} bytes/pixel", n)
                                 };
                                 let size = Vector2I::new(image.width as _, image.height as _);
@@ -953,8 +991,7 @@ impl Cache {
                                 let im_tr = graphics_state.transform
                                     * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
                                     * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
-                                let image = Image::new(size, Arc::new(data));
-                                let mut pattern = Pattern::from_image(image);
+                                let mut pattern = Pattern::from_image(Image::new(size, Arc::new(data)));
                                 pattern.apply_transform(im_tr);
                                 let style = PathStyle {
                                     mode: DrawMode::Fill(
@@ -963,6 +1000,7 @@ impl Cache {
                                     fill_rule: FillRule::Winding
                                 };
                                 draw(&mut scene, path_builder.take().transformed(&graphics_state.transform), &style, None);
+                                items.add_rect(graphics_state.transform * RectF::new(Vector2F::default(), size_f), image.clone())
                             },
                             _ => {}
                         }
@@ -977,6 +1015,6 @@ impl Cache {
             }
         }
         
-        Ok((scene, ItemMap(items)))
+        Ok((scene, items))
     }
 }
