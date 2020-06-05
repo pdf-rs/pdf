@@ -55,10 +55,8 @@ function init_view(data) {
 function show_data(data) {
     try {
         init_view(data);
-        document.getElementById("drop").style.display = "none";
     } catch (e) {
         display("oops. try another one.");
-        display(e);
     }
 }
 
@@ -67,9 +65,15 @@ function show(file) {
     reader.onload = function() {
         let data = new Uint8Array(reader.result);
         show_data(data);
-
     };
     reader.readAsArrayBuffer(file);
+}
+
+function open(event) {
+    event.preventDefault();
+    let e = document.getElementById("file-input");
+    show(e.files[0]);
+    e.value = "";
 }
 
 document.addEventListener("drop", drop_handler, false);

@@ -10,6 +10,9 @@
         <canvas id="canvas" tabindex="0"></canvas>
         <script type="text/javascript" src="index.js"></script>
         <div id="drop">
+            <form onsubmit="open(event)">
+              <input type="file" accept=".pdf" id="file-input"></input><input type="submit"></input>
+            </form>
             <p id="msg">loading …</p>
             <div id="banner"><a href="https://github.com/pdf-rs/pdf/">Code</a></div>
         </div>

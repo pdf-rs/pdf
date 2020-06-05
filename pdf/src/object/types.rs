@@ -324,7 +324,10 @@ pub struct ImageDict {
     pub width: i32,
     #[pdf(key="Height")]
     pub height: i32,
-    // ColorSpace: name or array
+
+    #[pdf(key="ColorSpace")]
+    pub color_space: Option<Primitive>,
+
     #[pdf(key="BitsPerComponent")]
     pub bits_per_component: i32,
     // Note: only allowed values are 1, 2, 4, 8, 16. Enum?
@@ -338,13 +341,15 @@ pub struct ImageDict {
     pub image_mask: bool,
 
     // Mask: stream or array
+    #[pdf(key="Mask")]
+    pub mask: Primitive,
     //
     /// Describes how to map image samples into the range of values appropriate for the image’s color space.
     /// If `image_mask`: either [0 1] or [1 0]. Else, the length must be twice the number of color
     /// components required by `color_space` (key ColorSpace)
     // (see Decode arrays page 344)
     #[pdf(key="Decode")]
-    pub decode: Vec<i32>,
+    pub decode: Option<Vec<f32>>,
 
     #[pdf(key="Interpolate", default="false")]
     pub interpolate: bool,
@@ -364,6 +369,8 @@ pub struct ImageDict {
     // Metadata: stream
     // OC: dict
     
+    #[pdf(other)]
+    other: Dictionary
 }
 
 

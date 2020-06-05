@@ -192,18 +192,18 @@ fn draw(scene: &mut Scene, path: Outline, style: &PathStyle, clip: Option<ClipPa
     match style.mode {
         DrawMode::None => {},
         DrawMode::Fill(paint) => {
-            scene.push_path(build_fill(path, paint));
+            scene.push_draw_path(build_fill(path, paint));
         }
         DrawMode::Stroke(paint, stroke) => {
-            scene.push_path(build_stroke(&path, paint, stroke));
+            scene.push_draw_path(build_stroke(&path, paint, stroke));
         }
         DrawMode::FillThenStroke(fill_paint, stroke_paint, stroke) => {
-            scene.push_path(build_fill(path.clone(), fill_paint));
-            scene.push_path(build_stroke(&path, stroke_paint, stroke));
+            scene.push_draw_path(build_fill(path.clone(), fill_paint));
+            scene.push_draw_path(build_stroke(&path, stroke_paint, stroke));
         }
         DrawMode::StrokeThenFill(fill_paint, stroke, stroke_paint) => {
-            scene.push_path(build_stroke(&path, stroke_paint, stroke));
-            scene.push_path(build_fill(path, fill_paint));
+            scene.push_draw_path(build_stroke(&path, stroke_paint, stroke));
+            scene.push_draw_path(build_fill(path, fill_paint));
         }
     }
 }

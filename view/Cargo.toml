@@ -23,7 +23,7 @@ console_log = "*"
 console_error_panic_hook = "*"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pdf = { path = "../pdf", features=["mmap", "dump"] }
+#pdf = { path = "../pdf", features=["mmap", "dump"] }
 pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 env_logger = "*"
 

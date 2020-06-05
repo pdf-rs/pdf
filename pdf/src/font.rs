@@ -175,17 +175,17 @@ impl Font {
             _ => None
         }
     }
-    pub fn widths(&self) -> Result<Option<[f32; 256]>> {
+    pub fn widths(&self) -> Result<Option<Box<[f32; 256]>>> {
         match self.data {
             FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(),
             FontData::Type1(ref info) | FontData::TrueType(ref info) => {
-                let mut widths = [0.0; 256];
+                let mut widths = Box::new([0.0; 256]);
                 widths[info.first_char as usize .. info.first_char as usize + info.widths.len()]
                     .copy_from_slice(&info.widths);
                 Ok(Some(widths))
             },
             FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid, _) => {
-                let mut widths = [cid.default_width; 256];
+                let mut widths = Box::new([cid.default_width; 256]);
                 let mut iter = cid.widths.iter();
                 while let Some(ref p) = iter.next() {
                     let c1 = p.as_integer()? as usize;

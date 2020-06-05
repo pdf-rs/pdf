@@ -249,6 +249,29 @@ impl<T: Object> Object for Vec<T> {
         )
     }
 }
+/*
+pub struct Data(pub Vec<u8>);
+impl Object for Data {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+        unimplemented!()
+    }
+    /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Array(_) => {
+                p.to_array(r)?
+                    .into_iter()
+                    .map(|p| u8::from_primitive(p, r))
+                    .collect::<Result<Vec<T>>>()?
+            },
+            Primitive::Null => {
+                Vec::new()
+            }
+            Primitive::Reference(id) => Self::from_primitive(r.resolve(id)?, r)?,
+            _ => 
+        }
+    }
+}*/
 
 impl Object for Primitive {
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
