@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use tuple::*;
 use inflate::{inflate_bytes_zlib, inflate_bytes};
 use std::mem;
 
@@ -95,15 +94,20 @@ fn sym_85(byte: u8) -> Option<u8> {
 fn word_85(input: &[u8]) -> Option<(u8, [u8; 4])> {
     match input.get(0).cloned() {
         Some(b'z') => Some((1, [0; 4])),
-        Some(a) => T4::from_iter(input[1 .. 5].iter().cloned()).and_then(|t| {
-            T1(a).join(t)
-            .map(sym_85).collect()
-            .map(|v| v.map(|x| x as u32))
-            .map(|T5(a, b, c, d, e)| {
-                let q: u32 = ((((a * 85) + b * 85) + c * 85) + d * 85) + e;
-                (5, [(q >> 24) as u8, (q >> 16) as u8, (q >> 8) as u8, q as u8])
-            })
-        }),
+        Some(a) => {
+            if let [b, c, d, e] = input[1 .. 5] {
+                let q: u32 = (
+                    (   (   (
+                                sym_85(a)? as u32 * 85
+                            ) + sym_85(b)? as u32 * 85
+                        ) + sym_85(c)? as u32 * 85
+                    ) + sym_85(d)? as u32 * 85
+                ) + e as u32;
+                Some((5, [(q >> 24) as u8, (q >> 16) as u8, (q >> 8) as u8, q as u8]))
+            } else {
+                None
+            }
+        }
         None => None
     }
 }
@@ -113,9 +117,7 @@ fn substr(data: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
-    use std::iter::repeat;
-    
-    let mut out = Vec::with_capacity(data.len());
+    let mut out = Vec::with_capacity((data.len() + 4 / 5) * 4);
     
     let mut pos = 0;
     while let Some((advance, word)) = word_85(&data[pos..]) {
@@ -124,13 +126,11 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     }
     let tail_len = substr(&data[pos..], b"~>").ok_or(PdfError::Ascii85TailError)?;
     assert!(tail_len < 5);
-    let tail: [u8; 5] = T5::from_iter(
-        data[pos..pos+tail_len].iter()
-        .cloned()
-        .chain(repeat(b'u'))
-    )
-    .ok_or(PdfError::Ascii85TailError)?
-    .into();
+    if data.len() < pos+tail_len {
+        return Err(PdfError::Ascii85TailError);
+    }
+    let mut tail = [b'u'; 5];
+    tail[.. tail_len].copy_from_slice(&data[pos..pos+tail_len]);
     
     let (_, last) = word_85(&tail).ok_or(PdfError::Ascii85TailError)?;
     out.extend_from_slice(&last[.. tail_len-1]);
@@ -139,7 +139,7 @@ fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
 
 
 fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
-    let predictor = params.predictor as usize;;
+    let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
 
