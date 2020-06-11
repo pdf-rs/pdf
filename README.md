@@ -7,6 +7,16 @@ One easy way you can contribute is to add different PDF files to `tests/files` a
 
 Feel free to contribute with ideas, issues or code! Please join [us on Zulip](https://type.zulipchat.com/#narrow/stream/209232-pdf) if you have any questions or problems.
 
+# Building
+The PDF standard references 14 standard fonts, which are not distributed with it.
+Due to dubius practices by Adobe, it is not safe to publish them in the viewer.
+
+You can download them [here](https://lbry.tv/pdf-standard-fonts.tar.bz:060d67b0d4f5ef9089853f3b314598e0e5d9c487) and unpack with
+```
+tar -xf fonts.tar.bz
+```
+placing the `fonts` directory in repository directory.
+
 # Workspace
 This repository uses a Cargo Workspace and default members. This means by default only the `pdf` library is build.
 To build additional parts, pass `--package=read` to build the subcrate you are interested in (here the `read` example).
