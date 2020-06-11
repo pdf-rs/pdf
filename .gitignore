@@ -7,3 +7,5 @@ Cargo.lock
 **/perf.data.old
 
 !.travis.yml
+
+/fonts

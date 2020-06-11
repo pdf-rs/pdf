@@ -17,7 +17,7 @@ tar -xf fonts.tar.bz
 ```
 placing the `fonts` directory in repository directory.
 
-Alternativly you can get them from [this old debian release of the Adobe PDF reader](http://ardownload.adobe.com/pub/adobe/reader/unix/9.x/9.5.5/enu/AdbeRdr9.5.5-1_i386linux_enu.deb) And `AdobePiStd.ttf` can be found on the internet as well:
+Alternativly you can run `./download_fonts.sh` to get them from [this old debian release of the Adobe PDF reader](http://ardownload.adobe.com/pub/adobe/reader/unix/9.x/9.5.5/enu/AdbeRdr9.5.5-1_i386linux_enu.deb). And `AdobePiStd.ttf` can be found on the internet as well:
 
 Over all you will need in the `fonts` directory:
  - `CourierStd.otf`
