@@ -17,7 +17,13 @@ tar -xf fonts.tar.bz
 ```
 placing the `fonts` directory in repository directory.
 
+Finally set the environment variable `STANDARD_FONTS` to the fonts folder:
+```
+export STANDARD_FONTS=$pwd/fonts
+```
+
 Alternativly you can run `./download_fonts.sh` to get them from [this old debian release of the Adobe PDF reader](http://ardownload.adobe.com/pub/adobe/reader/unix/9.x/9.5.5/enu/AdbeRdr9.5.5-1_i386linux_enu.deb). And `AdobePiStd.ttf` can be found on the internet as well:
+
 
 Over all you will need in the `fonts` directory:
  - `CourierStd.otf`

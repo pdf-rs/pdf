@@ -58,7 +58,7 @@ pub enum FontData {
 macro_rules! fonts {
     ( $( ($name:tt, $file:tt ), )* ) => {
         &[ $(
-            ($name, &*include_bytes!(concat!("../../fonts/", $file))),
+            ($name, &*include_bytes!(concat!(env!("STANDARD_FONTS"), "/", $file))),
         )* ]
     };
 }
