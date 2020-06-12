@@ -38,6 +38,7 @@ Over all you will need in the `fonts` directory:
  - `ArialMT.ttf`
  - `Arial-ItalicMT.otf`
 
+Once you have the fonts, you can pass enable the `standard-fonts` for the pdf crate.
 
 # Workspace
 This repository uses a Cargo Workspace and default members. This means by default only the `pdf` library is build.

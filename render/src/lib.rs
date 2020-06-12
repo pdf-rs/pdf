@@ -30,11 +30,9 @@ use pathfinder_content::{
 };
 use pathfinder_color::ColorU;
 use pathfinder_renderer::{
-    scene::{DrawPath, ClipPath, ClipPathId},
+    scene::{DrawPath, ClipPath, ClipPathId, DrawMode, Scene},
     paint::{Paint, PaintId},
-    scene::Scene,
 };
-use pathfinder_builder::PathBuilder;
 
 use font::{self, Font, GlyphId};
 
@@ -157,55 +155,6 @@ struct GraphicsState<'a> {
     clip_path: Option<ClipPathId>,
     fill_color_space: &'a ColorSpace,
     stroke_color_space: &'a ColorSpace,
-}
-
-#[derive(Copy, Clone)]
-enum DrawMode {
-    None,
-    Fill(PaintId),
-    Stroke(PaintId, StrokeStyle),
-    StrokeThenFill(PaintId, StrokeStyle, PaintId),
-    FillThenStroke(PaintId, PaintId, StrokeStyle)
-}
-
-struct PathStyle {
-    mode: DrawMode,
-    fill_rule: FillRule
-}
-fn draw(scene: &mut Scene, path: Outline, style: &PathStyle, clip: Option<ClipPathId>) {
-    let build_stroke = |path, paint, stroke| {
-        let mut stroke_to_fill = OutlineStrokeToFill::new(path, stroke);
-        stroke_to_fill.offset();
-        let outline = stroke_to_fill.into_outline();
-        let mut draw_path = DrawPath::new(outline, paint);
-        draw_path.set_fill_rule(style.fill_rule);
-        draw_path.set_clip_path(clip);
-        draw_path
-    };
-    let build_fill = |path, paint| {
-        let mut draw_path = DrawPath::new(path, paint);
-        draw_path.set_fill_rule(style.fill_rule);
-        draw_path.set_clip_path(clip);
-        draw_path
-    };
-    
-    match style.mode {
-        DrawMode::None => {},
-        DrawMode::Fill(paint) => {
-            scene.push_draw_path(build_fill(path, paint));
-        }
-        DrawMode::Stroke(paint, stroke) => {
-            scene.push_draw_path(build_stroke(&path, paint, stroke));
-        }
-        DrawMode::FillThenStroke(fill_paint, stroke_paint, stroke) => {
-            scene.push_draw_path(build_fill(path.clone(), fill_paint));
-            scene.push_draw_path(build_stroke(&path, stroke_paint, stroke));
-        }
-        DrawMode::StrokeThenFill(fill_paint, stroke, stroke_paint) => {
-            scene.push_draw_path(build_stroke(&path, stroke_paint, stroke));
-            scene.push_draw_path(build_fill(path, fill_paint));
-        }
-    }
 }
 
 impl<'a> GraphicsState<'a> {

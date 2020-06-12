@@ -14,6 +14,7 @@ description = "PDF reader"
 mmap = ["memmap"]
 dump = ["tempfile"]
 threads = ["jpeg-decoder/default"]
+standard-fonts = []
 
 [dependencies.pdf_derive]
 path = "../pdf_derive"

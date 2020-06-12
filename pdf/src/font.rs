@@ -63,6 +63,7 @@ macro_rules! fonts {
     };
 }
 
+#[cfg(feature="standard-fonts")]
 pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = fonts!(
     ("Courier", "CourierStd.otf"),
     ("Courier-Bold", "CourierStd-Bold.otf"),
@@ -86,6 +87,9 @@ pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = fonts!(
     ("ArialMT", "ArialMT.ttf"),
     ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
 );
+#[cfg(not(feature="standard-fonts"))]
+pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = &[];
+
 impl Object for Font {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
