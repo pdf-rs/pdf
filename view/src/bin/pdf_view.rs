@@ -7,5 +7,8 @@ fn main() {
     let path = std::env::args().nth(1).unwrap();
     let file = File::<Vec<u8>>::open(&path).unwrap();
     let view = PdfView::new(file);
-    show(view, Config { zoom: true, pan: true });
+    let mut config = Config::default();
+    config.zoom = true;
+    config.pan = true;
+    show(view, config);
 }

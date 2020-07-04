@@ -141,6 +141,63 @@ impl Object for Font {
     }
 }
 
+pub struct Widths {
+    values: Vec<f32>,
+    default: f32,
+    first_char: usize
+}
+impl Widths {
+    pub fn get(&self, cid: usize) -> f32 {
+        if cid < self.first_char {
+            self.default
+        } else {
+            self.values.get(cid - self.first_char).cloned().unwrap_or(self.default)
+        }
+    }
+    fn new(default: f32) -> Widths {
+        Widths {
+            default,
+            values: Vec::new(),
+            first_char: 0
+        }
+    }
+    fn ensure_capacity(&mut self, n: usize) {
+        if n > self.values.capacity() {
+            let missing = n - self.values.len();
+            self.values.reserve(missing);
+        }
+    }
+    fn set(&mut self, cid: usize, width: f32) {
+        use std::iter::repeat;
+
+        if self.values.len() == 0 {
+            self.first_char = cid;
+            self.values.push(width);
+            return;
+        }
+
+        if cid == self.first_char + self.values.len() {
+            self.values.push(width);
+            return;
+        }
+
+        if cid < self.first_char {
+            self.values.splice(0 .. 0, repeat(self.default).take(self.first_char - cid));
+            self.first_char = cid;
+            self.values[0] = width;
+            return;
+        }
+
+        if cid - self.first_char > self.values.len() {
+            self.ensure_capacity(cid - self.first_char);
+            self.values.extend(repeat(self.default).take(cid - self.first_char - 1));
+            self.values.push(width);
+            return;
+        }
+
+        self.values[cid - self.first_char] = width;
+    }
+}
 impl Font {
     pub fn standard_font(&self) -> Option<&[u8]> {
         match self.data {
@@ -179,30 +236,32 @@ impl Font {
             _ => None
         }
     }
-    pub fn widths(&self) -> Result<Option<Box<[f32; 256]>>> {
+    pub fn widths(&self) -> Result<Option<Widths>> {
         match self.data {
             FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(),
             FontData::Type1(ref info) | FontData::TrueType(ref info) => {
-                let mut widths = Box::new([0.0; 256]);
-                widths[info.first_char as usize .. info.first_char as usize + info.widths.len()]
-                    .copy_from_slice(&info.widths);
-                Ok(Some(widths))
+                Ok(Some(Widths {
+                    default: 0.0,
+                    first_char: info.first_char as usize,
+                    values: info.widths.clone()
+                }))
             },
             FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid, _) => {
-                let mut widths = Box::new([cid.default_width; 256]);
+                let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
                 while let Some(ref p) = iter.next() {
                     let c1 = p.as_integer()? as usize;
                     match iter.next() {
                         Some(&Primitive::Array(ref array)) => {
+                            widths.ensure_capacity(c1 + array.len());
                             for (i, w) in array.iter().enumerate() {
-                                widths[c1 + i] = w.as_number()?;
+                                widths.set(c1 + i, w.as_number()?);
                             }
                         },
                         Some(&Primitive::Integer(c2)) => {
                             let w = try_opt!(iter.next()).as_number()?;
                             for c in (c1 as usize) ..= (c2 as usize) {
-                                widths[c] = w;
+                                widths.set(c, w);
                             }
                         },
                         p => return Err(PdfError::Other { msg: format!("unexpected primitive in W array: {:?}", p) })

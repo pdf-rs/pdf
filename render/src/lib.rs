@@ -12,7 +12,7 @@ use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::backend::Backend;
-use pdf::font::{Font as PdfFont, FontType};
+use pdf::font::{Font as PdfFont, FontType, Widths};
 use pdf::error::{PdfError, Result};
 use pdf::encoding::{Encoding as PdfEncoding, BaseEncoding};
 use pdf::content::Operation;
@@ -25,15 +25,14 @@ use pathfinder_geometry::{
 use pathfinder_content::{
     fill::FillRule,
     stroke::{LineCap, LineJoin, StrokeStyle, OutlineStrokeToFill},
-    outline::Outline,
+    outline::{Outline, Contour},
     pattern::{Pattern, Image},
 };
 use pathfinder_color::ColorU;
 use pathfinder_renderer::{
-    scene::{DrawPath, ClipPath, ClipPathId, DrawMode, Scene},
+    scene::{DrawPath, ClipPath, ClipPathId, Scene},
     paint::{Paint, PaintId},
 };
-
 use font::{self, Font, GlyphId};
 
 macro_rules! ops_p {
@@ -133,7 +132,7 @@ enum TextEncoding {
 struct FontEntry {
     font: Box<dyn Font>,
     encoding: TextEncoding,
-    widths: Option<Box<[f32; 256]>>,
+    widths: Option<Widths>,
     is_cid: bool,
 }
 #[derive(Copy, Clone)]
@@ -149,7 +148,7 @@ enum TextMode {
 #[derive(Copy, Clone)]
 struct GraphicsState<'a> {
     transform: Transform2F,
-    stroke_width: f32,
+    stroke_style: StrokeStyle,
     fill_paint: PaintId,
     stroke_paint: PaintId,
     clip_path: Option<ClipPathId>,
@@ -157,61 +156,36 @@ struct GraphicsState<'a> {
     stroke_color_space: &'a ColorSpace,
 }
 
+#[derive(Copy, Clone)]
+enum DrawMode {
+    Fill,
+    Stroke,
+    FillStroke,
+    StrokeFill,
+}
+
 impl<'a> GraphicsState<'a> {
-    fn get_text_style(&self, mode: TextMode) -> PathStyle {
-        match mode {
-            TextMode::Fill => self.fill_style(FillRule::Winding),
-            TextMode::Stroke => self.stroke_style(),
-            TextMode::FillThenStroke => self.fill_then_stroke_style(FillRule::Winding),
-            _ => PathStyle {
-                mode: DrawMode::None,
-                fill_rule: FillRule::Winding,
-            }
+    fn draw(&self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule) {
+        let fill = |scene: &mut Scene| {
+            let mut draw_path = DrawPath::new(outline.clone().transformed(&self.transform), self.fill_paint);
+            draw_path.set_clip_path(self.clip_path);
+            draw_path.set_fill_rule(fill_rule);
+            scene.push_draw_path(draw_path);
+        };
+
+        if matches!(mode, DrawMode::Fill | DrawMode::FillStroke) {
+            fill(scene);
         }
-    }
-    fn line_style(&self) -> StrokeStyle {
-        let line_width = self.stroke_width * self.transform.matrix.m11();
-        StrokeStyle {
-            line_cap: LineCap::Butt,
-            line_join: LineJoin::Miter(line_width),
-            line_width
+        if matches!(mode, DrawMode::Stroke | DrawMode::FillStroke) {
+            let mut stroke = OutlineStrokeToFill::new(outline, self.stroke_style);
+            stroke.offset();
+            let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&self.transform), self.stroke_paint);
+            draw_path.set_clip_path(self.clip_path);
+            draw_path.set_fill_rule(fill_rule);
+            scene.push_draw_path(draw_path);
         }
-    }
-    fn fill_style(&self, fill_rule: FillRule) -> PathStyle {
-        PathStyle {
-            mode: DrawMode::Fill(
-                self.fill_paint,
-            ),
-            fill_rule,
-        }
-    }
-    fn stroke_style(&self) -> PathStyle {
-        PathStyle {
-            mode: DrawMode::Stroke(
-                self.stroke_paint,
-                self.line_style()
-            ),
-            fill_rule: FillRule::Winding,
-        }
-    }
-    fn fill_then_stroke_style(&self, fill_rule: FillRule) -> PathStyle {
-        PathStyle {
-            mode: DrawMode::FillThenStroke(
-                self.fill_paint,
-                self.stroke_paint,
-                self.line_style(),
-            ),
-            fill_rule,
-        }
-    }
-    fn stroke_then_fill_style(&self, fill_rule: FillRule) -> PathStyle {
-        PathStyle {
-            mode: DrawMode::StrokeThenFill(
-                self.stroke_paint,
-                self.line_style(),
-                self.fill_paint,
-            ),
-            fill_rule,
+        if matches!(mode, DrawMode::StrokeFill) {
+            fill(scene);
         }
     }
 }
@@ -263,7 +237,15 @@ impl<'a> TextState<'a> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, root_tr: Transform2F, mut draw: impl FnMut(Outline), glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
+    fn add_glyphs(&mut self, scene: &mut Scene, gs: &GraphicsState, glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
+        let draw_mode = match self.mode {
+            TextMode::Fill => DrawMode::Fill,
+            TextMode::FillAndClip => DrawMode::Fill,
+            TextMode::FillThenStroke => DrawMode::FillStroke,
+            TextMode::Invisible => return BBox::empty(),
+            TextMode::Stroke => DrawMode::Stroke,
+            TextMode::StrokeAndClip => DrawMode::Stroke
+        };
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
 
@@ -287,8 +269,8 @@ impl<'a> TextState<'a> {
                 } // lets hope that works…
             };
             let glyph = e.font.glyph(gid);
-            let width: f32 = e.widths.as_ref().and_then(|w| w.get(cid as usize).map(|&w| w * 0.001 * self.horiz_scale * self.font_size))
-                .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance.x()))
+            let width: f32 = e.widths.as_ref().map(|w| w.get(cid as usize) * 0.001 * self.horiz_scale * self.font_size)
+                .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance))
                 .unwrap_or(0.0);
             
             if cid == 0x20 {
@@ -297,11 +279,11 @@ impl<'a> TextState<'a> {
                 continue;
             }
             if let Some(glyph) = glyph {
-                let transform = root_tr * self.text_matrix * tr;
+                let transform = gs.transform * self.text_matrix * tr;
                 let path = glyph.path.transformed(&transform);
                 if path.len() != 0 {
                     bbox.add(path.bounds());
-                    draw(path);
+                    gs.draw(scene, &path, draw_mode, FillRule::Winding);
                 }
             } else {
                 info!("no glyph for gid {:?}", gid);
@@ -312,7 +294,7 @@ impl<'a> TextState<'a> {
         debug!("text: {}", text);
         bbox
     }
-    fn draw_text(&mut self, root_tr: Transform2F, draw: impl FnMut(Outline), data: &[u8]) -> BBox {
+    fn draw_text(&mut self, scene: &mut Scene, gs: &GraphicsState, data: &[u8]) -> BBox {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
             let get_glyph = |cid: u16| {
@@ -323,15 +305,11 @@ impl<'a> TextState<'a> {
                 (cid, gid)
             };
             if e.is_cid {
-                self.add_glyphs(
-                    root_tr,
-                    draw,
+                self.add_glyphs(scene, gs,
                     data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
                 )
             } else {
-                self.add_glyphs(
-                    root_tr,
-                    draw,
+                self.add_glyphs(scene, gs,
                     data.iter().map(|&b| get_glyph(b as u16))
                 )
             }
@@ -559,25 +537,7 @@ impl Cache {
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
 
-        let mut path_builder = PathBuilder::new();
-
         let mut items = ItemMap::new();
-
-        // draw the page
-        let style = PathStyle {
-            mode: DrawMode::FillThenStroke(
-                white,
-                black,
-                StrokeStyle {
-                    line_cap: LineCap::Round,
-                    line_join: LineJoin::Round,
-                    line_width: 0.25
-                },
-            ),
-            fill_rule: FillRule::Winding,
-        };
-        path_builder.rect(RectF::new(Vector2F::default(), rect.size() * scale));
-        draw(&mut scene, path_builder.take(), &style, None);
 
         let root_transformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
         
@@ -596,16 +556,28 @@ impl Cache {
         
         let mut text_state = TextState::new();
         let mut stack = vec![];
+        let mut current_outline = Outline::new();
+        let mut current_contour = Contour::new();
 
-        path_builder.move_to(Vector2F::default());
+        fn flush(outline: &mut Outline, contour: &mut Contour) {
+            if !contour.is_empty() {
+                outline.push_contour(contour.clone());
+                contour.clear();
+            }
+        }
+
         let mut graphics_state = GraphicsState {
             transform: root_transformation,
-            stroke_width: 1.0,
             fill_paint: black,
             stroke_paint: black,
             clip_path: None,
             fill_color_space: &device_rgb,
             stroke_color_space: &device_rgb,
+            stroke_style: StrokeStyle {
+                line_cap: LineCap::Butt,
+                line_join: LineJoin::Miter(1.0),
+                line_width: 1.0,
+            }
         };
         
         let contents = try_opt!(page.contents.as_ref());
@@ -617,82 +589,75 @@ impl Cache {
             match s {
                 "m" => { // move x y
                     ops_p!(ops, p => {
-                        path_builder.move_to(p);
+                        flush(&mut current_outline, &mut current_contour);
+                        current_contour.push_endpoint(p);
                     })
                 }
                 "l" => { // line x y
                     ops_p!(ops, p => {
-                        path_builder.line_to(p);
+                        current_contour.push_endpoint(p);
                     })
                 }
                 "c" => { // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
                     ops_p!(ops, c1, c2, p => {
-                        path_builder.cubic_curve_to(c1, c2, p);
+                        current_contour.push_cubic(c1, c2, p);
                     })
                 }
                 "v" => { // cubic bezier c2.x c2.y p.x p.y
                     ops_p!(ops, c2, p => {
-                        let last = path_builder.pos().unwrap();
-                        path_builder.cubic_curve_to(last, c2, p);
+                        let c1 = current_contour.last_position().unwrap_or_default();
+                        current_contour.push_cubic(c1, c2, p);
                     })
                 }
                 "y" => { // cubic c1.x c1.y p.x p.y
                     ops_p!(ops, c1, p => {
-                        path_builder.cubic_curve_to(c1, p, p);
+                        current_contour.push_cubic(c1, p, p);
                     })
                 }
                 "h" => { // close
-                    path_builder.close();
+                    current_contour.close();
                 }
                 "re" => { // rect x y width height
                     ops_p!(ops, origin, size => {
-                        let r = RectF::new(origin, size);
-                        path_builder.rect(r);
+                        flush(&mut current_outline, &mut current_contour);
+                        current_outline.push_contour(Contour::from_rect(RectF::new(origin, size)));
                     })
                 }
                 "S" => { // stroke
-                    let style = graphics_state.stroke_style();
-                    let path = path_builder.take().transformed(&graphics_state.transform);
-                    draw(&mut scene, path, &style, graphics_state.clip_path);
+                    flush(&mut current_outline, &mut current_contour);
+                    graphics_state.draw(&mut scene, &current_outline, DrawMode::Stroke, FillRule::Winding);
+                    current_outline.clear();
                 }
                 "s" => { // close and stroke
-                    path_builder.close();
-                    let style = graphics_state.stroke_style();
-                    let path = path_builder.take().transformed(&graphics_state.transform);
-                    draw(&mut scene, path, &style, graphics_state.clip_path);
+                    current_contour.close();
+                    flush(&mut current_outline, &mut current_contour);
+                    graphics_state.draw(&mut scene, &current_outline, DrawMode::Stroke, FillRule::Winding);
+                    current_outline.clear();
                 }
-                "f" | "F" | "f*" => { // close and fill 
-                    // TODO: implement windings
-                    path_builder.close();
-                    let path = path_builder.take().transformed(&graphics_state.transform);
-                    let style = graphics_state.fill_style(fill_rule(s));
-                    draw(&mut scene, path, &style, graphics_state.clip_path);
+                "f" | "F" => { // close and fill 
+                    current_contour.close();
+                    flush(&mut current_outline, &mut current_contour);
+                    graphics_state.draw(&mut scene, &current_outline, DrawMode::Fill, fill_rule(s));
+                    current_outline.clear();
                 }
                 "B" | "B*" => { // fill and stroke
-                    path_builder.close();
-                    let path = path_builder.take().transformed(&graphics_state.transform);
-                    let style = graphics_state.fill_then_stroke_style(fill_rule(s));
-                    draw(&mut scene, path, &style, graphics_state.clip_path);
+                    flush(&mut current_outline, &mut current_contour);
+                    graphics_state.draw(&mut scene, &current_outline, DrawMode::FillStroke, fill_rule(s));
+                    current_outline.clear();
                 }
-                "b" | "b*" => { // stroke and fill
-                    path_builder.close();
-                    let path = path_builder.take().transformed(&graphics_state.transform);
-                    let style = graphics_state.stroke_then_fill_style(fill_rule(s));
-                    draw(&mut scene, path, &style, graphics_state.clip_path);
+                "b" | "b*" => { // close, stroke and fill
+                    current_contour.close();
+                    flush(&mut current_outline, &mut current_contour);
+                    graphics_state.draw(&mut scene, &current_outline, DrawMode::FillStroke, fill_rule(s));
+                    current_outline.clear();
                 }
                 "n" => { // clear path
-                    path_builder.clear();
+                    current_outline.clear();
+                    current_contour.clear();
                 }
                 "W" | "W*" => {
-                    let path = path_builder.take().transformed(&graphics_state.transform);
-                    /*
-                    let style = surface.build_style(PathStyle {
-                        fill: Some(Paint::Solid((0, 0, 200, 50))),
-                        stroke: None,
-                        fill_rule: FillRule::NonZero
-                    });
-                    surface.draw_path(path.clone(), &style, graphics_state.clip_path.as_ref());
-                    */
+                    flush(&mut current_outline, &mut current_contour);
+                    let path = current_outline.clone().transformed(&graphics_state.transform);
                     let mut clip_path = ClipPath::new(path);
                     clip_path.set_fill_rule(fill_rule(s));
                     let clip_path_id = scene.push_clip_path(clip_path);
@@ -713,7 +678,7 @@ impl Cache {
                 }
                 "w" => { // line width
                     ops!(ops, width: f32 => {
-                        graphics_state.stroke_width = width;
+                        graphics_state.stroke_style.line_width = width;
                     })
                 }
                 "J" => { // line cap
@@ -728,7 +693,7 @@ impl Cache {
                     let gs = gs.as_name()?;
                     let gs = try_opt!(resources.graphics_states.get(gs));
                     if let Some(lw) = gs.line_width {
-                        graphics_state.stroke_width = lw;
+                        graphics_state.stroke_style.line_width = lw;
                     }
                     if let Some((ref font, size)) = gs.font {
                         if let Some(e) = self.get_font(&font.name) {
@@ -864,51 +829,31 @@ impl Cache {
                 
                 // draw text
                 "Tj" => ops!(ops, text: &[u8] => {
-                    let style = graphics_state.get_text_style(text_state.mode);
-                    let bb = text_state.draw_text(
-                        graphics_state.transform,
-                        |path| draw(&mut scene, path, &style, graphics_state.clip_path),
-                        text
-                    );
+                    let bb = text_state.draw_text(&mut scene, &graphics_state, text);
                     items.add_bbox(bb, op.clone());
                 }),
                 
                 // move to the next line and draw text
                 "'" => ops!(ops, text: &[u8] => {
-                    let style = graphics_state.get_text_style(text_state.mode);
                     text_state.next_line();
-                    let bb = text_state.draw_text(
-                        graphics_state.transform,
-                        |path| draw(&mut scene, path, &style, graphics_state.clip_path),
-                        text
-                    );
+                    let bb = text_state.draw_text(&mut scene, &graphics_state, text);
                     items.add_bbox(bb, op.clone());
                 }),
                 
                 // set word and charactr spacing, move to the next line and draw text
                 "\"" => ops!(ops, word_space: f32, char_space: f32, text: &[u8] => {
-                    let style = graphics_state.get_text_style(text_state.mode);
                     text_state.word_space = word_space;
                     text_state.char_space = char_space;
                     text_state.next_line();
-                    let bb = text_state.draw_text(
-                        graphics_state.transform,
-                        |path| draw(&mut scene, path, &style, graphics_state.clip_path),
-                        text
-                    );
+                    let bb = text_state.draw_text(&mut scene, &graphics_state, text);
                     items.add_bbox(bb, op.clone());
                 }),
                 "TJ" => ops!(ops, array: &[Primitive] => {
                     let mut bb = BBox::empty();
-                    let style = graphics_state.get_text_style(text_state.mode);
                     for arg in array {
                         match arg {
                             Primitive::String(ref data) => {
-                                let r2 = text_state.draw_text(
-                                    graphics_state.transform,
-                                    |path| draw(&mut scene, path, &style, graphics_state.clip_path),
-                                    data.as_bytes()
-                                );
+                                let r2 = text_state.draw_text(&mut scene, &graphics_state, data.as_bytes());
                                 bb.add_bbox(r2);
                             },
                             p => {
@@ -935,20 +880,18 @@ impl Cache {
                                 };
                                 let size = Vector2I::new(image.width as _, image.height as _);
                                 let size_f = size.to_f32();
-                                let mut path_builder: PathBuilder = PathBuilder::new();
-                                path_builder.rect(RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
+                                let outline = Outline::from_rect(graphics_state.transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
                                 let im_tr = graphics_state.transform
                                     * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
                                     * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
                                 let mut pattern = Pattern::from_image(Image::new(size, Arc::new(data)));
                                 pattern.apply_transform(im_tr);
-                                let style = PathStyle {
-                                    mode: DrawMode::Fill(
-                                        scene.push_paint(&Paint::from_pattern(pattern))
-                                    ),
-                                    fill_rule: FillRule::Winding
-                                };
-                                draw(&mut scene, path_builder.take().transformed(&graphics_state.transform), &style, None);
+                                let paint = Paint::from_pattern(pattern);
+                                let paint_id = scene.push_paint(&paint);
+                                let mut draw_path = DrawPath::new(outline, paint_id);
+                                draw_path.set_clip_path(graphics_state.clip_path);
+                                scene.push_draw_path(draw_path);
+
                                 items.add_rect(graphics_state.transform * RectF::new(Vector2F::default(), size_f), image.clone())
                             },
                             _ => {}
