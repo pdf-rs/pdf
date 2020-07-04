@@ -14,8 +14,7 @@ font = { git = "https://github.com/pdf-rs/font/" }
 encoding = { git = "https://github.com/pdf-rs/encoding/" }
 itertools = "*"
 
-pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_content = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_color = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder/" }
-pathfinder_builder = { git = "https://github.com/s3bk/pathfinder/" }
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder/" }
+pathfinder_content = { git = "https://github.com/servo/pathfinder/" }
+pathfinder_color = { git = "https://github.com/servo/pathfinder/" }
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder/" }
