@@ -115,6 +115,9 @@ impl File<Vec<u8>> {
 }
 impl<B: Backend> File<B> {
     pub fn from_data(backend: B) -> Result<Self> {
+        Self::load_data(backend).map_err(|e| dbg!(e))
+    }
+    fn load_data(backend: B) -> Result<Self> {
         let (refs, trailer) = t!(backend.read_xref_table_and_trailer());
         let mut storage = Storage::new(backend, refs);
 

@@ -166,8 +166,11 @@ enum DrawMode {
 
 impl<'a> GraphicsState<'a> {
     fn draw(&self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule) {
+        self.draw_transform(scene, outline, mode, fill_rule, Transform2F::default());
+    }
+    fn draw_transform(&self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
         let fill = |scene: &mut Scene| {
-            let mut draw_path = DrawPath::new(outline.clone().transformed(&self.transform), self.fill_paint);
+            let mut draw_path = DrawPath::new(outline.clone().transformed(&(self.transform * transform)), self.fill_paint);
             draw_path.set_clip_path(self.clip_path);
             draw_path.set_fill_rule(fill_rule);
             scene.push_draw_path(draw_path);
@@ -279,11 +282,11 @@ impl<'a> TextState<'a> {
                 continue;
             }
             if let Some(glyph) = glyph {
-                let transform = gs.transform * self.text_matrix * tr;
-                let path = glyph.path.transformed(&transform);
+                let transform = self.text_matrix * tr;
+                let path = glyph.path;
                 if path.len() != 0 {
                     bbox.add(path.bounds());
-                    gs.draw(scene, &path, draw_mode, FillRule::Winding);
+                    gs.draw_transform(scene, &path, draw_mode, FillRule::Winding, transform);
                 }
             } else {
                 info!("no glyph for gid {:?}", gid);
@@ -532,10 +535,13 @@ impl Cache {
         
         let scale = Vector2F::splat(0.5);
         let mut scene = Scene::new();
-        scene.set_view_box(RectF::new(Vector2F::default(), rect.size() * scale));
+        let view_box = RectF::new(Vector2F::default(), rect.size() * scale);
+        scene.set_view_box(view_box);
         
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
+
+        scene.push_draw_path(DrawPath::new(Outline::from_rect(view_box), white));
 
         let mut items = ItemMap::new();
 
