@@ -26,6 +26,7 @@ impl<B: Backend> PdfView<B> {
     }
 }
 impl<B: Backend + 'static> Interactive for PdfView<B> {
+    type Event = Vec<u8>;
     fn title(&self) -> String {
         self.file.trailer.info_dict.as_ref()
             .and_then(|info| info.get("Title"))
@@ -84,15 +85,20 @@ pub fn run() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn show(canvas: HtmlCanvasElement, data: &Uint8Array) -> WasmView {
+    use pathfinder_resources::embedded::EmbeddedResourceLoader;
+
     let data: Vec<u8> = data.to_vec();
     info!("got {} bytes of data", data.len());
     let file = PdfFile::from_data(data).expect("failed to parse PDF");
     info!("got the file");
     let view = PdfView::new(file);
 
+    let mut config = Config::new(Box::new(EmbeddedResourceLoader));
+    config.zoom = false;
+    config.pan = false;
     WasmView::new(
         canvas,
-        Config { zoom: false, pan: false },
+        config,
         Box::new(view) as _
     )
 }

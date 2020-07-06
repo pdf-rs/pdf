@@ -169,8 +169,9 @@ impl<'a> GraphicsState<'a> {
         self.draw_transform(scene, outline, mode, fill_rule, Transform2F::default());
     }
     fn draw_transform(&self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
+        let tr = self.transform * transform;
         let fill = |scene: &mut Scene| {
-            let mut draw_path = DrawPath::new(outline.clone().transformed(&(self.transform * transform)), self.fill_paint);
+            let mut draw_path = DrawPath::new(outline.clone().transformed(&tr), self.fill_paint);
             draw_path.set_clip_path(self.clip_path);
             draw_path.set_fill_rule(fill_rule);
             scene.push_draw_path(draw_path);
@@ -182,7 +183,7 @@ impl<'a> GraphicsState<'a> {
         if matches!(mode, DrawMode::Stroke | DrawMode::FillStroke) {
             let mut stroke = OutlineStrokeToFill::new(outline, self.stroke_style);
             stroke.offset();
-            let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&self.transform), self.stroke_paint);
+            let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&tr), self.stroke_paint);
             draw_path.set_clip_path(self.clip_path);
             draw_path.set_fill_rule(fill_rule);
             scene.push_draw_path(draw_path);
@@ -240,7 +241,7 @@ impl<'a> TextState<'a> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, scene: &mut Scene, gs: &GraphicsState, glyphs: impl Iterator<Item=(u16, Option<GlyphId>)>) -> BBox {
+    fn add_glyphs(&mut self, scene: &mut Scene, gs: &GraphicsState, glyphs: impl Iterator<Item=(u16, Option<GlyphId>, bool)>) -> BBox {
         let draw_mode = match self.mode {
             TextMode::Fill => DrawMode::Fill,
             TextMode::FillAndClip => DrawMode::Fill,
@@ -258,7 +259,7 @@ impl<'a> TextState<'a> {
         ) * e.font.font_matrix();
         
         let mut text = String::with_capacity(32);
-        for (cid, gid) in glyphs {
+        for (cid, gid, is_space) in glyphs {
             if let Some(c) = std::char::from_u32(cid as u32) {
                 text.push(c);
             }
@@ -276,7 +277,7 @@ impl<'a> TextState<'a> {
                 .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance))
                 .unwrap_or(0.0);
             
-            if cid == 0x20 {
+            if is_space {
                 let advance = self.word_space * self.horiz_scale * self.font_size + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
                 continue;
@@ -301,11 +302,11 @@ impl<'a> TextState<'a> {
         debug!("text: {:?}", String::from_utf8_lossy(data));
         if let Some(e) = self.font_entry {
             let get_glyph = |cid: u16| {
-                let gid = match e.encoding {
-                    TextEncoding::CID => Some(GlyphId(cid as u32)),
-                    TextEncoding::Cmap(ref cmap) => cmap.get(&cid).cloned()
+                let (gid, is_space) = match e.encoding {
+                    TextEncoding::CID => (Some(GlyphId(cid as u32)), false),
+                    TextEncoding::Cmap(ref cmap) => (cmap.get(&cid).cloned(), cid == 0x20),
                 };
-                (cid, gid)
+                (cid, gid, is_space)
             };
             if e.is_cid {
                 self.add_glyphs(scene, gs,
@@ -313,7 +314,7 @@ impl<'a> TextState<'a> {
                 )
             } else {
                 self.add_glyphs(scene, gs,
-                    data.iter().map(|&b| get_glyph(b as u16))
+                    data.iter().map(|&b| get_glyph(b as u16)),
                 )
             }
         } else {
@@ -533,7 +534,7 @@ impl Cache {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
-        let scale = Vector2F::splat(0.5);
+        let scale = 25.4 / 72.;
         let mut scene = Scene::new();
         let view_box = RectF::new(Vector2F::default(), rect.size() * scale);
         scene.set_view_box(view_box);
@@ -878,9 +879,14 @@ impl Cache {
                         match *xobject {
                             XObject::Image(ref image) => {
                                 let raw_data = image.data()?;
-                                let data = match raw_data.len() / (image.width as usize * image.height as usize) {
+                                let pixel_count = image.width as usize * image.height as usize;
+                                if raw_data.len() % pixel_count != 0 {
+                                    warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
+                                    return Err(PdfError::EOF);
+                                }
+                                let data = match raw_data.len() / pixel_count {
                                     1 => raw_data.iter().map(|&l| ColorU { r: l, g: l, b: l, a: 255 }).collect(),
-                                    3 => raw_data.chunks(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
+                                    3 => raw_data.chunks_exact(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
                                     4 => cmyk2color(raw_data),
                                     n => panic!("unimplemented {} bytes/pixel", n)
                                 };
