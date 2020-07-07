@@ -69,13 +69,16 @@ function show(file) {
     reader.readAsArrayBuffer(file);
 }
 
-function open(event) {
-    event.preventDefault();
-    let e = document.getElementById("file-input");
-    show(e.files[0]);
-    e.value = "";
+function open() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.onchange = e => { 
+        // getting a hold of the file reference
+        var file = e.target.files[0]; 
+        show(file);
+    };
+    input.click();
 }
 
 document.addEventListener("drop", drop_handler, false);
 document.addEventListener("dragover", dragover_handler, false);
-
