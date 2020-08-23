@@ -2,7 +2,7 @@
 #[macro_use] extern crate pdf;
 
 use std::convert::TryInto;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::collections::HashMap;
 use std::fs;
 use std::borrow::Cow;
@@ -12,11 +12,10 @@ use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::backend::Backend;
-use pdf::font::{Font as PdfFont, FontType, Widths};
+use pdf::font::{Font as PdfFont, Widths};
 use pdf::error::{PdfError, Result};
-use pdf::encoding::{Encoding as PdfEncoding, BaseEncoding};
-use pdf::content::Operation;
-use encoding::{Encoding};
+use pdf::encoding::{BaseEncoding};
+use pdf_encoding::{Encoding};
 
 use pathfinder_geometry::{
     vector::{Vector2F, Vector2I},
@@ -527,10 +526,7 @@ impl Cache {
         self.fonts.get(font_name)
     }
     
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page) -> Result<(Scene, ItemMap)> {
-        self.render_page_n(file, page, usize::max_value())
-    }
-    pub fn render_page_n<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, num_ops: usize) -> Result<(Scene, ItemMap)> {
+    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
         
@@ -546,7 +542,7 @@ impl Cache {
 
         let mut items = ItemMap::new();
 
-        let root_transformation = Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
+        let root_transformation = transform * Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
         
         let resources = page.resources(file)?;
         // make sure all fonts are in the cache, so we can reference them
@@ -589,7 +585,7 @@ impl Cache {
         
         let contents = try_opt!(page.contents.as_ref());
         
-        for op in contents.operations.iter().take(num_ops) {
+        for op in contents.operations.iter() {
             debug!("{}", op);
             let ref ops = op.operands;
             let s = op.operator.as_str();

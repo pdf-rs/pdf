@@ -4,6 +4,7 @@ members = [
     "pdf_derive",
     "view",
     "render",
+    "convert",
     "examples/read",
     "examples/text",
     "examples/names",
@@ -15,21 +16,24 @@ default-members = [
    # "view"
 ]
 
-#[patch."https://github.com/pdf-rs/font"]
-#font = { path = "../font" }
+[patch."https://github.com/pdf-rs/font"]
+font = { path = "../font" }
 
-#[patch."https://github.com/s3bk/pathfinder_view"]
-#pathfinder_view = { path = "../pathfinder_view" }
+[patch."https://github.com/s3bk/pathfinder_view"]
+pathfinder_view = { path = "../pathfinder_view" }
 
-#[patch."https://github.com/s3bk/pathfinder"]
-#pathfinder_gl = { path = "../pathfinder/gl"}
-#pathfinder_webgl = { path = "../pathfinder/webgl"}
-#pathfinder_gpu = { path = "../pathfinder/gpu"}
-#pathfinder_content = { path = "../pathfinder/content"}
-#pathfinder_color = { path = "../pathfinder/color"}
-#pathfinder_geometry = { path = "../pathfinder/geometry"}
-#pathfinder_renderer = { path = "../pathfinder/renderer"}
-#pathfinder_resources = { path = "../pathfinder/resources"}
-#pathfinder_simd = { path = "../pathfinder/simd"}
-#pathfinder_svg = { path = "../pathfinder/svg"}
-#pathfinder_export = { path = "../pathfinder/export"}
+[patch."https://github.com/servo/pathfinder"]
+pathfinder_gl = { path = "../pathfinder/gl" }
+pathfinder_webgl = { path = "../pathfinder/webgl" }
+pathfinder_gpu = { path = "../pathfinder/gpu" }
+pathfinder_content = { path = "../pathfinder/content" }
+pathfinder_color = { path = "../pathfinder/color" }
+pathfinder_geometry = { path = "../pathfinder/geometry" }
+pathfinder_renderer = { path = "../pathfinder/renderer" }
+pathfinder_resources = { path = "../pathfinder/resources" }
+pathfinder_export = { path = "../pathfinder/export", features=["raster"] }
+pathfinder_simd = { path = "../pathfinder/simd"}
+
+[patch."https://github.com/s3bk/svg"]
+svg_dom = { path = "../svg/dom"}
+svg_draw = { path = "../svg/draw"}

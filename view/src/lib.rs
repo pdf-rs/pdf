@@ -33,12 +33,12 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
             .and_then(|p| p.as_str().map(|s| s.into_owned()))
             .unwrap_or_else(|| "PDF View".into())
     }
-    fn num_pages(&self) -> usize {
-        self.num_pages
+    fn init(&mut self, ctx: &mut Context, sender: Emitter<Self::Event>) {
+        ctx.num_pages = self.num_pages;
     }
-    fn scene(&mut self, page_nr: usize) -> Scene {
-        let page = self.file.get_page(page_nr as u32).unwrap();
-        let (scene, map) = self.cache.render_page(&self.file, &page).unwrap();
+    fn scene(&mut self, ctx: &mut Context) -> Scene {
+        let page = self.file.get_page(ctx.page_nr as u32).unwrap();
+        let (scene, map) = self.cache.render_page(&self.file, &page, ctx.view_transform()).unwrap();
         self.map = Some(map);
         scene
     }
@@ -61,7 +61,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
             KeyCode::Left | KeyCode::PageUp => ctx.prev_page(),
             _ => return
         }
-        ctx.update_scene();
+        ctx.request_redraw();
     }
 }
 

@@ -11,8 +11,8 @@ unstable = ["font/unstable"]
 log = "0.4.8"
 pdf = { path = "../pdf", default-features=false }
 font = { git = "https://github.com/pdf-rs/font/" }
-encoding = { git = "https://github.com/pdf-rs/encoding/" }
-itertools = "*"
+pdf_encoding = "0.1.0"
+itertools = "0.9.0"
 
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder/" }
 pathfinder_content = { git = "https://github.com/servo/pathfinder/" }

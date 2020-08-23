@@ -1,7 +1,7 @@
 [package]
 name = "pdf_view"
 version = "0.1.0"
-authors = ["Sebastian Köln <sebk@rynx.org>"]
+authors = ["Sebastian Köln <s3bk@protonmail.com>"]
 edition = "2018"
 
 [features]
@@ -13,31 +13,22 @@ pdf_render = { path = "../render" }
 pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
 pathfinder_color = { git = "https://github.com/servo/pathfinder" }
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
-pathfinder_export = { git = "https://github.com/servo/pathfinder" }
 pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
 pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
+pathfinder_export = { git = "https://github.com/servo/pathfinder" }
 log = "0.4.8"
+structopt = "*"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.wasm32-unknown-unknown.dependencies]
 wasm-bindgen = "0.2.48"
 js-sys = "*"
 web-sys = { version = "*", features = ["HtmlCanvasElement"] }
 console_log = "*"
 console_error_panic_hook = "*"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.x86_64-unknown-linux-gnu.dependencies]
 #pdf = { path = "../pdf", features=["mmap", "dump"] }
-pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 env_logger = "*"
-
-[[bin]]
-name = "pdf_view"
-
-[[bin]]
-name = "pdf2svg"
-
-[[bin]]
-name = "render"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
