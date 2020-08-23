@@ -240,11 +240,14 @@ impl Font {
         match self.data {
             FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(),
             FontData::Type1(ref info) | FontData::TrueType(ref info) => {
-                Ok(Some(Widths {
-                    default: 0.0,
-                    first_char: info.first_char as usize,
-                    values: info.widths.clone()
-                }))
+                match info {
+                    &TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
+                        default: 0.0,
+                        first_char: first as usize,
+                        values: widths.clone()
+                    })),
+                    _ => Ok(None)
+                }
             },
             FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid, _) => {
                 let mut widths = Widths::new(cid.default_width);
@@ -281,11 +284,13 @@ pub struct TFont {
     #[pdf(key="Name")]
     pub name: Option<String>,
     
+    /// per spec required, but some files lack it.
     #[pdf(key="FirstChar")]
-    pub first_char: i32,
+    pub first_char: Option<i32>,
     
+    /// same
     #[pdf(key="LastChar")]
-    pub last_char: i32,
+    pub last_char: Option<i32>,
     
     #[pdf(key="Widths")]
     pub widths: Vec<f32>,

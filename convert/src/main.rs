@@ -50,7 +50,7 @@ fn main() -> Result<(), PdfError> {
     let format = match opt.format.as_str() {
         "svg" => FileFormat::SVG,
         "pdf" => FileFormat::PDF,
-        "png" => FileFormat::PNG,
+       // "png" => FileFormat::PNG,
         "ps" => FileFormat::PS,
         _ => panic!("invalid format")
     };
