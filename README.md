@@ -8,43 +8,7 @@ One easy way you can contribute is to add different PDF files to `tests/files` a
 Feel free to contribute with ideas, issues or code! Please join [us on Zulip](https://type.zulipchat.com/#narrow/stream/209232-pdf) if you have any questions or problems.
 
 # Building
-The PDF standard references 14 standard fonts, which are not distributed with it.
-Due to dubious practices by Adobe, it is not safe to publish them in the viewer.
-
-You can download them [here](https://lbry.tv/pdf-standard-fonts.tar.bz:060d67b0d4f5ef9089853f3b314598e0e5d9c487) and unpack with
-```
-tar -xf fonts.tar.bz
-```
-placing the `fonts` directory in repository directory.
-
-Finally set the environment variable `STANDARD_FONTS` to the fonts folder:
-```
-export STANDARD_FONTS=$pwd/fonts
-```
-
-Alternativly you can run `./download_fonts.sh` to get them from [this old debian release of the Adobe PDF reader](http://ardownload.adobe.com/pub/adobe/reader/unix/9.x/9.5.5/enu/AdbeRdr9.5.5-1_i386linux_enu.deb). And `AdobePiStd.ttf` can be found on the internet as well:
-
-
-Over all you will need in the `fonts` directory:
- - `CourierStd.otf`
- - `CourierStd-Bold.otf`
- - `CourierStd-Oblique.otf`
- - `CourierStd-BoldOblique.otf`
- - `MinionPro-Regular.otf`
- - `MinionPro-Bold.otf`
- - `MinionPro-It.otf`
- - `MinionPro-BoldIt.otf`
- - `MyriadPro-Regular.otf`
- - `MyriadPro-Bold.otf`
- - `MyriadPro-It.otf`
- - `MyriadPro-BoldIt.otf`
- - `SY______.PFB`
- - `AdobePiStd.otf`
- - `Arial-BoldMT.otf`
- - `ArialMT.ttf`
- - `Arial-ItalicMT.otf`
-
-Once you have the fonts, you can pass enable the `standard-fonts` for the pdf crate.
+See [fonts.md](fonts.md) if you want to support the 14 standard fonts.
 
 # Workspace
 This repository uses a Cargo Workspace and default members. This means by default only the `pdf` library is build.
