@@ -11,7 +11,11 @@ fn main() -> Result<(), PdfError> {
 
     let file = File::<Vec<u8>>::open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
-        eprintln!("{:?}", info);
+        info.iter()
+            .filter(|(_, primitive)| primitive.as_str().is_some())
+            .for_each(|(key, value)| {
+                eprintln!("{:>15}: {}", key, value.as_str().unwrap());
+            });
     }
 
     Ok(())
