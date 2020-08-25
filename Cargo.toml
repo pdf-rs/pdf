@@ -8,6 +8,7 @@ members = [
     "examples/read",
     "examples/text",
     "examples/names",
+    "examples/metadata",
 ]
 default-members = [
     "pdf",
