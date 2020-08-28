@@ -407,3 +407,14 @@ impl<'a> Deref for Substr<'a> {
         self.as_slice()
     }
 }
+impl<'a> PartialEq<&[u8]> for Substr<'a> {
+    fn eq(&self, rhs: &&[u8]) -> bool {
+        self.equals(rhs)
+    }
+}
+
+impl<'a> PartialEq<&str> for Substr<'a> {
+    fn eq(&self, rhs: &&str) -> bool {
+        self.equals(rhs.as_bytes())
+    }
+}

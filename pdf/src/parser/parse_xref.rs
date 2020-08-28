@@ -74,19 +74,22 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
     let mut sections = Vec::new();
     
     // Keep reading subsections until we hit `trailer`
-    while !lexer.peek()?.equals(b"trailer") {
+    while lexer.peek()? != "trailer" {
         let start_id = t!(lexer.next_as::<u32>());
         let num_ids = t!(lexer.next_as::<u32>());
 
         let mut section = XRefSection::new(start_id);
 
-        for _ in 0..num_ids {
+        for i in 0..num_ids {
             let w1 = t!(lexer.next());
+            if w1 == "trailer" {
+                return Err(PdfError::Other { msg: format!("xref table declares {} entries, but only {} follow.", num_ids, i) });
+            }
             let w2 = t!(lexer.next());
             let w3 = t!(lexer.next());
-            if w3.equals(b"f") {
+            if w3 == "f" {
                 section.add_free_entry(t!(w1.to::<ObjNr>()), t!(w2.to::<GenNr>()));
-            } else if w3.equals(b"n") {
+            } else if w3 == "n" {
                 section.add_inuse_entry(t!(w1.to::<usize>()), t!(w2.to::<GenNr>()));
             } else {
                 return Err(PdfError::UnexpectedLexeme {pos: lexer.get_pos(), lexeme: w3.to_string(), expected: "f or n"});
@@ -104,7 +107,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
 
 pub fn read_xref_and_trailer_at(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let next_word = t!(lexer.next());
-    if next_word.equals(b"xref") {
+    if next_word == "xref" {
         // Read classic xref table
         parse_xref_table_and_trailer(lexer, resolve)
     } else {
