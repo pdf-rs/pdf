@@ -1,18 +1,12 @@
 use crate::error::*;
-use crate::parser::Lexer;
-use crate::parser::{read_xref_and_trailer_at};
-use crate::xref::{XRefTable};
-use crate::primitive::{Dictionary};
 use crate::object::*;
-use std::ops::{Deref};
+use crate::parser::read_xref_and_trailer_at;
+use crate::parser::Lexer;
+use crate::primitive::Dictionary;
+use crate::xref::XRefTable;
+use std::ops::Deref;
 
-use std::ops::{
-    RangeFull,
-    RangeFrom,
-    RangeTo,
-    Range,
-};
-
+use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 
 pub trait Backend: Sized {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]>;
@@ -35,37 +29,41 @@ pub trait Backend: Sized {
     fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {
         let mut xref_offset = t!(self.locate_xref_offset());
         let mut lexer = Lexer::new(t!(self.read(xref_offset..)));
-        
+
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
-        
-        let highest_id = t!(trailer.get("Size")
-            .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
+
+        let highest_id = t!(trailer
+            .get("Size")
+            .ok_or_else(|| PdfError::MissingEntry {
+                field: "Size".into(),
+                typ: "XRefTable"
+            })?
             .as_integer());
 
         let mut refs = XRefTable::new(highest_id as ObjNr);
         for section in xref_sections {
             refs.add_entries_from(section);
         }
-        
+
         let mut prev_trailer = {
             match trailer.get("Prev") {
                 Some(p) => Some(t!(p.as_integer())),
-                None => None
+                None => None,
             }
         };
         trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
             let mut lexer = Lexer::new(t!(self.read(prev_xref_offset as usize..)));
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
-            
+
             for section in xref_sections {
                 refs.add_entries_from(section);
             }
-            
+
             prev_trailer = {
                 match trailer.get("Prev") {
                     Some(p) => Some(t!(p.as_integer())),
-                    None => None
+                    None => None,
                 }
             };
         }
@@ -73,8 +71,11 @@ pub trait Backend: Sized {
     }
 }
 
-
-impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
+impl<T> Backend for T
+where
+    T: Deref<Target = [u8]>,
+{
+    //+ DerefMut<Target=[u8]> {
     fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
         let r = t!(range.to_range(self.len()));
         Ok(&self[r])
@@ -92,43 +93,53 @@ impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
 
 /// `IndexRange` is implemented by Rust's built-in range types, produced
 /// by range syntax like `..`, `a..`, `..b` or `c..d`.
-pub trait IndexRange
-{
+pub trait IndexRange {
     #[inline]
     /// Start index (inclusive)
-    fn start(&self) -> Option<usize> { None }
+    fn start(&self) -> Option<usize> {
+        None
+    }
     #[inline]
     /// End index (exclusive)
-    fn end(&self) -> Option<usize> { None }
+    fn end(&self) -> Option<usize> {
+        None
+    }
 
     /// `len`: the size of whatever container that is being indexed
     fn to_range(&self, len: usize) -> Result<Range<usize>> {
         match (self.start(), self.end()) {
-            (None, None) => Ok(0 .. len),
-            (Some(start), _) if start <= len => Ok(start .. len),
-            (None, Some(end)) if end <= len => Ok(0 .. end),
-            (Some(start), Some(end)) if start <= end && end <= len => Ok(start .. end),
-            _ => Err(PdfError::ContentReadPastBoundary)
+            (None, None) => Ok(0..len),
+            (Some(start), _) if start <= len => Ok(start..len),
+            (None, Some(end)) if end <= len => Ok(0..end),
+            (Some(start), Some(end)) if start <= end && end <= len => Ok(start..end),
+            _ => Err(PdfError::ContentReadPastBoundary),
         }
     }
 }
-
 
 impl IndexRange for RangeFull {}
 
 impl IndexRange for RangeFrom<usize> {
     #[inline]
-    fn start(&self) -> Option<usize> { Some(self.start) }
+    fn start(&self) -> Option<usize> {
+        Some(self.start)
+    }
 }
 
 impl IndexRange for RangeTo<usize> {
     #[inline]
-    fn end(&self) -> Option<usize> { Some(self.end) }
+    fn end(&self) -> Option<usize> {
+        Some(self.end)
+    }
 }
 
 impl IndexRange for Range<usize> {
     #[inline]
-    fn start(&self) -> Option<usize> { Some(self.start) }
+    fn start(&self) -> Option<usize> {
+        Some(self.start)
+    }
     #[inline]
-    fn end(&self) -> Option<usize> { Some(self.end) }
+    fn end(&self) -> Option<usize> {
+        Some(self.end)
+    }
 }

@@ -1,15 +1,17 @@
-use std::{str, fs};
-use std::rc::Rc;
+use glob::glob;
 use pdf::file::File;
 use pdf::object::*;
 use pdf::parser::parse;
-use glob::glob;
+use std::rc::Rc;
+use std::{fs, str};
 
 macro_rules! file_path {
-    ( $subdir:expr ) => { concat!("../files/", $subdir) }
+    ( $subdir:expr ) => {
+        concat!("../files/", $subdir)
+    };
 }
 macro_rules! run {
-    ($e:expr) => (
+    ($e:expr) => {
         match $e {
             Ok(v) => v,
             Err(e) => {
@@ -17,7 +19,7 @@ macro_rules! run {
                 panic!("{}", e);
             }
         }
-    )
+    };
 }
 
 #[test]
@@ -41,12 +43,12 @@ fn read_pages() {
 
                 let path = path.to_str().unwrap();
                 let file = run!(File::<Vec<u8>>::open(path));
-                for i in 0 .. file.num_pages() {
+                for i in 0..file.num_pages() {
                     println!("\nRead page {}", i);
                     let _ = file.get_page(i);
                 }
             }
-            Err(e) => println!("{:?}", e)
+            Err(e) => println!("{:?}", e),
         }
     }
 }
@@ -56,7 +58,7 @@ fn parse_objects_from_stream() {
     use pdf::object::NoResolve;
     let file = run!(File::<Vec<u8>>::open(file_path!("xelatex.pdf")));
     // .. we know that object 13 of that file is an ObjectStream
-    let obj_stream: Rc<ObjectStream> = run!(file.get(Ref::new(PlainRef {id: 13, gen: 0})));
+    let obj_stream: Rc<ObjectStream> = run!(file.get(Ref::new(PlainRef { id: 13, gen: 0 })));
     for i in 0..obj_stream.n_objects() {
         let slice = run!(obj_stream.get_object_slice(i));
         println!("Object slice #{}: {}\n", i, str::from_utf8(slice).unwrap());

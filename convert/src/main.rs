@@ -1,12 +1,12 @@
+use pathfinder_export::{Export, FileFormat};
+use pathfinder_geometry::transform2d::Transform2F;
+use pdf::error::PdfError;
 use pdf::file::File as PdfFile;
 use pdf::object::*;
-use pdf::error::PdfError;
+use pdf_render::Cache;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
-use pdf_render::Cache;
-use pathfinder_export::{FileFormat, Export};
-use pathfinder_geometry::transform2d::Transform2F;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -16,22 +16,22 @@ struct Opt {
     dpi: f32,
 
     /// Format to generate. (svg | png | ps | pdf)
-    #[structopt(short = "f", long="format")]
+    #[structopt(short = "f", long = "format")]
     format: String,
 
     /// (first) page to generate
-    #[structopt(short = "p", long="page", default_value="0")]
+    #[structopt(short = "p", long = "page", default_value = "0")]
     page: u32,
 
     /// Number of pages to generate, defaults to 1
-    #[structopt(short = "n", long="pages", default_value="1")]
+    #[structopt(short = "n", long = "pages", default_value = "1")]
     pages: u32,
 
-    #[structopt(long = "placeholder", default_value="\"{}\"")]
+    #[structopt(long = "placeholder", default_value = "\"{}\"")]
     placeholder: String,
 
     /// Number of digits to zero-pad the page number to
-    #[structopt(long = "digits", default_value="1")]
+    #[structopt(long = "digits", default_value = "1")]
     digits: usize,
 
     /// Input file
@@ -42,7 +42,6 @@ struct Opt {
     output: String,
 }
 
-
 fn main() -> Result<(), PdfError> {
     env_logger::init();
     let opt = Opt::from_args();
@@ -50,28 +49,36 @@ fn main() -> Result<(), PdfError> {
     let format = match opt.format.as_str() {
         "svg" => FileFormat::SVG,
         "pdf" => FileFormat::PDF,
-       // "png" => FileFormat::PNG,
+        // "png" => FileFormat::PNG,
         "ps" => FileFormat::PS,
-        _ => panic!("invalid format")
+        _ => panic!("invalid format"),
     };
 
     if opt.pages > 1 {
-        assert!(opt.output.contains(&opt.placeholder), "output name does not contain a placeholder");
+        assert!(
+            opt.output.contains(&opt.placeholder),
+            "output name does not contain a placeholder"
+        );
     }
 
     let transform = Transform2F::from_scale(opt.dpi / 25.4);
 
     println!("read: {:?}", opt.input);
     let file = PdfFile::<Vec<u8>>::open(&opt.input)?;
-    
+
     let mut cache = Cache::new();
-    for (i, page) in file.pages().enumerate().skip(opt.page as usize).take(opt.pages as usize) {
+    for (i, page) in file
+        .pages()
+        .enumerate()
+        .skip(opt.page as usize)
+        .take(opt.pages as usize)
+    {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
         let (scene, _) = cache.render_page(&file, p, transform)?;
         dbg!(scene.view_box());
         let output = if opt.pages > 1 {
-            let replacement = format!("{page:0digits$}", page=i, digits=opt.digits);
+            let replacement = format!("{page:0digits$}", page = i, digits = opt.digits);
             opt.output.replace(opt.placeholder.as_str(), &replacement)
         } else {
             opt.output.clone()

@@ -2,30 +2,30 @@
 //!
 //! Some of the structs are incomplete (missing fields that are in the PDF references).
 
-mod types;
-mod stream;
 mod color;
 mod function;
+mod stream;
+mod types;
 
-pub use self::types::*;
-pub use self::stream::*;
 pub use self::color::*;
 pub use self::function::*;
+pub use self::stream::*;
+pub use self::types::*;
 
-use crate::primitive::*;
-use crate::error::*;
 use crate::enc::*;
+use crate::error::*;
+use crate::primitive::*;
 
-use std::io;
-use std::fmt;
-use std::marker::PhantomData;
 use std::collections::HashMap;
+use std::fmt;
+use std::io;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
 
-pub trait Resolve: {
+pub trait Resolve {
     fn resolve(&self, r: PlainRef) -> Result<Primitive>;
     fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>>;
 }
@@ -46,7 +46,7 @@ pub trait Object: Sized + 'static {
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>;
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
-    
+
     fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
         Self::from_primitive(Primitive::Dictionary(dict), resolve)
     }
@@ -59,11 +59,11 @@ pub trait Object: Sized + 'static {
 // TODO move to primitive.rs
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlainRef {
-    pub id:     ObjNr,
-    pub gen:    GenNr,
+    pub id: ObjNr,
+    pub gen: GenNr,
 }
 impl Object for PlainRef {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         write!(out, "{} {} R", self.id, self.gen)?;
         Ok(())
     }
@@ -72,18 +72,17 @@ impl Object for PlainRef {
     }
 }
 
-
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
 
 pub struct Ref<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
+    inner: PlainRef,
+    _marker: PhantomData<T>,
 }
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Ref<T> {
         Ref {
             inner: self.inner,
-            _marker: PhantomData
+            _marker: PhantomData,
         }
     }
 }
@@ -92,14 +91,14 @@ impl<T> Copy for Ref<T> {}
 impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
         Ref {
-            inner:      inner,
-            _marker:    PhantomData::default(),
+            inner: inner,
+            _marker: PhantomData::default(),
         }
     }
     pub fn from_id(id: ObjNr) -> Ref<T> {
         Ref {
-            inner:      PlainRef {id: id, gen: 0},
-            _marker:    PhantomData::default(),
+            inner: PlainRef { id: id, gen: 0 },
+            _marker: PhantomData::default(),
         }
     }
     pub fn get_inner(&self) -> PlainRef {
@@ -112,7 +111,7 @@ impl<T: Object> Ref<T> {
     }
 }
 impl<T: Object> Object for Ref<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
+    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         self.inner.serialize(out)
     }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
@@ -138,7 +137,7 @@ impl Object for i32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_integer(),
-            p => p.as_integer()
+            p => p.as_integer(),
         }
     }
 }
@@ -150,7 +149,7 @@ impl Object for u32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_u32(),
-            p => p.as_u32()
+            p => p.as_u32(),
         }
     }
 }
@@ -162,7 +161,7 @@ impl Object for usize {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => Ok(r.resolve(id)?.as_u32()? as usize),
-            p => Ok(p.as_u32()? as usize)
+            p => Ok(p.as_u32()? as usize),
         }
     }
 }
@@ -174,7 +173,7 @@ impl Object for f32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_number(),
-            p => p.as_number()
+            p => p.as_number(),
         }
     }
 }
@@ -186,7 +185,7 @@ impl Object for bool {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_bool(),
-            p => p.as_bool()
+            p => p.as_bool(),
         }
     }
 }
@@ -204,7 +203,10 @@ impl Object for Dictionary {
         match p {
             Primitive::Dictionary(dict) => Ok(dict),
             Primitive::Reference(id) => Dictionary::from_primitive(r.resolve(id)?, r),
-            _ => Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}),
+            _ => Err(PdfError::UnexpectedPrimitive {
+                expected: "Dictionary",
+                found: p.get_debug_name(),
+            }),
         }
     }
 }
@@ -215,7 +217,7 @@ impl Object for String {
             match b {
                 '\\' | '(' | ')' => write!(out, r"\")?,
                 c if c > '~' => panic!("only ASCII"),
-                _ => ()
+                _ => (),
             }
             write!(out, "{}", b)?;
         }
@@ -232,21 +234,16 @@ impl<T: Object> Object for Vec<T> {
     }
     /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        Ok(
-        match p {
-            Primitive::Array(_) => {
-                p.to_array(r)?
-                    .into_iter()
-                    .map(|p| T::from_primitive(p, r))
-                    .collect::<Result<Vec<T>>>()?
-            },
-            Primitive::Null => {
-                Vec::new()
-            }
+        Ok(match p {
+            Primitive::Array(_) => p
+                .to_array(r)?
+                .into_iter()
+                .map(|p| T::from_primitive(p, r))
+                .collect::<Result<Vec<T>>>()?,
+            Primitive::Null => Vec::new(),
             Primitive::Reference(id) => Self::from_primitive(r.resolve(id)?, r)?,
-            _ => vec![T::from_primitive(p, r)?]
-        }
-        )
+            _ => vec![T::from_primitive(p, r)?],
+        })
     }
 }
 /*
@@ -268,7 +265,7 @@ impl Object for Data {
                 Vec::new()
             }
             Primitive::Reference(id) => Self::from_primitive(r.resolve(id)?, r)?,
-            _ => 
+            _ =>
         }
     }
 }*/
@@ -277,15 +274,15 @@ impl Object for Primitive {
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         match *self {
             Primitive::Null => write!(out, "null")?,
-            Primitive::Integer (ref x) => x.serialize(out)?,
-            Primitive::Number (ref x) => x.serialize(out)?,
-            Primitive::Boolean (ref x) => x.serialize(out)?,
-            Primitive::String (ref x) => x.serialize(out)?,
-            Primitive::Stream (ref x) => x.serialize(out)?,
-            Primitive::Dictionary (ref x) => x.serialize(out)?,
-            Primitive::Array (ref x) => x.serialize(out)?,
-            Primitive::Reference (ref x) => x.serialize(out)?,
-            Primitive::Name (ref x) => x.serialize(out)?,
+            Primitive::Integer(ref x) => x.serialize(out)?,
+            Primitive::Number(ref x) => x.serialize(out)?,
+            Primitive::Boolean(ref x) => x.serialize(out)?,
+            Primitive::String(ref x) => x.serialize(out)?,
+            Primitive::Stream(ref x) => x.serialize(out)?,
+            Primitive::Dictionary(ref x) => x.serialize(out)?,
+            Primitive::Array(ref x) => x.serialize(out)?,
+            Primitive::Reference(ref x) => x.serialize(out)?,
+            Primitive::Name(ref x) => x.serialize(out)?,
         }
         Ok(())
     }
@@ -301,15 +298,19 @@ impl<V: Object> Object for HashMap<String, V> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(HashMap::new()),
-            Primitive::Dictionary (dict) => {
+            Primitive::Dictionary(dict) => {
                 let mut new = Self::new();
                 for (key, val) in dict.iter() {
                     new.insert(key.clone(), V::from_primitive(val.clone(), resolve)?);
                 }
                 Ok(new)
             }
-            Primitive::Reference (id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
-            p =>  Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
+            Primitive::Reference(id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Dictionary",
+                found: p.get_debug_name(),
+            }
+            .into()),
         }
     }
 }
@@ -321,7 +322,7 @@ impl<T: Object + std::fmt::Debug> Object for Rc<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(r) => resolve.get(Ref::new(r)),
-            p => Ok(Rc::new(T::from_primitive(p, resolve)?))
+            p => Ok(Rc::new(T::from_primitive(p, resolve)?)),
         }
     }
 }
@@ -330,7 +331,7 @@ impl<T: Object> Object for Option<T> {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         // TODO: the Option here is most often or always about whether the entry exists in a
         // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
-        // handle Options. 
+        // handle Options.
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -339,10 +340,10 @@ impl<T: Object> Object for Option<T> {
             p => match T::from_primitive(p, resolve) {
                 Ok(p) => Ok(Some(p)),
                 // References to non-existing objects ought not to be an error
-                Err(PdfError::NullRef {..}) => Ok(None),
-                Err(PdfError::FreeObject {..}) => Ok(None),
+                Err(PdfError::NullRef { .. }) => Ok(None),
+                Err(PdfError::FreeObject { .. }) => Ok(None),
                 Err(e) => Err(e),
-            }
+            },
         }
     }
 }
@@ -357,7 +358,11 @@ impl Object for () {
     }
 }
 
-impl<T, U> Object for (T, U) where T: Object, U: Object {
+impl<T, U> Object for (T, U)
+where
+    T: Object,
+    U: Object,
+{
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         write!(out, "[")?;
         self.0.serialize(out)?;
@@ -373,6 +378,9 @@ impl<T, U> Object for (T, U) where T: Object, U: Object {
         }
         let b = arr.pop().unwrap();
         let a = arr.pop().unwrap();
-        Ok((T::from_primitive(a, resolve)?, U::from_primitive(b, resolve)?))
+        Ok((
+            T::from_primitive(a, resolve)?,
+            U::from_primitive(b, resolve)?,
+        ))
     }
 }

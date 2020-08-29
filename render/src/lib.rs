@@ -1,38 +1,41 @@
-#[macro_use] extern crate log;
-#[macro_use] extern crate pdf;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate pdf;
 
-use std::convert::TryInto;
-use std::path::{PathBuf};
-use std::collections::HashMap;
-use std::fs;
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use pdf::backend::Backend;
+use pdf::encoding::BaseEncoding;
+use pdf::error::{PdfError, Result};
 use pdf::file::File as PdfFile;
+use pdf::font::{Font as PdfFont, Widths};
 use pdf::object::*;
 use pdf::primitive::Primitive;
-use pdf::backend::Backend;
-use pdf::font::{Font as PdfFont, Widths};
-use pdf::error::{PdfError, Result};
-use pdf::encoding::{BaseEncoding};
-use pdf_encoding::{Encoding};
+use pdf_encoding::Encoding;
 
-use pathfinder_geometry::{
-    vector::{Vector2F, Vector2I},
-    rect::RectF, transform2d::Transform2F,
-};
+use font::{self, Font, GlyphId};
+use pathfinder_color::ColorU;
 use pathfinder_content::{
     fill::FillRule,
-    stroke::{LineCap, LineJoin, StrokeStyle, OutlineStrokeToFill},
-    outline::{Outline, Contour},
-    pattern::{Pattern, Image},
+    outline::{Contour, Outline},
+    pattern::{Image, Pattern},
+    stroke::{LineCap, LineJoin, OutlineStrokeToFill, StrokeStyle},
 };
-use pathfinder_color::ColorU;
+use pathfinder_geometry::{
+    rect::RectF,
+    transform2d::Transform2F,
+    vector::{Vector2F, Vector2I},
+};
 use pathfinder_renderer::{
-    scene::{DrawPath, ClipPath, ClipPathId, Scene},
     paint::{Paint, PaintId},
+    scene::{ClipPath, ClipPathId, DrawPath, Scene},
 };
-use font::{self, Font, GlyphId};
 
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
@@ -65,39 +68,37 @@ fn gray2fill(g: f32) -> Paint {
 
 fn cmyk2fill(c: f32, m: f32, y: f32, k: f32) -> Paint {
     let clamp = |f| if f > 1.0 { 1.0 } else { f };
-    rgb2fill(
-        1.0 - clamp(c + k),
-        1.0 - clamp(m + k),
-        1.0 - clamp(y + k),
-    )
+    rgb2fill(1.0 - clamp(c + k), 1.0 - clamp(m + k), 1.0 - clamp(y + k))
 }
 
 fn cmyk2color(data: &[u8]) -> Vec<ColorU> {
-    data.chunks_exact(4).map(|c| {
-        let mut buf = [0; 4];
-        buf.copy_from_slice(c);
+    data.chunks_exact(4)
+        .map(|c| {
+            let mut buf = [0; 4];
+            buf.copy_from_slice(c);
 
-        let [c, m, y, k] = buf;
-        let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-        let r = 255 - c.saturating_add(k);
-        let g = 255 - m.saturating_add(k);
-        let b = 255 - y.saturating_add(k);
-        ColorU::new(r, g, b, 255)
-        
-        /*
-        let clamp = |f| if f > 1.0 { 1.0 } else { f };
-        let i = |b| 1.0 - (b as f32 / 255.);
-        let o = |f| (f * 255.) as u8;
-        let (c, m, y, k) = (i(c), i(m), i(y), i(k));
-        let (r, g, b) = (
-            1.0 - clamp(c + k),
-            1.0 - clamp(m + k),
-            1.0 - clamp(y + k),
-        );
-        let (r, g, b) = (o(r), o(g), o(b));
-        ColorU::new(r, g, b, 255)
-        */
-    }).collect()
+            let [c, m, y, k] = buf;
+            let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
+            let r = 255 - c.saturating_add(k);
+            let g = 255 - m.saturating_add(k);
+            let b = 255 - y.saturating_add(k);
+            ColorU::new(r, g, b, 255)
+
+            /*
+            let clamp = |f| if f > 1.0 { 1.0 } else { f };
+            let i = |b| 1.0 - (b as f32 / 255.);
+            let o = |f| (f * 255.) as u8;
+            let (c, m, y, k) = (i(c), i(m), i(y), i(k));
+            let (r, g, b) = (
+                1.0 - clamp(c + k),
+                1.0 - clamp(m + k),
+                1.0 - clamp(y + k),
+            );
+            let (r, g, b) = (o(r), o(g), o(b));
+            ColorU::new(r, g, b, 255)
+            */
+        })
+        .collect()
 }
 
 #[derive(Copy, Clone)]
@@ -109,7 +110,7 @@ impl BBox {
     fn add(&mut self, r2: RectF) {
         self.0 = Some(match self.0 {
             Some(r1) => r1.union_rect(r2),
-            None => r2
+            None => r2,
         });
     }
     fn add_bbox(&mut self, bb: Self) {
@@ -125,7 +126,7 @@ impl BBox {
 #[derive(Debug)]
 enum TextEncoding {
     CID,
-    Cmap(HashMap<u16, GlyphId>)
+    Cmap(HashMap<u16, GlyphId>),
 }
 
 struct FontEntry {
@@ -141,7 +142,7 @@ enum TextMode {
     FillThenStroke,
     Invisible,
     FillAndClip,
-    StrokeAndClip
+    StrokeAndClip,
 }
 
 #[derive(Copy, Clone)]
@@ -167,7 +168,14 @@ impl<'a> GraphicsState<'a> {
     fn draw(&self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule) {
         self.draw_transform(scene, outline, mode, fill_rule, Transform2F::default());
     }
-    fn draw_transform(&self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
+    fn draw_transform(
+        &self,
+        scene: &mut Scene,
+        outline: &Outline,
+        mode: DrawMode,
+        fill_rule: FillRule,
+        transform: Transform2F,
+    ) {
         let tr = self.transform * transform;
         let fill = |scene: &mut Scene| {
             let mut draw_path = DrawPath::new(outline.clone().transformed(&tr), self.fill_paint);
@@ -182,7 +190,8 @@ impl<'a> GraphicsState<'a> {
         if matches!(mode, DrawMode::Stroke | DrawMode::FillStroke) {
             let mut stroke = OutlineStrokeToFill::new(outline, self.stroke_style);
             stroke.offset();
-            let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&tr), self.stroke_paint);
+            let mut draw_path =
+                DrawPath::new(stroke.into_outline().transformed(&tr), self.stroke_paint);
             draw_path.set_clip_path(self.clip_path);
             draw_path.set_fill_rule(fill_rule);
             scene.push_draw_path(draw_path);
@@ -195,17 +204,17 @@ impl<'a> GraphicsState<'a> {
 
 #[derive(Copy, Clone)]
 struct TextState<'a> {
-    text_matrix: Transform2F, // tracks current glyph
-    line_matrix: Transform2F, // tracks current line
-    char_space: f32, // Character spacing
-    word_space: f32, // Word spacing
-    horiz_scale: f32, // Horizontal scaling
-    leading: f32, // Leading
+    text_matrix: Transform2F,          // tracks current glyph
+    line_matrix: Transform2F,          // tracks current line
+    char_space: f32,                   // Character spacing
+    word_space: f32,                   // Word spacing
+    horiz_scale: f32,                  // Horizontal scaling
+    leading: f32,                      // Leading
     font_entry: Option<&'a FontEntry>, // Text font
-    font_size: f32, // Text font size
-    mode: TextMode, // Text rendering mode
-    rise: f32, // Text rise
-    knockout: f32, //Text knockout
+    font_size: f32,                    // Text font size
+    mode: TextMode,                    // Text rendering mode
+    rise: f32,                         // Text rise
+    knockout: f32,                     //Text knockout
 }
 impl<'a> TextState<'a> {
     fn new() -> TextState<'a> {
@@ -220,7 +229,7 @@ impl<'a> TextState<'a> {
             font_size: 0.,
             mode: TextMode::Fill,
             rise: 0.,
-            knockout: 0.
+            knockout: 0.,
         }
     }
     fn reset_matrix(&mut self) {
@@ -230,7 +239,7 @@ impl<'a> TextState<'a> {
         let m = self.line_matrix * Transform2F::from_translation(v);
         self.set_matrix(m);
     }
-    
+
     // move to the next line
     fn next_line(&mut self) {
         self.translate(Vector2F::new(0., -self.leading * self.font_size));
@@ -240,23 +249,32 @@ impl<'a> TextState<'a> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    fn add_glyphs(&mut self, scene: &mut Scene, gs: &GraphicsState, glyphs: impl Iterator<Item=(u16, Option<GlyphId>, bool)>) -> BBox {
+    fn add_glyphs(
+        &mut self,
+        scene: &mut Scene,
+        gs: &GraphicsState,
+        glyphs: impl Iterator<Item = (u16, Option<GlyphId>, bool)>,
+    ) -> BBox {
         let draw_mode = match self.mode {
             TextMode::Fill => DrawMode::Fill,
             TextMode::FillAndClip => DrawMode::Fill,
             TextMode::FillThenStroke => DrawMode::FillStroke,
             TextMode::Invisible => return BBox::empty(),
             TextMode::Stroke => DrawMode::Stroke,
-            TextMode::StrokeAndClip => DrawMode::Stroke
+            TextMode::StrokeAndClip => DrawMode::Stroke,
         };
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
 
         let tr = Transform2F::row_major(
-            self.horiz_scale * self.font_size, 0., 0.,
-            0., self.font_size, self.rise
+            self.horiz_scale * self.font_size,
+            0.,
+            0.,
+            0.,
+            self.font_size,
+            self.rise,
         ) * e.font.font_matrix();
-        
+
         let mut text = String::with_capacity(32);
         for (cid, gid, is_space) in glyphs {
             if let Some(c) = std::char::from_u32(cid as u32) {
@@ -272,13 +290,17 @@ impl<'a> TextState<'a> {
                 } // lets hope that works…
             };
             let glyph = e.font.glyph(gid);
-            let width: f32 = e.widths.as_ref().map(|w| w.get(cid as usize) * 0.001 * self.horiz_scale * self.font_size)
+            let width: f32 = e
+                .widths
+                .as_ref()
+                .map(|w| w.get(cid as usize) * 0.001 * self.horiz_scale * self.font_size)
                 .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance))
                 .unwrap_or(0.0);
-            
+
             if is_space {
                 let advance = self.word_space * self.horiz_scale * self.font_size + width;
-                self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+                self.text_matrix =
+                    self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
                 continue;
             }
             if let Some(glyph) = glyph {
@@ -292,7 +314,8 @@ impl<'a> TextState<'a> {
                 info!("no glyph for gid {:?}", gid);
             }
             let advance = self.char_space * self.horiz_scale * self.font_size + width;
-            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+            self.text_matrix =
+                self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
         debug!("text: {}", text);
         bbox
@@ -308,13 +331,14 @@ impl<'a> TextState<'a> {
                 (cid, gid, is_space)
             };
             if e.is_cid {
-                self.add_glyphs(scene, gs,
-                    data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
+                self.add_glyphs(
+                    scene,
+                    gs,
+                    data.chunks_exact(2)
+                        .map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
                 )
             } else {
-                self.add_glyphs(scene, gs,
-                    data.iter().map(|&b| get_glyph(b as u16)),
-                )
+                self.add_glyphs(scene, gs, data.iter().map(|&b| get_glyph(b as u16)))
             }
         } else {
             warn!("no font set");
@@ -324,13 +348,14 @@ impl<'a> TextState<'a> {
     fn advance(&mut self, delta: f32) {
         //debug!("advance by {}", delta);
         let advance = delta * self.font_size * self.horiz_scale;
-        self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+        self.text_matrix =
+            self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
     }
 }
 
 pub struct Cache {
     // shared mapping of fontname -> font
-    fonts: HashMap<String, FontEntry>
+    fonts: HashMap<String, FontEntry>,
 }
 impl FontEntry {
     fn build(font: Box<dyn Font>, pdf_font: &PdfFont) -> FontEntry {
@@ -340,7 +365,11 @@ impl FontEntry {
 
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
-            let cmap = map.iter().enumerate().map(|(cid, &gid)| (cid as u16, GlyphId(gid as u32))).collect();
+            let cmap = map
+                .iter()
+                .enumerate()
+                .map(|(cid, &gid)| (cid as u16, GlyphId(gid as u32)))
+                .collect();
             TextEncoding::Cmap(cmap)
         } else if base_encoding == Some(&BaseEncoding::IdentityH) {
             is_cid = true;
@@ -361,19 +390,25 @@ impl FontEntry {
             match (source_encoding, font_encoding) {
                 (Some(source), Some(dest)) => {
                     let transcoder = source.to(dest).expect("can't transcode");
-                    
-                    for b in 0 .. 256 {
-                        if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
+
+                    for b in 0..256 {
+                        if let Some(gid) = transcoder
+                            .translate(b)
+                            .and_then(|cp| font.gid_for_codepoint(cp))
+                        {
                             cmap.insert(b as u16, gid);
                             debug!("{} -> {:?}", b, gid);
                         }
                     }
-                },
+                }
                 _ => {
-                    warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
-                    
+                    warn!(
+                        "can't translate from text encoding {:?} to font encoding {:?}",
+                        base_encoding, font_encoding
+                    );
+
                     // assuming same encoding
-                    for cp in 0 .. 256 {
+                    for cp in 0..256 {
                         if let Some(gid) = font.gid_for_codepoint(cp) {
                             cmap.insert(cp as u16, gid);
                         }
@@ -387,7 +422,7 @@ impl FontEntry {
                         Some(gid) => {
                             cmap.insert(cp as u16, gid);
                         }
-                        None => info!("no glyph for name {}", name)
+                        None => info!("no glyph for name {}", name),
                     }
                 }
             }
@@ -398,7 +433,7 @@ impl FontEntry {
                 TextEncoding::Cmap(cmap)
             }
         };
-        
+
         let widths = pdf_font.widths().unwrap();
 
         FontEntry {
@@ -422,13 +457,17 @@ impl ItemMap {
     }
     pub fn get_string(&self, p: Vector2F) -> Option<String> {
         use itertools::Itertools;
-        let mut iter = self.0.iter().filter_map(|&(rect, ref op)| {
-            if rect.contains_point(p) {
-                Some(op)
-            } else {
-                None
-            }
-        }).peekable();
+        let mut iter = self
+            .0
+            .iter()
+            .filter_map(|&(rect, ref op)| {
+                if rect.contains_point(p) {
+                    Some(op)
+                } else {
+                    None
+                }
+            })
+            .peekable();
         if iter.peek().is_some() {
             Some(format!("{:?}", iter.format(", ")))
         } else {
@@ -484,23 +523,23 @@ fn convert_color(cs: &ColorSpace, ops: &[Primitive]) -> Result<Paint> {
                 _ => unimplemented!()
             }
         }),
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
 impl Cache {
     pub fn new() -> Cache {
         Cache {
-            fonts: HashMap::new()
+            fonts: HashMap::new(),
         }
     }
     fn load_font(&mut self, pdf_font: &PdfFont) {
         if self.fonts.get(&pdf_font.name).is_some() {
             return;
         }
-        
+
         debug!("loading {:?}", pdf_font);
-        
+
         let data: Cow<[u8]> = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
             (_, Some(Ok(data))) => {
                 if let Some(path) = std::env::var_os("PDF_FONTS") {
@@ -513,28 +552,41 @@ impl Cache {
             (None, Some(Err(e))) => panic!("can't decode font data: {:?}", e),
             (None, None) => {
                 info!("Font: {:?}", pdf_font);
-                warn!("No font data for {}. Glyphs will be missing.", pdf_font.name);
+                warn!(
+                    "No font data for {}. Glyphs will be missing.",
+                    pdf_font.name
+                );
                 return;
             }
         };
         let entry = FontEntry::build(font::parse(&data), pdf_font);
         debug!("is_cid={}", entry.is_cid);
-            
+
         self.fonts.insert(pdf_font.name.clone(), entry);
     }
     fn get_font(&self, font_name: &str) -> Option<&FontEntry> {
         self.fonts.get(font_name)
     }
-    
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
-        let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
+
+    pub fn render_page<B: Backend>(
+        &mut self,
+        file: &PdfFile<B>,
+        page: &Page,
+        transform: Transform2F,
+    ) -> Result<(Scene, ItemMap)> {
+        let Rect {
+            left,
+            right,
+            top,
+            bottom,
+        } = page.media_box(file).expect("no media box");
         let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
-        
+
         let scale = 25.4 / 72.;
         let mut scene = Scene::new();
         let view_box = RectF::new(Vector2F::default(), rect.size() * scale);
         scene.set_view_box(view_box);
-        
+
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
 
@@ -542,8 +594,10 @@ impl Cache {
 
         let mut items = ItemMap::new();
 
-        let root_transformation = transform * Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
-        
+        let root_transformation = transform
+            * Transform2F::from_scale(scale)
+            * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
+
         let resources = page.resources(file)?;
         // make sure all fonts are in the cache, so we can reference them
         for font in resources.fonts.values() {
@@ -556,7 +610,7 @@ impl Cache {
         }
 
         let device_rgb = ColorSpace::DeviceRGB;
-        
+
         let mut text_state = TextState::new();
         let mut stack = vec![];
         let mut current_outline = Outline::new();
@@ -580,113 +634,152 @@ impl Cache {
                 line_cap: LineCap::Butt,
                 line_join: LineJoin::Miter(1.0),
                 line_width: 1.0,
-            }
+            },
         };
-        
+
         let contents = try_opt!(page.contents.as_ref());
-        
+
         for op in contents.operations.iter() {
             debug!("{}", op);
             let ref ops = op.operands;
             let s = op.operator.as_str();
             match s {
-                "m" => { // move x y
+                "m" => {
+                    // move x y
                     ops_p!(ops, p => {
                         flush(&mut current_outline, &mut current_contour);
                         current_contour.push_endpoint(p);
                     })
                 }
-                "l" => { // line x y
+                "l" => {
+                    // line x y
                     ops_p!(ops, p => {
                         current_contour.push_endpoint(p);
                     })
                 }
-                "c" => { // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
+                "c" => {
+                    // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
                     ops_p!(ops, c1, c2, p => {
                         current_contour.push_cubic(c1, c2, p);
                     })
                 }
-                "v" => { // cubic bezier c2.x c2.y p.x p.y
+                "v" => {
+                    // cubic bezier c2.x c2.y p.x p.y
                     ops_p!(ops, c2, p => {
                         let c1 = current_contour.last_position().unwrap_or_default();
                         current_contour.push_cubic(c1, c2, p);
                     })
                 }
-                "y" => { // cubic c1.x c1.y p.x p.y
+                "y" => {
+                    // cubic c1.x c1.y p.x p.y
                     ops_p!(ops, c1, p => {
                         current_contour.push_cubic(c1, p, p);
                     })
                 }
-                "h" => { // close
+                "h" => {
+                    // close
                     current_contour.close();
                 }
-                "re" => { // rect x y width height
+                "re" => {
+                    // rect x y width height
                     ops_p!(ops, origin, size => {
                         flush(&mut current_outline, &mut current_contour);
                         current_outline.push_contour(Contour::from_rect(RectF::new(origin, size)));
                     })
                 }
-                "S" => { // stroke
+                "S" => {
+                    // stroke
                     flush(&mut current_outline, &mut current_contour);
-                    graphics_state.draw(&mut scene, &current_outline, DrawMode::Stroke, FillRule::Winding);
+                    graphics_state.draw(
+                        &mut scene,
+                        &current_outline,
+                        DrawMode::Stroke,
+                        FillRule::Winding,
+                    );
                     current_outline.clear();
                 }
-                "s" => { // close and stroke
+                "s" => {
+                    // close and stroke
                     current_contour.close();
                     flush(&mut current_outline, &mut current_contour);
-                    graphics_state.draw(&mut scene, &current_outline, DrawMode::Stroke, FillRule::Winding);
+                    graphics_state.draw(
+                        &mut scene,
+                        &current_outline,
+                        DrawMode::Stroke,
+                        FillRule::Winding,
+                    );
                     current_outline.clear();
                 }
-                "f" | "F" => { // close and fill 
+                "f" | "F" => {
+                    // close and fill
                     current_contour.close();
                     flush(&mut current_outline, &mut current_contour);
                     graphics_state.draw(&mut scene, &current_outline, DrawMode::Fill, fill_rule(s));
                     current_outline.clear();
                 }
-                "B" | "B*" => { // fill and stroke
+                "B" | "B*" => {
+                    // fill and stroke
                     flush(&mut current_outline, &mut current_contour);
-                    graphics_state.draw(&mut scene, &current_outline, DrawMode::FillStroke, fill_rule(s));
+                    graphics_state.draw(
+                        &mut scene,
+                        &current_outline,
+                        DrawMode::FillStroke,
+                        fill_rule(s),
+                    );
                     current_outline.clear();
                 }
-                "b" | "b*" => { // close, stroke and fill
+                "b" | "b*" => {
+                    // close, stroke and fill
                     current_contour.close();
                     flush(&mut current_outline, &mut current_contour);
-                    graphics_state.draw(&mut scene, &current_outline, DrawMode::FillStroke, fill_rule(s));
+                    graphics_state.draw(
+                        &mut scene,
+                        &current_outline,
+                        DrawMode::FillStroke,
+                        fill_rule(s),
+                    );
                     current_outline.clear();
                 }
-                "n" => { // clear path
+                "n" => {
+                    // clear path
                     current_outline.clear();
                     current_contour.clear();
                 }
                 "W" | "W*" => {
                     flush(&mut current_outline, &mut current_contour);
-                    let path = current_outline.clone().transformed(&graphics_state.transform);
+                    let path = current_outline
+                        .clone()
+                        .transformed(&graphics_state.transform);
                     let mut clip_path = ClipPath::new(path);
                     clip_path.set_fill_rule(fill_rule(s));
                     let clip_path_id = scene.push_clip_path(clip_path);
                     graphics_state.clip_path = Some(clip_path_id);
                 }
-                "q" => { // save state
+                "q" => {
+                    // save state
                     stack.push((graphics_state.clone(), text_state));
                 }
-                "Q" => { // restore
+                "Q" => {
+                    // restore
                     let (g, t) = stack.pop().expect("graphcs stack is empty");
                     graphics_state = g;
                     text_state = t;
                 }
-                "cm" => { // modify transformation matrix 
+                "cm" => {
+                    // modify transformation matrix
                     ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
                         graphics_state.transform = graphics_state.transform * Transform2F::row_major(a, c, e, b, d, f);
                     })
                 }
-                "w" => { // line width
+                "w" => {
+                    // line width
                     ops!(ops, width: f32 => {
                         graphics_state.stroke_style.line_width = width;
                     })
                 }
                 "J" => { // line cap
                 }
-                "j" => { // line join 
+                "j" => { // line join
                 }
                 "M" => { // miter limit
                 }
@@ -708,41 +801,49 @@ impl Cache {
                         }
                     }
                 }),
-                "SC" | "SCN" | "RG" => { // stroke color
+                "SC" | "SCN" | "RG" => {
+                    // stroke color
                     let paint = convert_color(graphics_state.stroke_color_space, &*ops)?;
                     graphics_state.stroke_paint = scene.push_paint(&paint);
                 }
-                "sc" | "scn" | "rg" => { // fill color
+                "sc" | "scn" | "rg" => {
+                    // fill color
                     let paint = convert_color(graphics_state.fill_color_space, &*ops)?;
                     graphics_state.fill_paint = scene.push_paint(&paint);
                 }
-                "G" => { // stroke gray
+                "G" => {
+                    // stroke gray
                     ops!(ops, gray: f32 => {
                         graphics_state.stroke_paint = scene.push_paint(&gray2fill(gray));
                     })
                 }
-                "g" => { // fill gray
+                "g" => {
+                    // fill gray
                     ops!(ops, gray: f32 => {
                         graphics_state.fill_paint = scene.push_paint(&gray2fill(gray));
                     })
                 }
-                "K" => { // stroke color
+                "K" => {
+                    // stroke color
                     ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
                         graphics_state.stroke_paint = scene.push_paint(&cmyk2fill(c, m, y, k));
                     });
                 }
-                "k" => { // fill color
+                "k" => {
+                    // fill color
                     ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
                         graphics_state.fill_paint = scene.push_paint(&cmyk2fill(c, m, y, k));
                     });
                 }
-                "cs" => { // color space
+                "cs" => {
+                    // color space
                     ops!(ops, name: &Primitive => {
                         let name = name.as_name()?;
                         graphics_state.fill_color_space = resources.color_spaces.get(name).unwrap().clone();
                     });
                 }
-                "CS" => { // color space
+                "CS" => {
+                    // color space
                     ops!(ops, name: &Primitive => {
                         let name = name.as_name()?;
                         graphics_state.stroke_color_space = resources.color_spaces.get(name).unwrap().clone();
@@ -751,30 +852,29 @@ impl Cache {
                 "BT" => {
                     text_state.reset_matrix();
                 }
-                "ET" => {
-                }
+                "ET" => {}
                 // state modifiers
-                
+
                 // character spacing
                 "Tc" => ops!(ops, char_space: f32 => {
                     text_state.char_space = char_space;
                 }),
-                
+
                 // word spacing
                 "Tw" => ops!(ops, word_space: f32 => {
                     text_state.word_space = word_space;
                 }),
-                
+
                 // Horizontal scaling (in percent)
                 "Tz" => ops!(ops, scale: f32 => {
                     text_state.horiz_scale = 0.01 * scale;
                 }),
-                
+
                 // leading
                 "TL" => ops!(ops, leading: f32 => {
                     text_state.leading = leading;
                 }),
-                
+
                 // text font
                 "Tf" => ops!(ops, font_name: &Primitive, size: f32 => {
                     let font_name = font_name.as_name()?;
@@ -787,7 +887,7 @@ impl Cache {
                         text_state.font_entry = None;
                     }
                 }),
-                
+
                 // render mode
                 "Tr" => ops!(ops, mode: i32 => {
                     use TextMode::*;
@@ -803,46 +903,46 @@ impl Cache {
                         }
                     }
                 }),
-                
+
                 // text rise
                 "Ts" => ops!(ops, rise: f32 => {
                     text_state.rise = rise;
                 }),
-                
+
                 // positioning operators
                 // Move to the start of the next line
                 "Td" => ops_p!(ops, t => {
                     text_state.translate(t);
                 }),
-                
+
                 "TD" => ops_p!(ops, t => {
                     text_state.leading = -t.y();
                     text_state.translate(t);
                 }),
-                
+
                 // Set the text matrix and the text line matrix
                 "Tm" => ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
                     text_state.set_matrix(Transform2F::row_major(a, c, e, b, d, f));
                 }),
-                
+
                 // Move to the start of the next line
                 "T*" => {
                     text_state.next_line();
-                },
-                
+                }
+
                 // draw text
                 "Tj" => ops!(ops, text: &[u8] => {
                     let bb = text_state.draw_text(&mut scene, &graphics_state, text);
                     items.add_bbox(bb, op.clone());
                 }),
-                
+
                 // move to the next line and draw text
                 "'" => ops!(ops, text: &[u8] => {
                     text_state.next_line();
                     let bb = text_state.draw_text(&mut scene, &graphics_state, text);
                     items.add_bbox(bb, op.clone());
                 }),
-                
+
                 // set word and charactr spacing, move to the next line and draw text
                 "\"" => ops!(ops, word_space: f32, char_space: f32, text: &[u8] => {
                     text_state.word_space = word_space;
@@ -914,7 +1014,7 @@ impl Cache {
                 _ => {}
             }
         }
-        
+
         Ok((scene, items))
     }
 }

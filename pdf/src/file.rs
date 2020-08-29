@@ -1,26 +1,26 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::marker::PhantomData;
-use std::collections::HashMap;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::path::Path;
+use std::rc::Rc;
 
 use crate as pdf;
+use crate::any::Any;
+use crate::backend::Backend;
+use crate::crypt::CryptDict;
+use crate::crypt::Decoder;
 use crate::error::*;
 use crate::object::*;
-use crate::primitive::{Primitive, Dictionary, PdfString};
-use crate::backend::Backend;
-use crate::any::{Any};
 use crate::parser::Lexer;
-use crate::parser::{parse_indirect_object, parse};
+use crate::parser::{parse, parse_indirect_object};
+use crate::primitive::{Dictionary, PdfString, Primitive};
 use crate::xref::{XRef, XRefTable};
-use crate::crypt::Decoder;
-use crate::crypt::CryptDict;
 
 pub struct PromisedRef<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
+    inner: PlainRef,
+    _marker: PhantomData<T>,
 }
 impl<'a, T> Into<PlainRef> for &'a PromisedRef<T> {
     fn into(self) -> PlainRef {
@@ -36,15 +36,15 @@ impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
     cache: RefCell<HashMap<PlainRef, Any>>,
-    
+
     // objects that differ from the backend
-    changes:    HashMap<ObjNr, Primitive>,
-    
-    refs:       XRefTable,
-    
-    decoder:    Option<Decoder>,
-    
-    backend: B
+    changes: HashMap<ObjNr, Primitive>,
+
+    refs: XRefTable,
+
+    decoder: Option<Decoder>,
+
+    backend: B,
 }
 impl<B: Backend> Storage<B> {
     pub fn new(backend: B, refs: XRefTable) -> Storage<B> {
@@ -53,7 +53,7 @@ impl<B: Backend> Storage<B> {
             refs,
             cache: RefCell::new(HashMap::new()),
             changes: HashMap::new(),
-            decoder: None
+            decoder: None,
         }
     }
 }
@@ -62,26 +62,34 @@ impl<B: Backend> Resolve for Storage<B> {
         match self.changes.get(&r.id) {
             Some(ref p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
-                XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::new(t!(self.backend.read(pos ..)));
-                    let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref())).1;
+                XRef::Raw { pos, .. } => {
+                    let mut lexer = Lexer::new(t!(self.backend.read(pos..)));
+                    let p = t!(parse_indirect_object(
+                        &mut lexer,
+                        self,
+                        self.decoder.as_ref()
+                    ))
+                    .1;
                     Ok(p)
                 }
-                XRef::Stream {stream_id, index} => {
-                    let obj_stream = t!(self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}));
+                XRef::Stream { stream_id, index } => {
+                    let obj_stream = t!(self.resolve(PlainRef {
+                        id: stream_id,
+                        gen: 0 /* TODO what gen nr? */
+                    }));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
                     let slice = t!(obj_stream.get_object_slice(index));
                     parse(slice, self)
                 }
-                XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
+                XRef::Free { .. } => err!(PdfError::FreeObject { obj_nr: r.id }),
                 XRef::Promised => unimplemented!(),
-                XRef::Invalid => err!(PdfError::NullRef {obj_nr: r.id}),
-            }
+                XRef::Invalid => err!(PdfError::NullRef { obj_nr: r.id }),
+            },
         }
     }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
         let key = r.get_inner();
-        
+
         if let Some(any) = self.cache.borrow().get(&key) {
             return any.clone().downcast();
         }
@@ -90,14 +98,14 @@ impl<B: Backend> Resolve for Storage<B> {
         let obj = t!(T::from_primitive(primitive, self));
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
-        
+
         Ok(rc)
     }
 }
 
 pub struct File<B: Backend> {
-    storage:    Storage<B>,
-    pub trailer:    Trailer,
+    storage: Storage<B>,
+    pub trailer: Trailer,
 }
 impl<B: Backend> Resolve for File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
@@ -122,45 +130,45 @@ impl<B: Backend> File<B> {
         let mut storage = Storage::new(backend, refs);
 
         if let Some(crypt) = trailer.get("Encrypt") {
-            let key = trailer.get("ID").ok_or(
-                PdfError::MissingEntry { typ: "Trailer", field: "ID".into() }
-            )?
-            .as_array()?[0]
-            .as_string()?
-            .as_bytes();
+            let key = trailer
+                .get("ID")
+                .ok_or(PdfError::MissingEntry {
+                    typ: "Trailer",
+                    field: "ID".into(),
+                })?
+                .as_array()?[0]
+                .as_string()?
+                .as_bytes();
             let dict = CryptDict::from_primitive(crypt.clone(), &storage)?;
             storage.decoder = Some(t!(Decoder::default(&dbg!(dict), key)));
         }
-        let trailer = t!(Trailer::from_primitive(Primitive::Dictionary(trailer), &storage));
-        
-        Ok(File {
-            storage,
-            trailer,
-        })
+        let trailer = t!(Trailer::from_primitive(
+            Primitive::Dictionary(trailer),
+            &storage
+        ));
+
+        Ok(File { storage, trailer })
     }
-    
 
     pub fn get_root(&self) -> &Catalog {
         &self.trailer.root
     }
-    
-    pub fn pages<'a>(&'a self) -> impl Iterator<Item=Result<PageRc>> + 'a {
-        (0 .. self.num_pages()).map(move |n| self.get_page(n))
+
+    pub fn pages<'a>(&'a self) -> impl Iterator<Item = Result<PageRc>> + 'a {
+        (0..self.num_pages()).map(move |n| self.get_page(n))
     }
     pub fn num_pages(&self) -> u32 {
         match *self.trailer.root.pages {
             PagesNode::Tree(ref tree) => tree.count,
-            PagesNode::Leaf(_) => 1
+            PagesNode::Leaf(_) => 1,
         }
     }
-    
+
     pub fn get_page(&self, n: u32) -> Result<PageRc> {
         match *self.trailer.root.pages {
-            PagesNode::Tree(ref tree) => {
-                tree.page(self, n)
-            }
+            PagesNode::Tree(ref tree) => tree.page(self, n),
             PagesNode::Leaf(ref page) if n == 0 => Ok(page.clone()),
-            _ => Err(PdfError::PageOutOfBounds {page_nr: n, max: 1})
+            _ => Err(PdfError::PageOutOfBounds { page_nr: n, max: 1 }),
         }
     }
 
@@ -190,7 +198,7 @@ impl<B: Backend> File<B> {
         });
         images
     }
-    
+
     // tail call to trick borrowck
     fn update_pages(&self, pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
         for kid in &mut pages.kids.iter_mut() {
@@ -213,24 +221,24 @@ impl<B: Backend> File<B> {
                     }
                 }
             }
-            
+
         }
         Err(PdfError::PageNotFound {page_nr: page_nr})
     }
-    
+
     pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
         self.update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
     }
-    
+
     pub fn update(&mut self, id: ObjNr, primitive: Primitive) {
         self.changes.insert(id, primitive);
     }
-    
+
     pub fn promise<T: Object>(&mut self) -> PromisedRef<T> {
         let id = self.refs.len() as u64;
-        
+
         self.refs.push(XRef::Promised);
-        
+
         PromisedRef {
             inner: PlainRef {
                 id:     id,
@@ -239,45 +247,44 @@ impl<B: Backend> File<B> {
             _marker:    PhantomData
         }
     }
-    
+
     pub fn fulfill<T>(&mut self, promise: PromisedRef<T>, obj: T) -> Ref<T>
     where T: Into<Primitive>
     {
         self.update(promise.inner.id, obj.into());
-        
+
         Ref::new(promise.inner)
     }
-    
+
     pub fn add<T>(&mut self, obj: T) -> Ref<T> where T: Into<Primitive> {
         let id = self.refs.len() as u64;
         self.refs.push(XRef::Promised);
         self.update(id, obj.into());
-        
+
         Ref::from_id(id)
     }
     */
 }
 
-    
 #[derive(Object)]
 pub struct Trailer {
     #[pdf(key = "Size")]
-    pub highest_id:         i32,
+    pub highest_id: i32,
 
     #[pdf(key = "Prev")]
-    pub prev_trailer_pos:   Option<i32>,
+    pub prev_trailer_pos: Option<i32>,
 
     #[pdf(key = "Root")]
-    pub root:               Catalog,
+    pub root: Catalog,
 
     #[pdf(key = "Encrypt")]
-    pub encrypt_dict:       Option<CryptDict>,
+    pub encrypt_dict: Option<CryptDict>,
 
     #[pdf(key = "Info")]
-    pub info_dict:          Option<Dictionary>,
+    pub info_dict: Option<Dictionary>,
 
     #[pdf(key = "ID")]
-    pub id:                 Vec<PdfString>,
+    pub id: Vec<PdfString>,
 }
 
 #[derive(Object, Debug)]
@@ -297,7 +304,7 @@ pub struct XRefInfo {
     prev: Option<i32>,
 
     #[pdf(key = "W")]
-    pub w: Vec<i32>
+    pub w: Vec<i32>,
 }
 
 /*

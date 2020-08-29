@@ -1,31 +1,31 @@
 use crate as pdf;
-use crate::object::*;
 use crate::error::*;
+use crate::object::*;
 
 #[derive(Object, Debug)]
 struct RawFunction {
-    #[pdf(key="FunctionType")]
+    #[pdf(key = "FunctionType")]
     function_type: u32,
 
-    #[pdf(key="Domain")]
+    #[pdf(key = "Domain")]
     domain: Vec<f32>,
 
-    #[pdf(key="Range")]
+    #[pdf(key = "Range")]
     range: Option<Vec<f32>>,
 
     #[pdf(other)]
-    other: Dictionary
+    other: Dictionary,
 }
 
 #[derive(Object, Debug)]
 struct Function2 {
-    #[pdf(key="C0")]
+    #[pdf(key = "C0")]
     c0: Option<Vec<f32>>,
 
-    #[pdf(key="C1")]
+    #[pdf(key = "C1")]
     c1: Option<Vec<f32>>,
 
-    #[pdf(key="N")]
+    #[pdf(key = "N")]
     exponent: f32,
 }
 
@@ -44,7 +44,7 @@ impl Function {
                     *y = f.apply(x);
                 }
             }
-            _ => panic!("unimplemted function {:?}", self)
+            _ => panic!("unimplemted function {:?}", self),
         }
     }
 }
@@ -59,28 +59,46 @@ impl Object for Function {
             2 => {
                 let f2 = Function2::from_dict(raw.other, resolve)?;
                 let mut parts = Vec::with_capacity(raw.domain.len());
-                
+
                 let n_dim = match (raw.range.as_ref(), f2.c0.as_ref(), f2.c1.as_ref()) {
                     (Some(range), _, _) => range.len() / 2,
                     (_, Some(c0), _) => c0.len(),
                     (_, _, Some(c1)) => c1.len(),
-                    _ => panic!("unknown dimensions")
+                    _ => panic!("unknown dimensions"),
                 };
                 let input_range = (raw.domain[0], raw.domain[1]);
-                for dim in 0 .. n_dim {
+                for dim in 0..n_dim {
                     let output_range = (
-                        raw.range.as_ref().and_then(|r| r.get(2*dim).cloned()).unwrap_or(-INFINITY),
-                        raw.range.as_ref().and_then(|r| r.get(2*dim+1).cloned()).unwrap_or(INFINITY)
+                        raw.range
+                            .as_ref()
+                            .and_then(|r| r.get(2 * dim).cloned())
+                            .unwrap_or(-INFINITY),
+                        raw.range
+                            .as_ref()
+                            .and_then(|r| r.get(2 * dim + 1).cloned())
+                            .unwrap_or(INFINITY),
                     );
-                    let c0 = f2.c0.as_ref().and_then(|c0| c0.get(dim).cloned()).unwrap_or(0.0);
-                    let c1 = f2.c1.as_ref().and_then(|c1| c1.get(dim).cloned()).unwrap_or(1.0);
+                    let c0 = f2
+                        .c0
+                        .as_ref()
+                        .and_then(|c0| c0.get(dim).cloned())
+                        .unwrap_or(0.0);
+                    let c1 = f2
+                        .c1
+                        .as_ref()
+                        .and_then(|c1| c1.get(dim).cloned())
+                        .unwrap_or(1.0);
                     let exponent = f2.exponent;
                     parts.push(InterpolatedFunctionDim {
-                        input_range, output_range, c0, c1, exponent
+                        input_range,
+                        output_range,
+                        c0,
+                        c1,
+                        exponent,
                     });
                 }
                 Ok(Function::Interpolated(parts))
-            },
+            }
             _ => {
                 dbg!(raw);
                 unimplemented!()

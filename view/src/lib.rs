@@ -1,13 +1,14 @@
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
-use pdf::file::File as PdfFile;
 use pdf::backend::Backend;
 use pdf::error::PdfError;
+use pdf::file::File as PdfFile;
 use pdf_render::{Cache, ItemMap};
 
-use pathfinder_view::{*};
-use pathfinder_renderer::scene::Scene;
 use pathfinder_geometry::vector::Vector2F;
+use pathfinder_renderer::scene::Scene;
+use pathfinder_view::*;
 
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
@@ -28,7 +29,10 @@ impl<B: Backend> PdfView<B> {
 impl<B: Backend + 'static> Interactive for PdfView<B> {
     type Event = Vec<u8>;
     fn title(&self) -> String {
-        self.file.trailer.info_dict.as_ref()
+        self.file
+            .trailer
+            .info_dict
+            .as_ref()
             .and_then(|info| info.get("Title"))
             .and_then(|p| p.as_str().map(|s| s.into_owned()))
             .unwrap_or_else(|| "PDF View".into())
@@ -38,12 +42,17 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     }
     fn scene(&mut self, ctx: &mut Context) -> Scene {
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();
-        let (scene, map) = self.cache.render_page(&self.file, &page, ctx.view_transform()).unwrap();
+        let (scene, map) = self
+            .cache
+            .render_page(&self.file, &page, ctx.view_transform())
+            .unwrap();
         self.map = Some(map);
         scene
     }
     fn mouse_input(&mut self, ctx: &mut Context, page: usize, pos: Vector2F, state: ElementState) {
-        if state != ElementState::Pressed { return; }
+        if state != ElementState::Pressed {
+            return;
+        }
         info!("x={}, y={}", pos.x(), pos.y());
 
         if let Some(ref map) = self.map {
@@ -59,7 +68,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         match event.keycode {
             KeyCode::Right | KeyCode::PageDown => ctx.next_page(),
             KeyCode::Left | KeyCode::PageUp => ctx.prev_page(),
-            _ => return
+            _ => return,
         }
         ctx.request_redraw();
     }
@@ -72,7 +81,7 @@ use wasm_bindgen::prelude::*;
 use js_sys::Uint8Array;
 
 #[cfg(target_arch = "wasm32")]
-use web_sys::{HtmlCanvasElement};
+use web_sys::HtmlCanvasElement;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
@@ -96,9 +105,5 @@ pub fn show(canvas: HtmlCanvasElement, data: &Uint8Array) -> WasmView {
     let mut config = Config::new(Box::new(EmbeddedResourceLoader));
     config.zoom = false;
     config.pan = false;
-    WasmView::new(
-        canvas,
-        config,
-        Box::new(view) as _
-    )
+    WasmView::new(canvas, config, Box::new(view) as _)
 }

@@ -1,30 +1,32 @@
 use crate as pdf;
-use crate::object::*;
-use crate::primitive::*;
-use crate::error::*;
-use crate::parser::Lexer;
 use crate::enc::decode;
+use crate::error::*;
+use crate::object::*;
+use crate::parser::Lexer;
+use crate::primitive::*;
 
 use once_cell::unsync::OnceCell;
 
 use std::borrow::Cow;
+use std::fmt;
 use std::io;
 use std::ops::Deref;
-use std::fmt;
-
-
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
-pub struct Stream<I: Object=()> {
+pub struct Stream<I: Object = ()> {
     pub info: StreamInfo<I>,
     raw_data: Vec<u8>,
-    decoded: OnceCell<Vec<u8>>
+    decoded: OnceCell<Vec<u8>>,
 }
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, data} = s;
-        let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
+        let PdfStream { info, data } = s;
+        let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary(info), resolve)?;
+        Ok(Stream {
+            info,
+            raw_data: data,
+            decoded: OnceCell::new(),
+        })
     }
 
     /// decode the data.
@@ -45,21 +47,23 @@ impl<I: Object + fmt::Debug> Stream<I> {
         Ok(data)
     }
     pub fn data(&self) -> Result<&[u8]> {
-        self.decoded.get_or_try_init(|| {
-            let data = self.decode()?;
-            Ok(data.into_owned())
-        }).map(|v| v.as_slice())
+        self.decoded
+            .get_or_try_init(|| {
+                let data = self.decode()?;
+                Ok(data.into_owned())
+            })
+            .map(|v| v.as_slice())
     }
 
     /// If this is contains DCT encoded data, return the compressed data as is
     pub fn as_jpeg(&self) -> Option<&[u8]> {
         match self.info.filters.as_slice() {
             &[StreamFilter::DCTDecode(_)] => Some(self.raw_data.as_slice()),
-            _ => None
+            _ => None,
         }
     }
 }
-        
+
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         self.info.info.fmt(f)
@@ -68,7 +72,9 @@ impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
 
 impl<I: Object + fmt::Debug> Object for Stream<I> {
     /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, _: &mut W) -> Result<()> {unimplemented!()}
+    fn serialize<W: io::Write>(&self, _: &mut W) -> Result<()> {
+        unimplemented!()
+    }
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let s = PdfStream::from_primitive(p, resolve)?;
@@ -76,13 +82,12 @@ impl<I: Object + fmt::Debug> Object for Stream<I> {
     }
 }
 
-impl<I:Object> Deref for Stream<I> {
+impl<I: Object> Deref for Stream<I> {
     type Target = StreamInfo<I>;
     fn deref(&self) -> &StreamInfo<I> {
         &self.info
     }
 }
-
 
 /// General stream type. `I` is the additional information to be read from the stream dict.
 #[derive(Debug, Clone)]
@@ -130,7 +135,7 @@ impl<I: Default> Default for StreamInfo<I> {
     }
 }
 impl<T> StreamInfo<T> {
-/*
+    /*
     /// If the stream is not encoded, this is a no-op. `decode()` should be called whenever it's uncertain
     /// whether the stream is encoded.
     pub fn encode(&mut self, _filter: StreamFilter) {
@@ -150,29 +155,41 @@ impl<T: Object> Object for StreamInfo<T> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
 
         let _length = usize::from_primitive(
-            dict.remove("Length").ok_or(PdfError::MissingEntry{ typ: "SteamInfo", field: "Length".into() })?,
-            resolve)?;
+            dict.remove("Length").ok_or(PdfError::MissingEntry {
+                typ: "SteamInfo",
+                field: "Length".into(),
+            })?,
+            resolve,
+        )?;
 
         let filters = Vec::<String>::from_primitive(
             dict.remove("Filter").or(Some(Primitive::Null)).unwrap(),
-            resolve)?;
+            resolve,
+        )?;
 
         let decode_params = Vec::<Dictionary>::from_primitive(
-            dict.remove("DecodeParms").or(Some(Primitive::Null)).unwrap(),
-            resolve)?;
+            dict.remove("DecodeParms")
+                .or(Some(Primitive::Null))
+                .unwrap(),
+            resolve,
+        )?;
 
         let file = Option::<FileSpec>::from_primitive(
             dict.remove("F").or(Some(Primitive::Null)).unwrap(),
-            resolve)?;
+            resolve,
+        )?;
 
         let file_filters = Vec::<String>::from_primitive(
             dict.remove("FFilter").or(Some(Primitive::Null)).unwrap(),
-            resolve)?;
+            resolve,
+        )?;
 
         let file_decode_params = Vec::<Dictionary>::from_primitive(
-            dict.remove("FDecodeParms").or(Some(Primitive::Null)).unwrap(),
-            resolve)?;
-
+            dict.remove("FDecodeParms")
+                .or(Some(Primitive::Null))
+                .unwrap(),
+            resolve,
+        )?;
 
         let mut new_filters = Vec::new();
         let mut new_file_filters = Vec::new();
@@ -198,7 +215,7 @@ impl<T: Object> Object for StreamInfo<T> {
             file: file,
             file_filters: new_file_filters,
             // Special
-            info: T::from_primitive(Primitive::Dictionary (dict.clone()), resolve)?,
+            info: T::from_primitive(Primitive::Dictionary(dict.clone()), resolve)?,
         })
     }
 }
@@ -217,17 +234,15 @@ pub struct ObjStmInfo {
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
     pub extends: Option<i32>,
-
 }
-
 
 pub struct ObjectStream {
     /// Byte offset of each object. Index is the object number.
-    offsets:    Vec<usize>,
+    offsets: Vec<usize>,
     /// The object number of this object.
-    id:         ObjNr,
-    
-    inner:      Stream<ObjStmInfo>
+    id: ObjNr,
+
+    inner: Stream<ObjStmInfo>,
 }
 
 impl Object for ObjectStream {
@@ -251,7 +266,7 @@ impl Object for ObjectStream {
         Ok(ObjectStream {
             offsets: offsets,
             id: 0, // TODO
-            inner: stream
+            inner: stream,
         })
     }
 }
@@ -259,7 +274,10 @@ impl Object for ObjectStream {
 impl ObjectStream {
     pub fn get_object_slice(&self, index: usize) -> Result<&[u8]> {
         if index >= self.offsets.len() {
-            err!(PdfError::ObjStmOutOfBounds {index: index, max: self.offsets.len()});
+            err!(PdfError::ObjStmOutOfBounds {
+                index: index,
+                max: self.offsets.len()
+            });
         }
         let start = self.inner.info.first as usize + self.offsets[index];
         let data = self.inner.data()?;
