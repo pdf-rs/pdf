@@ -14,7 +14,6 @@ pathfinder_color = { git = "https://github.com/servo/pathfinder" }
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
 pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
 pathfinder_export = { git = "https://github.com/servo/pathfinder" }
-pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
 log = "0.4.8"
-env_logger = "*"
-structopt = "*"
+env_logger = "0.7"
+structopt = "0.3"
