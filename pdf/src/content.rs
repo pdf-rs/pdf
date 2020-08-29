@@ -1,5 +1,4 @@
 /// PDF content streams.
-use std;
 use std::fmt::{Display, Formatter};
 use std::mem::replace;
 use std::io;
@@ -20,8 +19,8 @@ pub struct Operation {
 impl Operation {
     pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
         Operation{
-            operator: operator,
-            operands: operands,
+            operator,
+            operands,
         }
     }
 }

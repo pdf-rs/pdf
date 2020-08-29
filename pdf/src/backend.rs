@@ -1,10 +1,10 @@
 use crate::error::*;
 use crate::parser::Lexer;
-use crate::parser::{read_xref_and_trailer_at};
-use crate::xref::{XRefTable};
-use crate::primitive::{Dictionary};
+use crate::parser::read_xref_and_trailer_at;
+use crate::xref::XRefTable;
+use crate::primitive::Dictionary;
 use crate::object::*;
-use std::ops::{Deref};
+use std::ops::Deref;
 
 use std::ops::{
     RangeFull,
@@ -18,6 +18,9 @@ pub trait Backend: Sized {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]>;
     //fn write<T: IndexRange>(&mut self, range: T) -> Result<&mut [u8]>;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Returns the value of startxref (currently only used internally!)
     fn locate_xref_offset(&self) -> Result<usize> {
@@ -33,7 +36,7 @@ pub trait Backend: Sized {
 
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {
-        let mut xref_offset = t!(self.locate_xref_offset());
+        let xref_offset = t!(self.locate_xref_offset());
         let mut lexer = Lexer::new(t!(self.read(xref_offset..)));
         
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));

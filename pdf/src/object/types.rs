@@ -27,7 +27,7 @@ impl Object for PagesNode {
     }
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<PagesNode> {
         let dict = Dictionary::from_primitive(p, r)?;
-        match dict["Type"].clone().to_name()?.as_str() {
+        match dict["Type"].clone().into_name()?.as_str() {
             "Page" => Ok(PagesNode::Leaf (Object::from_primitive(Primitive::Dictionary(dict), r)?)),
             "Pages" => Ok(PagesNode::Tree (Object::from_primitive(Primitive::Dictionary(dict), r)?)),
             other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
@@ -186,7 +186,7 @@ fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -
 impl Page {
     pub fn new(parent: Ref<PagesNode>) -> Page {
         Page {
-            parent:     parent,
+            parent,
             media_box:  None,
             crop_box:   None,
             trim_box:   None,
@@ -453,17 +453,17 @@ impl<T: Object> Object for NameTree<T> {
         unimplemented!();
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut dict = p.to_dictionary(resolve)?;
+        let mut dict = p.into_dictionary(resolve)?;
         
         // Quite long function..=
         let limits = match dict.remove("Limits") {
             Some(limits) => {
-                let limits = limits.to_array(resolve)?;
+                let limits = limits.into_array(resolve)?;
                 if limits.len() != 2 {
                     bail!("Error reading NameTree: 'Limits' is not of length 2");
                 }
-                let min = limits[0].clone().to_string()?;
-                let max = limits[1].clone().to_string()?;
+                let min = limits[0].clone().into_string()?;
+                let max = limits[1].clone().into_string()?;
 
                 Some((min, max))
             }
@@ -476,11 +476,11 @@ impl<T: Object> Object for NameTree<T> {
         // If no `kids`, try `names`. Else there is an error.
         Ok(match kids {
             Some(kids) => {
-                let kids = kids.to_array(resolve)?.iter().map(|kid|
+                let kids = kids.into_array(resolve)?.iter().map(|kid|
                     Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
                 ).collect::<Result<Vec<_>>>()?;
                 NameTree {
-                    limits: limits,
+                    limits,
                     node: NameTreeNode::Intermediate (kids)
                 }
             }
@@ -488,15 +488,15 @@ impl<T: Object> Object for NameTree<T> {
             None =>
                 match names {
                     Some(names) => {
-                        let names = names.to_array(resolve)?;
+                        let names = names.into_array(resolve)?;
                         let mut new_names = Vec::new();
                         for pair in names.chunks(2) {
-                            let name = pair[0].clone().to_string()?;
+                            let name = pair[0].clone().into_string()?;
                             let value = T::from_primitive(pair[1].clone(), resolve)?;
                             new_names.push((name, value));
                         }
                         NameTree {
-                            limits: limits,
+                            limits,
                             node: NameTreeNode::Leaf (new_names),
                         }
                     }
@@ -756,7 +756,7 @@ impl Object for Rect {
         Ok(())
     }
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        let arr = p.to_array(r)?;
+        let arr = p.into_array(r)?;
         if arr.len() != 4 {
             bail!("len != 4");
         }

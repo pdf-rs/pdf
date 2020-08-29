@@ -1,6 +1,5 @@
 use itertools::Itertools;
 use inflate::{inflate_bytes_zlib, inflate_bytes};
-use std::mem;
 
 use crate as pdf;
 use crate::error::*;
@@ -117,7 +116,7 @@ fn substr(data: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
-    let mut out = Vec::with_capacity((data.len() + 4 / 5) * 4);
+    let mut out = Vec::with_capacity((data.len() + 4) / 5 * 4);
     
     let mut pos = 0;
     while let Some((advance, word)) = word_85(&data[pos..]) {
@@ -236,7 +235,7 @@ impl PredictorType {
             2 => Ok(PredictorType::Up),
             3 => Ok(PredictorType::Avg),
             4 => Ok(PredictorType::Paeth),
-            n => Err(PdfError::IncorrectPredictorType {n}.into())
+            n => Err(PdfError::IncorrectPredictorType {n})
         }
     }
 }
@@ -269,6 +268,8 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
 
     match filter {
         NoFilter => {
+            #[allow(clippy::manual_memcpy)]
+            // TODO consider: `out[..len].clone_from_slice(&inp[..len])`
             for i in 0..len {
                 out[i] = inp[i];
             }

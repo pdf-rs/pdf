@@ -40,7 +40,7 @@ impl Object for Encoding {
                 let mut gid = 0;
                 let mut differences = HashMap::new();
                 if let Some(p) = dict.remove("Differences") {
-                    for part in p.to_array(resolve)? {
+                    for part in p.into_array(resolve)? {
                         match part {
                             Primitive::Integer(code) => {
                                 gid = code as u32;

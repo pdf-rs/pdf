@@ -33,7 +33,7 @@ impl<'a> StringLexer<'a> {
         StringLexer {
             pos: 0,
             nested: 0,
-            buf: buf,
+            buf,
         }
     }
     pub fn iter<'b>(&'b mut self) -> StringLexerIter<'a, 'b> {
