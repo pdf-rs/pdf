@@ -31,7 +31,7 @@ fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32]
     }
     Ok(XRefSection {
         first_id: first_id as u32,
-        entries: entries,
+        entries,
     })
 }
 /// Helper to read an integer with a certain amount of bits `width` from stream.
@@ -100,7 +100,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
     // Read trailer
     t!(lexer.next_expect("trailer"));
     let trailer = t!(parse_with_lexer(lexer, resolve));
-    let trailer = t!(trailer.to_dictionary(resolve));
+    let trailer = t!(trailer.into_dictionary(resolve));
  
     Ok((sections, trailer))
 }

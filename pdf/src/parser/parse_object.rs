@@ -18,7 +18,7 @@ pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Optio
     lexer.next_expect("obj")?;
 
     let ctx = Context {
-        decoder: decoder,
+        decoder,
         obj_nr,
         gen_nr
     };
@@ -34,7 +34,7 @@ pub fn parse_indirect_stream(lexer: &mut Lexer, r: &impl Resolve, decoder: Optio
     lexer.next_expect("obj")?;
 
     let ctx = Context {
-        decoder: decoder,
+        decoder,
         obj_nr,
         gen_nr
     };

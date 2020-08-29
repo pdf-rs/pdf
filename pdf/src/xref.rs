@@ -1,4 +1,3 @@
-use std;
 use std::fmt::{Debug, Formatter};
 use crate::error::*;
 use crate::object::*;
@@ -56,7 +55,7 @@ impl XRefTable {
         let mut entries = Vec::new();
         entries.resize(num_objects as usize, XRef::Invalid);
         XRefTable {
-            entries: entries,
+            entries,
         }
     }
 
@@ -70,7 +69,7 @@ impl XRefTable {
     pub fn get(&self, id: ObjNr) -> Result<XRef> {
         match self.entries.get(id as usize) {
             Some(&entry) => Ok(entry),
-            None => Err(PdfError::UnspecifiedXRefEntry {id: id}),
+            None => Err(PdfError::UnspecifiedXRefEntry {id}),
         }
     }
 
@@ -141,15 +140,15 @@ pub struct XRefSection {
 impl XRefSection {
     pub fn new(first_id: u32) -> XRefSection {
         XRefSection {
-            first_id: first_id,
+            first_id,
             entries: Vec::new(),
         }
     }
     pub fn add_free_entry(&mut self, next_obj_nr: ObjNr, gen_nr: GenNr) {
-        self.entries.push(XRef::Free{next_obj_nr: next_obj_nr, gen_nr: gen_nr});
+        self.entries.push(XRef::Free{next_obj_nr, gen_nr});
     }
     pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
-        self.entries.push(XRef::Raw{pos: pos, gen_nr: gen_nr});
+        self.entries.push(XRef::Raw{pos, gen_nr});
     }
     pub fn entries(&self) -> impl Iterator<Item=(usize, &XRef)> {
         self.entries.iter().enumerate().map(move |(i, e)| (i + self.first_id as usize, e))

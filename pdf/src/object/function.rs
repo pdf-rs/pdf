@@ -49,7 +49,7 @@ impl Function {
     }
 }
 impl Object for Function {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!()
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {

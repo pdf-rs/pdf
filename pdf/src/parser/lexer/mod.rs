@@ -1,7 +1,6 @@
 /// Lexing an input file, in the sense of breaking it up into substrings based on delimiters and
 /// whitespace.
 
-use std;
 use std::str::FromStr;
 use std::ops::{Range, Deref};
 use std::io::SeekFrom;
@@ -53,10 +52,7 @@ fn test_boundary() {
 
 #[inline]
 fn is_whitespace(b: u8) -> bool {
-    match b {
-        b' ' | b'\r' | b'\n' | b'\t' => true,
-        _ => false
-    }
+    matches!(b, b' ' | b'\r' | b'\n' | b'\t')
 }
 #[inline]
 fn not<T>(f: impl Fn(T) -> bool) -> impl Fn(T) -> bool {
@@ -66,11 +62,12 @@ impl<'a> Lexer<'a> {
     pub fn new(buf: &'a [u8]) -> Lexer<'a> {
         Lexer {
             pos: 0,
-            buf: buf,
+            buf,
         }
     }
 
     /// Returns next lexeme. Lexer moves to the next byte after the lexeme. (needs to be tested)
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Substr<'a>> {
         let (lexeme, pos) = self.next_word()?;
         self.pos = pos;
@@ -130,7 +127,7 @@ impl<'a> Lexer<'a> {
             Err(PdfError::UnexpectedLexeme {
                 pos: self.pos,
                 lexeme: word.to_string(),
-                expected: expected
+                expected
             })
         }
     }
@@ -380,16 +377,10 @@ impl<'a> Substr<'a> {
         std::str::from_utf8(self.slice)?.parse::<T>().map_err(|e| PdfError::Parse { source: e.into() })
     }
     pub fn is_integer(&self) -> bool {
-        match self.to::<i32>() {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        self.to::<i32>().is_ok()
     }
     pub fn is_real_number(&self) -> bool {
-        match self.to::<f32>() {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        self.to::<f32>().is_ok()   
     }
 
     pub fn as_slice(&self) -> &'a [u8] {

@@ -53,8 +53,8 @@ impl<I: Object + fmt::Debug> Stream<I> {
 
     /// If this is contains DCT encoded data, return the compressed data as is
     pub fn as_jpeg(&self) -> Option<&[u8]> {
-        match self.info.filters.as_slice() {
-            &[StreamFilter::DCTDecode(_)] => Some(self.raw_data.as_slice()),
+        match *self.info.filters.as_slice() {
+            [StreamFilter::DCTDecode(_)] => Some(self.raw_data.as_slice()),
             _ => None
         }
     }
@@ -195,10 +195,10 @@ impl<T: Object> Object for StreamInfo<T> {
         Ok(StreamInfo {
             // General
             filters: new_filters,
-            file: file,
+            file,
             file_filters: new_file_filters,
             // Special
-            info: T::from_primitive(Primitive::Dictionary (dict.clone()), resolve)?,
+            info: T::from_primitive(Primitive::Dictionary (dict), resolve)?,
         })
     }
 }
@@ -249,7 +249,7 @@ impl Object for ObjectStream {
         }
 
         Ok(ObjectStream {
-            offsets: offsets,
+            offsets,
             id: 0, // TODO
             inner: stream
         })
@@ -259,7 +259,7 @@ impl Object for ObjectStream {
 impl ObjectStream {
     pub fn get_object_slice(&self, index: usize) -> Result<&[u8]> {
         if index >= self.offsets.len() {
-            err!(PdfError::ObjStmOutOfBounds {index: index, max: self.offsets.len()});
+            err!(PdfError::ObjStmOutOfBounds {index, max: self.offsets.len()});
         }
         let start = self.inner.info.first as usize + self.offsets[index];
         let data = self.inner.data()?;

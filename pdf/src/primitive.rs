@@ -53,6 +53,9 @@ impl Dictionary {
     pub fn len(&self) -> usize {
         self.dict.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }
@@ -125,7 +128,7 @@ impl<'a> IntoIterator for &'a Dictionary {
     type Item = (&'a String, &'a Primitive);
     type IntoIter = btree_map::Iter<'a, String, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
-        (&self.dict).into_iter()
+        (&self.dict).iter()
     }
 }
 
@@ -141,7 +144,7 @@ impl Object for PdfStream {
         for (k, v) in &self.info {
             write!(out, "  {} ", k)?;
             v.serialize(out)?;
-            writeln!(out, "")?;
+            writeln!(out)?;
         }
         writeln!(out, ">>")?;
         
@@ -219,7 +222,7 @@ impl AsRef<[u8]> for PdfString {
 impl PdfString {
     pub fn new(data: Vec<u8>) -> PdfString {
         PdfString {
-            data: data
+            data
         }
     }
     pub fn as_bytes(&self) -> &[u8] {
@@ -271,7 +274,7 @@ impl Primitive {
     pub fn as_u32(&self) -> Result<u32> {
         match *self {
             Primitive::Integer(n) if n >= 0 => Ok(n as u32),
-            Primitive::Integer(n) => bail!("negative integer"),
+            Primitive::Integer(_) => bail!("negative integer"),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
@@ -310,43 +313,43 @@ impl Primitive {
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    pub fn to_reference(self) -> Result<PlainRef> {
+    pub fn into_reference(self) -> Result<PlainRef> {
         match self {
             Primitive::Reference(id) => Ok(id),
             p => unexpected_primitive!(Reference, p.get_debug_name())
         }
     }
     /// Does accept a Reference
-    pub fn to_array(self, r: &impl Resolve) -> Result<Vec<Primitive>> {
+    pub fn into_array(self, r: &impl Resolve) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
-            Primitive::Reference(id) => r.resolve(id)?.to_array(r),
+            Primitive::Reference(id) => r.resolve(id)?.into_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    pub fn to_dictionary(self, r: &impl Resolve) -> Result<Dictionary> {
+    pub fn into_dictionary(self, r: &impl Resolve) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
-            Primitive::Reference(id) => r.resolve(id)?.to_dictionary(r),
+            Primitive::Reference(id) => r.resolve(id)?.into_dictionary(r),
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_name(self) -> Result<String> {
+    pub fn into_name(self) -> Result<String> {
         match self {
             Primitive::Name(name) => Ok(name),
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_string(self) -> Result<PdfString> {
+    pub fn into_string(self) -> Result<PdfString> {
         match self {
             Primitive::String(data) => Ok(data),
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
     /// Doesn't accept a Reference
-    pub fn to_stream(self, _r: &impl Resolve) -> Result<PdfStream> {
+    pub fn into_stream(self, _r: &impl Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
             // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
@@ -461,7 +464,7 @@ impl<'a> TryInto<String> for &'a Primitive {
 
 fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default: T) -> T {
     buffer.get(range)
-        .map(|s| str::parse::<T>(s).unwrap_or(default.clone()))
+        .map(|s| str::parse::<T>(s).unwrap_or_else(|_| default.clone()))
         .unwrap_or(default)
 }
 

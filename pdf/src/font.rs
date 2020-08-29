@@ -3,7 +3,6 @@ use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
-use crate::parser::parse_with_lexer;
 use std::io;
 use std::rc::Rc;
 
@@ -55,14 +54,6 @@ pub enum FontData {
     Standard(&'static [u8])
 }
 
-macro_rules! fonts {
-    ( $( ($name:tt, $file:tt ), )* ) => {
-        &[ $(
-            ($name, &*include_bytes!(concat!(env!("STANDARD_FONTS"), "/", $file))),
-        )* ]
-    };
-}
-
 #[cfg(feature="standard-fonts")]
 pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = fonts!(
     ("Courier", "CourierStd.otf"),
@@ -88,14 +79,14 @@ pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = fonts!(
     ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
 );
 #[cfg(not(feature="standard-fonts"))]
-pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = &[];
+pub static STANDARD_FONTS: &[(&str, &[u8])] = &[];
 
 impl Object for Font {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut dict = p.to_dictionary(resolve)?;
+        let mut dict = p.into_dictionary(resolve)?;
         dict.expect("Font", "Type", "Font", true)?;
-        let base_font = dict.require("Font", "BaseFont")?.to_name()?;
+        let base_font = dict.require("Font", "BaseFont")?.into_name()?;
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
         
         let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
@@ -105,7 +96,7 @@ impl Object for Font {
             None => None
         };
         let _other = dict.clone();
-        let data = match STANDARD_FONTS.iter().filter(|&(name, _)| *name == base_font).next() {
+        let data = match STANDARD_FONTS.iter().find(|&(name, _)| *name == base_font) {
             Some((_, data)) => {
                 FontData::Standard(data)
             }
@@ -170,7 +161,7 @@ impl Widths {
     fn set(&mut self, cid: usize, width: f32) {
         use std::iter::repeat;
 
-        if self.values.len() == 0 {
+        if self.values.is_empty() {
             self.first_char = cid;
             self.values.push(width);
             return;
@@ -214,10 +205,7 @@ impl Font {
         }
     }
     pub fn is_cid(&self) -> bool {
-        match self.data {
-            FontData::CIDFontType0(_) | FontData::CIDFontType2(_, _) => true,
-            _ => false
-        }
+        matches!(self.data, FontData::CIDFontType0(_) | FontData::CIDFontType2(_, _))
     }
     pub fn cid_to_gid_map(&self) -> Option<&[u16]> {
         match self.data {
@@ -240,8 +228,8 @@ impl Font {
         match self.data {
             FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(),
             FontData::Type1(ref info) | FontData::TrueType(ref info) => {
-                match info {
-                    &TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
+                match *info {
+                    TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
                         default: 0.0,
                         first_char: first as usize,
                         values: widths.clone()

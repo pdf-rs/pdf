@@ -24,7 +24,7 @@ impl Clone for Rc4 { fn clone(&self) -> Rc4 { *self } }
 
 impl Rc4 {
     pub fn new(key: &[u8]) -> Rc4 {
-        assert!(key.len() >= 1 && key.len() <= 256);
+        assert!(!key.is_empty() && key.len() <= 256);
         let mut rc4 = Rc4 { i: 0, j: 0, state: [0; 256] };
         for (i, x) in rc4.state.iter_mut().enumerate() {
             *x = i as u8;
@@ -40,8 +40,7 @@ impl Rc4 {
         self.i = self.i.wrapping_add(1);
         self.j = self.j.wrapping_add(self.state[self.i as usize]);
         self.state.swap(self.i as usize, self.j as usize);
-        let k = self.state[(self.state[self.i as usize].wrapping_add(self.state[self.j as usize])) as usize];
-        k
+        self.state[(self.state[self.i as usize].wrapping_add(self.state[self.j as usize])) as usize]
     }
     pub fn encrypt(key: &[u8], data: &mut [u8]) {
         let mut rc4 = Rc4::new(key);
@@ -223,7 +222,7 @@ impl Decoder {
         data
     }
     pub fn check_password(&self, dict: &CryptDict, id: &[u8]) -> bool {
-        self.compute_u(id) == &dict.u.as_bytes()[.. 16]
+        self.compute_u(id) == dict.u.as_bytes()[.. 16]
     }
     pub fn decrypt(&self, id: u64, gen: u16, data: &mut [u8]) {
         // Algorithm 1

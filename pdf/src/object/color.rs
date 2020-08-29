@@ -23,7 +23,7 @@ pub enum ColorSpace {
     DeviceCMYK,
     Indexed(Rc<ColorSpace>, Vec<u8>),
     Separation(String, Rc<ColorSpace>, Function),
-    Icc(Stream<IccInfo>),
+    Icc(Box<Stream<IccInfo>>),
     Other(Vec<Primitive>)
 }
 
@@ -33,7 +33,7 @@ fn get_index(arr: &[Primitive], idx: usize) -> Result<&Primitive> {
 }
 
 impl Object for ColorSpace {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
         unimplemented!()
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<ColorSpace> {
@@ -45,7 +45,7 @@ impl Object for ColorSpace {
             };
             return Ok(cs);
         }
-        let arr = t!(p.to_array(resolve));
+        let arr = t!(p.into_array(resolve));
         dbg!(&arr);
         let typ = t!(t!(get_index(&arr, 0)).as_name());
         
@@ -70,14 +70,14 @@ impl Object for ColorSpace {
                 Ok(ColorSpace::Indexed(base, lookup))
             }
             "Separation" => {
-                let name = t!(t!(get_index(&arr, 1)).clone().to_name());
+                let name = t!(t!(get_index(&arr, 1)).clone().into_name());
                 let alternate = t!(Object::from_primitive(t!(get_index(&arr, 2)).clone(), resolve));
                 let tint = t!(Function::from_primitive(t!(get_index(&arr, 3)).clone(), resolve));
                 Ok(ColorSpace::Separation(name, alternate, tint))
             }
             "ICCBased" => {
                 let s: Stream<IccInfo> = t!(Stream::from_primitive(t!(get_index(&arr, 1)).clone(), resolve));
-                Ok(ColorSpace::Icc(s))
+                Ok(ColorSpace::Icc(Box::new(s)))
             }
             _ => Ok(ColorSpace::Other(arr))
         }

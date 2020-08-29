@@ -68,7 +68,7 @@ impl Object for PlainRef {
         Ok(())
     }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        p.to_reference()
+        p.into_reference()
     }
 }
 
@@ -92,13 +92,13 @@ impl<T> Copy for Ref<T> {}
 impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
         Ref {
-            inner:      inner,
+            inner,
             _marker:    PhantomData::default(),
         }
     }
     pub fn from_id(id: ObjNr) -> Ref<T> {
         Ref {
-            inner:      PlainRef {id: id, gen: 0},
+            inner:      PlainRef {id, gen: 0},
             _marker:    PhantomData::default(),
         }
     }
@@ -116,7 +116,7 @@ impl<T: Object> Object for Ref<T> {
         self.inner.serialize(out)
     }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        Ok(Ref::new(p.to_reference()?))
+        Ok(Ref::new(p.into_reference()?))
     }
 }
 
@@ -222,7 +222,7 @@ impl Object for String {
         Ok(())
     }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        Ok(p.to_name()?)
+        Ok(p.into_name()?)
     }
 }
 
@@ -235,7 +235,7 @@ impl<T: Object> Object for Vec<T> {
         Ok(
         match p {
             Primitive::Array(_) => {
-                p.to_array(r)?
+                p.into_array(r)?
                     .into_iter()
                     .map(|p| T::from_primitive(p, r))
                     .collect::<Result<Vec<T>>>()?
@@ -259,7 +259,7 @@ impl Object for Data {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Array(_) => {
-                p.to_array(r)?
+                p.into_array(r)?
                     .into_iter()
                     .map(|p| u8::from_primitive(p, r))
                     .collect::<Result<Vec<T>>>()?
@@ -309,7 +309,7 @@ impl<V: Object> Object for HashMap<String, V> {
                 Ok(new)
             }
             Primitive::Reference (id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
-            p =>  Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}.into())
+            p =>  Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()})
         }
     }
 }
@@ -367,7 +367,7 @@ impl<T, U> Object for (T, U) where T: Object, U: Object {
         Ok(())
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut arr = p.to_array(resolve)?;
+        let mut arr = p.into_array(resolve)?;
         if arr.len() != 2 {
             bail!("expected array of length 2 (found {})", arr.len());
         }

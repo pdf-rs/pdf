@@ -1,8 +1,6 @@
 use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
-use std::borrow::Cow;
-use std::ops::Range;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -221,7 +219,7 @@ macro_rules! unimplemented {
 }
 
 #[cfg(not(feature = "dump"))]
-pub fn dump_data(data: &[u8]) {}
+pub fn dump_data(_data: &[u8]) {}
 
 #[cfg(feature = "dump")]
 pub fn dump_data(data: &[u8]) {
