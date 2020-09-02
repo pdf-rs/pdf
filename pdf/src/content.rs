@@ -1,6 +1,7 @@
 /// PDF content streams.
 use std::fmt::{Display, Formatter};
 use std::mem::replace;
+use std::cmp::Ordering;
 use std::io;
 use itertools::Itertools;
 
@@ -59,10 +60,10 @@ impl Content {
                     content.operations.push(operation.clone());
                 }
             }
-            if lexer.get_pos() > data.len() {
-                err!(PdfError::ContentReadPastBoundary);
-            } else if lexer.get_pos() == data.len() {
-                break;
+            match lexer.get_pos().cmp(&data.len()) {
+                Ordering::Greater => err!(PdfError::ContentReadPastBoundary),
+                Ordering::Less => (),
+                Ordering::Equal => break
             }
         }
         Ok(content)

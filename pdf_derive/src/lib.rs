@@ -377,7 +377,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     ///////////////////////
     let typ = id.to_string();
     let let_parts = fields.iter().map(|field| {
-        let ref name = field.ident;
+        let name = &field.ident;
         let attrs = FieldAttrs::parse(&field.attrs);
         if attrs.skip {
             return quote! {}
@@ -438,7 +438,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     });
 
     let field_parts = fields.iter().map(|field| {
-        let ref name = field.ident;
+        let name = &field.ident;
         quote! { #name: #name, }
     });
 
