@@ -34,7 +34,7 @@ pub enum FontType {
 pub struct Font {
     pub subtype: FontType,
     pub name: String,
-    pub data: FontData,
+    pub data: Result<FontData>,
     
     encoding: Option<Encoding>,
     
@@ -51,35 +51,8 @@ pub enum FontData {
     CIDFontType0(CIDFont),
     CIDFontType2(CIDFont, Option<Vec<u16>>),
     Other(Dictionary),
-    Standard(&'static [u8])
+    None,
 }
-
-#[cfg(feature="standard-fonts")]
-pub static STANDARD_FONTS: &[(&'static str, &'static [u8])] = fonts!(
-    ("Courier", "CourierStd.otf"),
-    ("Courier-Bold", "CourierStd-Bold.otf"),
-    ("Courier-Oblique", "CourierStd-Oblique.otf"),
-    ("Courier-BoldOblique", "CourierStd-BoldOblique.otf"),
-    
-    ("Times-Roman", "MinionPro-Regular.otf"),
-    ("Times-Bold", "MinionPro-Bold.otf"),
-    ("Times-Italic", "MinionPro-It.otf"),
-    ("Times-BoldItalic", "MinionPro-BoldIt.otf"),
-    
-    ("Helvetica", "MyriadPro-Regular.otf"),
-    ("Helvetica-Bold", "MyriadPro-Bold.otf"),
-    ("Helvetica-Oblique", "MyriadPro-It.otf"),
-    ("Helvetica-BoldOblique", "MyriadPro-BoldIt.otf"),
-    
-    ("Symbol", "SY______.PFB"),
-    ("ZapfDingbats", "AdobePiStd.otf"),
-    
-    ("Arial-BoldMT", "Arial-BoldMT.otf"),
-    ("ArialMT", "ArialMT.ttf"),
-    ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
-);
-#[cfg(not(feature="standard-fonts"))]
-pub static STANDARD_FONTS: &[(&str, &[u8])] = &[];
 
 impl Object for Font {
     fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
@@ -96,11 +69,8 @@ impl Object for Font {
             None => None
         };
         let _other = dict.clone();
-        let data = match STANDARD_FONTS.iter().find(|&(name, _)| *name == base_font) {
-            Some((_, data)) => {
-                FontData::Standard(data)
-            }
-            None => match subtype {
+        let data = { || 
+            Ok(match subtype {
                 FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
                 FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
                 FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
@@ -118,8 +88,8 @@ impl Object for Font {
                     FontData::CIDFontType2(cid_font, cid_map)
                 }
                 _ => FontData::Other(dict)
-            }
-        };
+            })
+        }();
         
         Ok(Font {
             subtype,
@@ -190,14 +160,8 @@ impl Widths {
     }
 }
 impl Font {
-    pub fn standard_font(&self) -> Option<&[u8]> {
-        match self.data {
-            FontData::Standard(data) => Some(data),
-            _ => None
-        }
-    }
     pub fn embedded_data(&self) -> Option<Result<&[u8]>> {
-        match self.data {
+        match self.data.as_ref().ok()? {
             FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data()),
             FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(),
             FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.data(),
@@ -205,10 +169,10 @@ impl Font {
         }
     }
     pub fn is_cid(&self) -> bool {
-        matches!(self.data, FontData::CIDFontType0(_) | FontData::CIDFontType2(_, _))
+        matches!(self.data, Ok(FontData::CIDFontType0(_)) | Ok(FontData::CIDFontType2(_, _)))
     }
     pub fn cid_to_gid_map(&self) -> Option<&[u16]> {
-        match self.data {
+        match self.data.as_ref().ok()? {
             FontData::Type0(ref inner) => inner.descendant_fonts.get(0).and_then(|f| f.cid_to_gid_map()),
             FontData::CIDFontType2(_, ref data) => data.as_ref().map(|v| &**v),
             _ => None
@@ -218,7 +182,7 @@ impl Font {
         self.encoding.as_ref()
     }
     pub fn info(&self) -> Option<&TFont> {
-        match self.data {
+        match self.data.as_ref().ok()? {
             FontData::Type1(ref info) => Some(info),
             FontData::TrueType(ref info) => Some(info),
             _ => None
@@ -226,10 +190,10 @@ impl Font {
     }
     pub fn widths(&self) -> Result<Option<Widths>> {
         match self.data {
-            FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(),
-            FontData::Type1(ref info) | FontData::TrueType(ref info) => {
-                match *info {
-                    TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
+            Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(),
+            Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => {
+                match info {
+                    &TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
                         default: 0.0,
                         first_char: first as usize,
                         values: widths.clone()
@@ -237,7 +201,7 @@ impl Font {
                     _ => Ok(None)
                 }
             },
-            FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid, _) => {
+            Ok(FontData::CIDFontType0(ref cid)) | Ok(FontData::CIDFontType2(ref cid, _)) => {
                 let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
                 while let Some(ref p) = iter.next() {

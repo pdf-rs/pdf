@@ -34,6 +34,30 @@ use pathfinder_renderer::{
 };
 use font::{self, Font, GlyphId};
 
+pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
+    ("Courier", "CourierStd.otf"),
+    ("Courier-Bold", "CourierStd-Bold.otf"),
+    ("Courier-Oblique", "CourierStd-Oblique.otf"),
+    ("Courier-BoldOblique", "CourierStd-BoldOblique.otf"),
+    
+    ("Times-Roman", "MinionPro-Regular.otf"),
+    ("Times-Bold", "MinionPro-Bold.otf"),
+    ("Times-Italic", "MinionPro-It.otf"),
+    ("Times-BoldItalic", "MinionPro-BoldIt.otf"),
+    
+    ("Helvetica", "MyriadPro-Regular.otf"),
+    ("Helvetica-Bold", "MyriadPro-Bold.otf"),
+    ("Helvetica-Oblique", "MyriadPro-It.otf"),
+    ("Helvetica-BoldOblique", "MyriadPro-BoldIt.otf"),
+    
+    ("Symbol", "SY______.PFB"),
+    ("ZapfDingbats", "AdobePiStd.otf"),
+    
+    ("Arial-BoldMT", "Arial-BoldMT.otf"),
+    ("ArialMT", "ArialMT.ttf"),
+    ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
+];
+
 macro_rules! ops_p {
     ($ops:ident, $($point:ident),* => $block:block) => ({
         let mut iter = $ops.iter();
@@ -501,20 +525,30 @@ impl Cache {
         
         debug!("loading {:?}", pdf_font);
         
-        let data: Cow<[u8]> = match (pdf_font.standard_font(), pdf_font.embedded_data()) {
-            (_, Some(Ok(data))) => {
+        let data: Cow<[u8]> = match pdf_font.embedded_data() {
+            Some(Ok(data)) => {
                 if let Some(path) = std::env::var_os("PDF_FONTS") {
                     let file = PathBuf::from(path).join(&pdf_font.name);
                     fs::write(file, data).expect("can't write font");
                 }
                 data.into()
             }
-            (Some(data), _) => data.into(),
-            (None, Some(Err(e))) => panic!("can't decode font data: {:?}", e),
-            (None, None) => {
-                info!("Font: {:?}", pdf_font);
-                warn!("No font data for {}. Glyphs will be missing.", pdf_font.name);
-                return;
+            Some(Err(e)) => panic!("can't decode font data: {:?}", e),
+            None => {
+                match STANDARD_FONTS.iter().find(|&&(name, _)| pdf_font.name == name) {
+                    Some(&(_, file_name)) => {
+                        if let Ok(data) = std::fs::read(file_name) {
+                            data.into()
+                        } else {
+                            warn!("can't open {} for {}", file_name, pdf_font.name);
+                            return;
+                        }
+                    }
+                    None => {
+                        warn!("no font for {}", pdf_font.name);
+                        return;
+                    }
+                }
             }
         };
         let entry = FontEntry::build(font::parse(&data), pdf_font);
