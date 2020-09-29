@@ -63,7 +63,12 @@ impl<B: Backend> Resolve for Storage<B> {
             Some(ref p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::new(t!(self.backend.read(pos ..)));
+                    // TODO: This will be evaluated repeatedly. It should be stored and reused,
+                    // but there isn't a good place to store this offset yet without breaking the
+                    // public API.
+                    let start_offset = t!(self.backend.locate_start_offset());
+
+                    let mut lexer = Lexer::new(t!(self.backend.read(start_offset + pos ..)));
                     let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref())).1;
                     Ok(p)
                 }
