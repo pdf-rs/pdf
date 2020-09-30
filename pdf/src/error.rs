@@ -7,12 +7,12 @@ pub enum PdfError {
     // Syntax / parsing
     #[snafu(display("Unexpected end of file"))]
     EOF,
-    
+
     #[snafu(display("Error parsing from string: {}", source))]
-    Parse { source: Box<dyn Error> },
-    
+    Parse { source: Box<dyn Error + Send + Sync> },
+
     #[snafu(display("Invalid encoding: {}", source))]
-    Encoding { source: Box<dyn Error> },
+    Encoding { source: Box<dyn Error + Send + Sync> },
 
     #[snafu(display("Out of bounds: index {}, but len is {}", index, len))]
     Bounds { index: usize, len: usize },
@@ -233,5 +233,21 @@ pub fn dump_data(data: &[u8]) {
         info!("data written to {:?}", path);
     } else {
         info!("set PDF_OUT to an existing directory to dump stream data");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PdfError;
+
+    fn assert_send<T: Send>() {}
+
+    fn assert_sync<T: Sync>() {}
+
+    #[test]
+    fn error_is_send_and_sync() {
+        // note that these checks happens at compile time, not when the test is run
+        assert_send::<PdfError>();
+        assert_sync::<PdfError>();
     }
 }

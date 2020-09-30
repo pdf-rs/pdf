@@ -200,7 +200,7 @@ impl<'a> Lexer<'a> {
 
     #[inline]
     pub fn next_as<T>(&mut self) -> Result<T>
-        where T: FromStr, T::Err: std::error::Error + 'static
+        where T: FromStr, T::Err: std::error::Error + Send + Sync + 'static
     {
         self.next().and_then(|word| word.to::<T>())
     }
@@ -372,7 +372,7 @@ impl<'a> Substr<'a> {
         self.slice.to_vec()
     }
     pub fn to<T>(&self) -> Result<T>
-        where T: FromStr, T::Err: std::error::Error + 'static
+        where T: FromStr, T::Err: std::error::Error + Send + Sync + 'static
     {
         std::str::from_utf8(self.slice)?.parse::<T>().map_err(|e| PdfError::Parse { source: e.into() })
     }
