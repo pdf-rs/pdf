@@ -36,24 +36,28 @@ impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
     cache: RefCell<HashMap<PlainRef, Any>>,
-    
+
     // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
-    
+
     refs:       XRefTable,
-    
+
     decoder:    Option<Decoder>,
-    
-    backend: B
+
+    backend: B,
+
+    /// Position of the PDF header in the file.
+    start_offset: usize,
 }
 impl<B: Backend> Storage<B> {
-    pub fn new(backend: B, refs: XRefTable) -> Storage<B> {
+    pub fn new(backend: B, refs: XRefTable, start_offset: usize) -> Storage<B> {
         Storage {
             backend,
             refs,
+            start_offset,
             cache: RefCell::new(HashMap::new()),
             changes: HashMap::new(),
-            decoder: None
+            decoder: None,
         }
     }
 }
@@ -63,7 +67,7 @@ impl<B: Backend> Resolve for Storage<B> {
             Some(ref p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::new(t!(self.backend.read(pos ..)));
+                    let mut lexer = Lexer::new(t!(self.backend.read(self.start_offset + pos ..)));
                     let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref())).1;
                     Ok(p)
                 }
@@ -118,8 +122,9 @@ impl<B: Backend> File<B> {
         Self::load_data(backend).map_err(|e| dbg!(e))
     }
     fn load_data(backend: B) -> Result<Self> {
-        let (refs, trailer) = t!(backend.read_xref_table_and_trailer());
-        let mut storage = Storage::new(backend, refs);
+        let start_offset = t!(backend.locate_start_offset());
+        let (refs, trailer) = t!(backend.read_xref_table_and_trailer(start_offset));
+        let mut storage = Storage::new(backend, refs, start_offset);
 
         if let Some(crypt) = trailer.get("Encrypt") {
             let key = trailer.get("ID").ok_or(

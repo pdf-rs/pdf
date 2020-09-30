@@ -1,6 +1,7 @@
 
 fn build_xref_table() {
     warn!("can't read xref table: {:?}", e);
+    let start_offset = t!(backend.locate_start_offset());
     let mut lexer = Lexer::new(t!(backend.read(..)));
     let mut objects = Vec::new();
 
@@ -27,7 +28,7 @@ fn build_xref_table() {
             continue;
         }
         xref.push(XRef::Raw {
-            pos: offset,
+            pos: offset - start_offset,
             gen_nr
         });
         last_id = obj_nr;

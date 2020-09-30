@@ -22,6 +22,20 @@ pub trait Backend: Sized {
         self.len() == 0
     }
 
+    /// Returns the offset of the beginning of the file, i.e., where the `%PDF-1.5` header is.
+    /// (currently only used internally!)
+    fn locate_start_offset(&self) -> Result<usize> {
+        // Read from the beginning of the file, and look for the header.
+        // Implementation note 13 in version 1.7 of the PDF reference says that Acrobat viewers
+        // expect the header to be within the first 1KB of the file, so we do the same here.
+        const HEADER: &[u8] = b"%PDF-";
+        let buf = t!(self.read(..std::cmp::min(1024, self.len())));
+        buf
+            .windows(HEADER.len())
+            .position(|window| window == HEADER)
+            .ok_or_else(|| PdfError::Other{ msg: "file header is missing".to_string() })
+    }
+
     /// Returns the value of startxref (currently only used internally!)
     fn locate_xref_offset(&self) -> Result<usize> {
         // locate the xref offset at the end of the file
@@ -35,9 +49,9 @@ pub trait Backend: Sized {
     }
 
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
-    fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {
+    fn read_xref_table_and_trailer(&self, start_offset: usize) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
-        let mut lexer = Lexer::new(t!(self.read(xref_offset..)));
+        let mut lexer = Lexer::new(t!(self.read(start_offset + xref_offset..)));
         
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
         
@@ -58,7 +72,7 @@ pub trait Backend: Sized {
         };
         trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
-            let mut lexer = Lexer::new(t!(self.read(prev_xref_offset as usize..)));
+            let mut lexer = Lexer::new(t!(self.read(start_offset + prev_xref_offset as usize..)));
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
             
             for section in xref_sections {
