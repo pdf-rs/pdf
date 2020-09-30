@@ -49,8 +49,7 @@ pub trait Backend: Sized {
     }
 
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
-    fn read_xref_table_and_trailer(&self) -> Result<(XRefTable, Dictionary)> {
-        let start_offset = t!(self.locate_start_offset());
+    fn read_xref_table_and_trailer(&self, start_offset: usize) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
         let mut lexer = Lexer::new(t!(self.read(start_offset + xref_offset..)));
         
