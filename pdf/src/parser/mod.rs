@@ -48,15 +48,15 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         let mut dict = Dictionary::default();
         loop {
             // Expect a Name (and Object) or the '>>' delimiter
-            let delimiter = t!(lexer.next());
-            if delimiter.equals(b"/") {
-                let key = lexer.next()?.to_string();
+            let token = t!(lexer.next());
+            if token.starts_with(b"/") {
+                let key = token.reslice(1..).to_string();
                 let obj = t!(parse_with_lexer_ctx(lexer, r, ctx));
                 dict.insert(key, obj);
-            } else if delimiter.equals(b">>") {
+            } else if token.equals(b">>") {
                 break;
             } else {
-                err!(PdfError::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.to_string(), expected: "/ or >>"});
+                err!(PdfError::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: token.to_string(), expected: "/ or >>"});
             }
         }
         // It might just be the dictionary in front of a stream.
@@ -117,9 +117,9 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
     } else if first_lexeme.is_real_number() {
         // Real Number
         Primitive::Number (t!(first_lexeme.to::<f32>()))
-    } else if first_lexeme.equals(b"/") {
+    } else if first_lexeme.starts_with(b"/") {
         // Name
-        let s = t!(lexer.next()).to_string();
+        let s = first_lexeme.reslice(1..).to_string();
         Primitive::Name(s)
     } else if first_lexeme.equals(b"[") {
         let mut array = Vec::new();
@@ -200,15 +200,15 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
         let mut dict = Dictionary::default();
         loop {
             // Expect a Name (and Object) or the '>>' delimiter
-            let delimiter = t!(lexer.next());
-            if delimiter.equals(b"/") {
-                let key = lexer.next()?.to_string();
+            let token = t!(lexer.next());
+            if token.starts_with(b"/") {
+                let key = token.reslice(1..).to_string();
                 let obj = t!(parse_with_lexer(lexer, r));
                 dict.insert(key, obj);
-            } else if delimiter.equals(b">>") {
+            } else if token.equals(b">>") {
                 break;
             } else {
-                err!(PdfError::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: delimiter.to_string(), expected: "/ or >>"});
+                err!(PdfError::UnexpectedLexeme{ pos: lexer.get_pos(), lexeme: token.to_string(), expected: "/ or >>"});
             }
         }
         // It might just be the dictionary in front of a stream.
@@ -242,4 +242,57 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
     Ok(obj)
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dict_with_empty_name_as_value() {
+        use crate::object::NoResolve;
 
+        {
+            let data = b"<</App<</Name/>>>>";
+            let primitive = super::parse(data, &NoResolve).unwrap();
+            let dict = primitive.into_dictionary(&NoResolve).unwrap();
+
+            assert_eq!(dict.len(), 1);
+            let app_dict = dict.get("App").unwrap().clone().into_dictionary(&NoResolve).unwrap();
+            assert_eq!(app_dict.len(), 1);
+            let name = app_dict.get("Name").unwrap().as_name().unwrap();
+            assert_eq!(name, "");
+        }
+
+        {
+            let data = b"<</Length 0/App<</Name/>>>>stream\nendstream\n";
+            let stream = super::parse_stream(data, &NoResolve,None).unwrap();
+            let dict = stream.info;
+
+            assert_eq!(dict.len(), 2);
+            let app_dict = dict.get("App").unwrap().clone().into_dictionary(&NoResolve).unwrap();
+            assert_eq!(app_dict.len(), 1);
+            let name = app_dict.get("Name").unwrap().as_name().unwrap();
+            assert_eq!(name, "");
+        }
+    }
+
+    #[test]
+    fn dict_with_empty_name_as_key() {
+        use crate::object::NoResolve;
+
+        {
+            let data = b"<</ true>>";
+            let primitive = super::parse(data, &NoResolve).unwrap();
+            let dict = primitive.into_dictionary(&NoResolve).unwrap();
+
+            assert_eq!(dict.len(), 1);
+            assert_eq!(dict.get("").unwrap().as_bool().unwrap(), true);
+        }
+
+        {
+            let data = b"<</Length 0/ true>>stream\nendstream\n";
+            let stream = super::parse_stream(data, &NoResolve, None).unwrap();
+            let dict = stream.info;
+
+            assert_eq!(dict.len(), 2);
+            assert_eq!(dict.get("").unwrap().as_bool().unwrap(), true);
+        }
+    }
+}
