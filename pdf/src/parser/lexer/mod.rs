@@ -4,6 +4,7 @@
 use std::str::FromStr;
 use std::ops::{Range, Deref};
 use std::io::SeekFrom;
+use std::slice::SliceIndex;
 
 use crate::error::*;
 
@@ -165,8 +166,16 @@ impl<'a> Lexer<'a> {
         let start_pos = pos;
 
         // If first character is delimiter, this lexeme only contains that character.
-        //  - except << and >> which go together
+        //  - except << and >> which go together, and / which marks the start of a
+        // name token.
         if self.is_delimiter(pos) {
+            if self.buf[pos] == b'/' {
+                pos = self.advance_pos(pos)?;
+                while !self.is_whitespace(pos) && !self.is_delimiter(pos) {
+                    pos = self.advance_pos(pos)?;
+                }
+                return Ok((self.new_substr(start_pos..pos), pos));
+            }
             // TODO +- 1
             if self.buf[pos] == b'<' && self.buf[pos+1] == b'<'
                 || self.buf[pos] == b'>' && self.buf[pos+1] == b'>' {
@@ -389,6 +398,10 @@ impl<'a> Substr<'a> {
 
     pub fn equals(&self, other: impl AsRef<[u8]>) -> bool {
         self.slice == other.as_ref()
+    }
+
+    pub fn reslice<R: SliceIndex<[u8], Output = [u8]>>(&self, range: R) -> Substr<'a> {
+        Substr { slice: &self.slice[range] }
     }
 }
 
