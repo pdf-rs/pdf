@@ -1,6 +1,9 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 
 use crate as pdf;
+use aes::Aes128;
+use block_modes::{BlockMode, Cbc};
+use block_modes::block_padding::Pkcs7;
 use std::fmt;
 use std::collections::HashMap;
 use crate::object::PlainRef;
@@ -118,6 +121,7 @@ pub struct CryptFilter {
 pub struct Decoder {
     key_size: usize,
     key: [u8; 16], // maximum length
+    method: CryptMethod,
     /// A reference to the /Encrypt dictionary, if it is in an indirect
     /// object. The strings in this dictionary are not encrypted, so
     /// decryption must be skipped when accessing them.
@@ -131,14 +135,24 @@ impl Decoder {
         &self.key[.. self.key_size]
     }
     pub fn from_password(dict: &CryptDict, id: &[u8], pass: &[u8]) -> Result<Decoder> {
-        let key_bits = match dict.v {
-            1 | 2 | 3 => dict.bits,
+        let (key_bits, method) = match dict.v {
+            1 => (40, CryptMethod::V2),
+            2 => (dict.bits, CryptMethod::V2),
             4 => {
                 let default = dict.crypt_filters.get(dict.default_crypt_filter.as_ref().unwrap().as_str()).unwrap();
                 match default.method {
                     CryptMethod::V2 => {
-                        default.length.map(|n| 8 * n).unwrap_or(dict.bits)
+                        (
+                            default.length.map(|n| 8 * n).unwrap_or(dict.bits),
+                            CryptMethod::V2,
+                        )
                     },
+                    CryptMethod::AESV2 => {
+                        (
+                            default.length.map(|n| 8 * n).unwrap_or(dict.bits),
+                            CryptMethod::AESV2,
+                        )
+                    }
                     m => panic!("unimplemented crypt method {:?}", m),
                 }
             },
@@ -151,7 +165,7 @@ impl Decoder {
         let o = dict.o.as_bytes();
         //let u = dict.u.as_bytes();
         let p = dict.p;
-        
+
         // a) and b)
         let mut hash = md5::Context::new();
         if pass.len() < 32 {
@@ -160,17 +174,17 @@ impl Decoder {
         } else {
             hash.consume(&pass[.. 32]);
         }
-        
+
         // c)
         hash.consume(o);
-        
+
         // d)
         hash.consume(p.to_le_bytes());
-        
+
         // e)
         hash.consume(id);
-        
-        // f) 
+
+        // f)
         if level >= 4 && !dict.encrypt_metadata {
             hash.consume([0xff, 0xff, 0xff, 0xff]);
         }
@@ -178,20 +192,21 @@ impl Decoder {
         if !dict.encrypt_metadata {
             warn!("metadata not encrypted. this is not implemented yet!");
         }
-        
-        // g) 
+
+        // g)
         let mut data = *hash.compute();
-        
-        // h) 
+
+        // h)
         if level >= 3 {
             for _ in 0 .. 50 {
                 data = *md5::compute(&data[.. key_size]);
             }
         }
-        
+
         let decoder = Decoder {
             key: data,
             key_size,
+            method,
             encrypt_indirect_object: None,
         };
         if decoder.check_password(dict, id) {
@@ -230,32 +245,63 @@ impl Decoder {
     pub fn check_password(&self, dict: &CryptDict, id: &[u8]) -> bool {
         self.compute_u(id) == dict.u.as_bytes()[.. 16]
     }
-    pub fn decrypt(&self, id: u64, gen: u16, data: &mut [u8]) {
+    pub fn decrypt<'buf>(&self, id: u64, gen: u16, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
         if self.encrypt_indirect_object == Some(PlainRef { id, gen }) {
             // Strings inside the /Encrypt dictionary are not encrypted
-            return;
+            return Ok(data);
         }
 
         // Algorithm 1
         // a) we have those already
-        
-        // b)
-        let mut key = [0; 16+5];
-        let n = self.key_size;
-        key[    .. n  ].copy_from_slice(self.key());
-        key[n   .. n+3].copy_from_slice(&id.to_le_bytes()[.. 3]);
-        key[n+3 .. n+5].copy_from_slice(&gen.to_le_bytes()[.. 2]);
-        
-        // c)
-        let key = *md5::compute(&key[.. n+5]);
-        
-        // d)
-        Rc4::encrypt(&key[.. (n+5).min(16)], data);
+
+        match self.method {
+            CryptMethod::None => unreachable!(),
+            CryptMethod::V2 => {
+                // b)
+                let mut key = [0; 16 + 5];
+                let n = self.key_size;
+                key[..n].copy_from_slice(self.key());
+                key[n..n + 3].copy_from_slice(&id.to_le_bytes()[..3]);
+                key[n + 3..n + 5].copy_from_slice(&gen.to_le_bytes()[..2]);
+
+                // c)
+                let key = *md5::compute(&key[..n + 5]);
+
+                // d)
+                Rc4::encrypt(&key[..(n + 5).min(16)], data);
+                Ok(data)
+            }
+            CryptMethod::AESV2 => {
+                // b)
+                let mut key = [0; 16 + 5 + 4];
+                let n = self.key_size;
+                key[..n].copy_from_slice(self.key());
+                key[n..n + 3].copy_from_slice(&id.to_le_bytes()[..3]);
+                key[n + 3..n + 5].copy_from_slice(&gen.to_le_bytes()[..2]);
+                key[n + 5..n + 9].copy_from_slice(b"sAlT");
+
+                // c)
+                let key = *md5::compute(&key[..n + 9]);
+
+                // d)
+                type Aes128Cbc = Cbc<Aes128, Pkcs7>;
+                let key = &key[..(n + 5).min(16)];
+                let (iv, ciphertext) = data.split_at_mut(16);
+                let cipher =
+                    t!(Aes128Cbc::new_var(key, iv).map_err(|_| PdfError::DecryptionFailure));
+                Ok(t!(cipher
+                    .decrypt(ciphertext)
+                    .map_err(|_| PdfError::DecryptionFailure)))
+            }
+        }
     }
 }
 impl fmt::Debug for Decoder {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.key())
+        f.debug_struct("Decoder")
+            .field("key", &self.key())
+            .field("method", &self.method)
+            .finish()
     }
 }
 

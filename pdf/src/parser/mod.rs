@@ -20,9 +20,11 @@ pub struct Context<'a> {
     pub gen_nr: u16
 }
 impl<'a> Context<'a> {
-    pub fn decrypt(&self, mut data: &mut [u8]) {
+    pub fn decrypt<'buf>(&self, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
         if let Some(ref decoder) = self.decoder {
-            decoder.decrypt(self.obj_nr, self.gen_nr, &mut data);
+            decoder.decrypt(self.obj_nr, self.gen_nr, data)
+        } else {
+            Ok(data)
         }
     }
 }
@@ -75,7 +77,7 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
 
     // decrypt it
     if let Some(ctx) = ctx {
-        ctx.decrypt(&mut data);
+        data = t!(ctx.decrypt(&mut data)).to_vec();
     }
 
     Ok(PdfStream {
@@ -159,7 +161,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         lexer.offset_pos(bytes_traversed as usize);
         // decrypt it
         if let Some(ctx) = ctx {
-            ctx.decrypt(&mut string);
+            string = t!(ctx.decrypt(&mut string)).to_vec();
         }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
@@ -177,7 +179,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
 
         // decrypt it
         if let Some(ctx) = ctx {
-            ctx.decrypt(&mut string);
+            string = t!(ctx.decrypt(&mut string)).to_vec();
         }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"true") {

@@ -104,7 +104,10 @@ pub enum PdfError {
     
     #[snafu(display("Invalid user password"))]
     InvalidPassword,
-    
+
+    #[snafu(display("Decryption failure"))]
+    DecryptionFailure,
+
     #[snafu(display("JPEG"))]
     Jpeg { source: jpeg_decoder::Error },
 
