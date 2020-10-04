@@ -3,7 +3,8 @@
 use crate as pdf;
 use std::fmt;
 use std::collections::HashMap;
-use crate::primitive::{PdfString, Dictionary};
+use crate::object::PlainRef;
+use crate::primitive::{Dictionary, PdfString};
 use crate::error::{PdfError, Result};
 
 const PADDING: [u8; 32] = [
@@ -116,7 +117,11 @@ pub struct CryptFilter {
 
 pub struct Decoder {
     key_size: usize,
-    key: [u8; 16] // maximum length
+    key: [u8; 16], // maximum length
+    /// A reference to the /Encrypt dictionary, if it is in an indirect
+    /// object. The strings in this dictionary are not encrypted, so
+    /// decryption must be skipped when accessing them.
+    pub(crate) encrypt_indirect_object: Option<PlainRef>,
 }
 impl Decoder {
     pub fn default(dict: &CryptDict, id: &[u8]) -> Result<Decoder> {
@@ -186,7 +191,8 @@ impl Decoder {
         
         let decoder = Decoder {
             key: data,
-            key_size
+            key_size,
+            encrypt_indirect_object: None,
         };
         if decoder.check_password(dict, id) {
             Ok(decoder)
@@ -225,6 +231,11 @@ impl Decoder {
         self.compute_u(id) == dict.u.as_bytes()[.. 16]
     }
     pub fn decrypt(&self, id: u64, gen: u16, data: &mut [u8]) {
+        if self.encrypt_indirect_object == Some(PlainRef { id, gen }) {
+            // Strings inside the /Encrypt dictionary are not encrypted
+            return;
+        }
+
         // Algorithm 1
         // a) we have those already
         

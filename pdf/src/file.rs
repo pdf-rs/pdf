@@ -135,6 +135,9 @@ impl<B: Backend> File<B> {
             .as_bytes();
             let dict = CryptDict::from_primitive(crypt.clone(), &storage)?;
             storage.decoder = Some(t!(Decoder::default(&dbg!(dict), key)));
+            if let Primitive::Reference(reference) = crypt {
+                storage.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
+            }
         }
         let trailer = t!(Trailer::from_primitive(Primitive::Dictionary(trailer), &storage));
         
