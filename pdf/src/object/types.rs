@@ -474,8 +474,8 @@ impl<T: Object> Object for NameTree<T> {
         let kids = dict.remove("Kids");
         let names = dict.remove("Names");
         // If no `kids`, try `names`. Else there is an error.
-        Ok(match kids {
-            Some(kids) => {
+        Ok(match (kids, names) {
+            (Some(kids), _) => {
                 let kids = kids.into_array(resolve)?.iter().map(|kid|
                     Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
                 ).collect::<Result<Vec<_>>>()?;
@@ -484,24 +484,20 @@ impl<T: Object> Object for NameTree<T> {
                     node: NameTreeNode::Intermediate (kids)
                 }
             }
-
-            None =>
-                match names {
-                    Some(names) => {
-                        let names = names.into_array(resolve)?;
-                        let mut new_names = Vec::new();
-                        for pair in names.chunks(2) {
-                            let name = pair[0].clone().into_string()?;
-                            let value = T::from_primitive(pair[1].clone(), resolve)?;
-                            new_names.push((name, value));
-                        }
-                        NameTree {
-                            limits,
-                            node: NameTreeNode::Leaf (new_names),
-                        }
-                    }
-                    None => bail!("Neither Kids nor Names present in NameTree node.")
+            (None, Some(names)) => {
+                let names = names.into_array(resolve)?;
+                let mut new_names = Vec::new();
+                for pair in names.chunks(2) {
+                    let name = pair[0].clone().into_string()?;
+                    let value = T::from_primitive(pair[1].clone(), resolve)?;
+                    new_names.push((name, value));
                 }
+                NameTree {
+                    limits,
+                    node: NameTreeNode::Leaf (new_names),
+                }
+            }
+            (None, None) => bail!("Neither Kids nor Names present in NameTree node.")
         })
     }
 }
