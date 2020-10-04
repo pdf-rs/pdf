@@ -99,6 +99,30 @@ impl<B: Backend> Resolve for Storage<B> {
     }
 }
 
+pub fn load_storage_and_trailer<B: Backend>(backend: B) -> Result<(Storage<B>, Dictionary)> {
+    let start_offset = t!(backend.locate_start_offset());
+    let (refs, trailer) = t!(backend.read_xref_table_and_trailer(start_offset));
+    let mut storage = Storage::new(backend, refs, start_offset);
+
+    if let Some(crypt) = trailer.get("Encrypt") {
+        let key = trailer
+            .get("ID")
+            .ok_or(PdfError::MissingEntry {
+                typ: "Trailer",
+                field: "ID".into(),
+            })?
+            .as_array()?[0]
+            .as_string()?
+            .as_bytes();
+        let dict = CryptDict::from_primitive(crypt.clone(), &storage)?;
+        storage.decoder = Some(t!(Decoder::default(&dict, key)));
+        if let Primitive::Reference(reference) = crypt {
+            storage.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
+        }
+    }
+    Ok((storage, trailer))
+}
+
 pub struct File<B: Backend> {
     storage:    Storage<B>,
     pub trailer:    Trailer,
@@ -121,37 +145,20 @@ impl<B: Backend> File<B> {
     pub fn from_data(backend: B) -> Result<Self> {
         Self::load_data(backend).map_err(|e| dbg!(e))
     }
-    fn load_data(backend: B) -> Result<Self> {
-        let start_offset = t!(backend.locate_start_offset());
-        let (refs, trailer) = t!(backend.read_xref_table_and_trailer(start_offset));
-        let mut storage = Storage::new(backend, refs, start_offset);
 
-        if let Some(crypt) = trailer.get("Encrypt") {
-            let key = trailer.get("ID").ok_or(
-                PdfError::MissingEntry { typ: "Trailer", field: "ID".into() }
-            )?
-            .as_array()?[0]
-            .as_string()?
-            .as_bytes();
-            let dict = CryptDict::from_primitive(crypt.clone(), &storage)?;
-            storage.decoder = Some(t!(Decoder::default(&dbg!(dict), key)));
-            if let Primitive::Reference(reference) = crypt {
-                storage.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
-            }
-        }
-        let trailer = t!(Trailer::from_primitive(Primitive::Dictionary(trailer), &storage));
-        
-        Ok(File {
-            storage,
-            trailer,
-        })
+    fn load_data(backend: B) -> Result<Self> {
+        let (storage, trailer) = load_storage_and_trailer(backend)?;
+        let trailer = t!(Trailer::from_primitive(
+            Primitive::Dictionary(trailer),
+            &storage,
+        ));
+        Ok(File { storage, trailer })
     }
-    
 
     pub fn get_root(&self) -> &Catalog {
         &self.trailer.root
     }
-    
+
     pub fn pages<'a>(&'a self) -> impl Iterator<Item=Result<PageRc>> + 'a {
         (0 .. self.num_pages()).map(move |n| self.get_page(n))
     }
@@ -161,7 +168,7 @@ impl<B: Backend> File<B> {
             PagesNode::Leaf(_) => 1
         }
     }
-    
+
     pub fn get_page(&self, n: u32) -> Result<PageRc> {
         match *self.trailer.root.pages {
             PagesNode::Tree(ref tree) => {
