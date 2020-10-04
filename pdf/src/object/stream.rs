@@ -150,7 +150,7 @@ impl<T: Object> Object for StreamInfo<T> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
 
         let _length = usize::from_primitive(
-            dict.remove("Length").ok_or(PdfError::MissingEntry{ typ: "SteamInfo", field: "Length".into() })?,
+            dict.remove("Length").ok_or(PdfError::MissingEntry{ typ: "StreamInfo", field: "Length".into() })?,
             resolve)?;
 
         let filters = Vec::<String>::from_primitive(
@@ -216,7 +216,7 @@ pub struct ObjStmInfo {
 
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
-    pub extends: Option<i32>,
+    pub extends: Option<Rc<Stream>>,
 
 }
 
