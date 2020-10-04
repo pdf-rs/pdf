@@ -247,3 +247,76 @@ impl fmt::Debug for Decoder {
         write!(f, "{:?}", self.key())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn unencrypted_strings() {
+        let data_prefix = b"%PDF-1.5\n\
+            1 0 obj\n\
+            << /Type /Catalog /Pages 2 0 R >>\n\
+            endobj\n\
+            2 0 obj\n\
+            << /Type /Pages /Kids [3 0 R] /Count 1 >>\n\
+            endobj\n\
+            3 0 obj\n\
+            << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\n\
+            endobj\n\
+            4 0 obj\n\
+            << /Length 0 >>\n\
+            stream\n\
+            endstream\n\
+            endobj\n\
+            5 0 obj\n\
+            <<\n\
+                /V 4\n\
+                /CF <<\n\
+                    /StdCF << /Type /CryptFilter /CFM /V2 >>\n\
+                >>\n\
+                /StmF /StdCF\n\
+                /StrF /StdCF\n\
+                /R 4\n\
+                /O (owner pwd hash!!)\n\
+                /U <E721D9D63EC4E7BD4DA6C9F0E30C8290>\n\
+                /P -4\n\
+            >>\n\
+            endobj\n\
+            xref\n\
+            1 5\n";
+        let mut data = data_prefix.to_vec();
+        for obj_nr in 1..=5 {
+            let needle = format!("\n{} 0 obj\n", obj_nr).into_bytes();
+            let offset = data_prefix
+                .windows(needle.len())
+                .position(|w| w == needle)
+                .unwrap()
+                + 1;
+            let mut line = format!("{:010} {:05} n\r\n", offset, 0).into_bytes();
+            assert_eq!(line.len(), 20);
+            data.append(&mut line);
+        }
+        let trailer_snippet = b"trailer\n\
+            <<\n\
+                /Size 6\n\
+                /Root 1 0 R\n\
+                /Encrypt 5 0 R\n\
+                /ID [<DEADBEEF> <DEADBEEF>]\n\
+            >>\n\
+            startxref\n";
+        data.extend_from_slice(trailer_snippet);
+        let xref_offset = data_prefix
+            .windows("xref".len())
+            .rposition(|w| w == b"xref")
+            .unwrap();
+        data.append(&mut format!("{}\n%%EOF", xref_offset).into_bytes());
+
+        let file = crate::file::File::from_data(data).unwrap();
+
+        // PDF reference says strings in the encryption dictionary are "not
+        // encrypted by the usual methods."
+        assert_eq!(
+            file.trailer.encrypt_dict.unwrap().o.as_ref(),
+            b"owner pwd hash!!",
+        );
+    }
+}
