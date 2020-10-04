@@ -509,7 +509,7 @@ impl<T: Object> Object for NameTree<T> {
 #[derive(Debug, Clone)]
 pub enum DestView {
     // left, top, zoom
-    XYZ { left: f32, top: f32, zoom: f32 },
+    XYZ { left: Option<f32>, top: Option<f32>, zoom: f32 },
     Fit,
     FitH { top: f32 },
     FitV { left: f32 },
@@ -541,14 +541,24 @@ impl Object for Dest {
         let kind = try_opt!(array.get(1));
         let view = match kind.as_name()? {
             "XYZ" => DestView::XYZ {
-                left: try_opt!(array.get(2)).as_number()?,
-                top: try_opt!(array.get(3)).as_number()?,
+                left: match try_opt!(array.get(2)) {
+                    &Primitive::Null => None,
+                    &Primitive::Integer(n) => Some(n as f32),
+                    &Primitive::Number(f) => Some(f),
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                },
+                top: match try_opt!(array.get(3)) {
+                    &Primitive::Null => None,
+                    &Primitive::Integer(n) => Some(n as f32),
+                    &Primitive::Number(f) => Some(f),
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                },
                 zoom: match try_opt!(array.get(4)) {
                     &Primitive::Null => 0.0,
                     &Primitive::Integer(n) => n as f32,
                     &Primitive::Number(f) => f,
-                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() })
-                }
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                },
             },
             "Fit" => DestView::Fit,
             "FitH" => DestView::FitH {
