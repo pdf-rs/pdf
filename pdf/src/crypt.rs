@@ -161,7 +161,7 @@ impl Decoder {
         // 7.6.3.3 - Algorithm 2
         // get important data first
         let level = dict.r;
-        let key_size = dbg!(key_bits as usize / 8);
+        let key_size = key_bits as usize / 8;
         let o = dict.o.as_bytes();
         //let u = dict.u.as_bytes();
         let p = dict.p;

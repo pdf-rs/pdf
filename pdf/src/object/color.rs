@@ -46,7 +46,6 @@ impl Object for ColorSpace {
             return Ok(cs);
         }
         let arr = t!(p.into_array(resolve));
-        dbg!(&arr);
         let typ = t!(t!(get_index(&arr, 0)).as_name());
         
         match typ {
