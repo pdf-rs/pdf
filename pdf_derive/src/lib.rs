@@ -18,7 +18,7 @@
 //!
 //! Examples:
 //!
-//! ```norun
+//! ```ignore
 //! #[derive(Object)]
 //! #[pdf(Type="XObject", Subtype="Image")]
 //! /// A variant of XObject
@@ -47,7 +47,7 @@
 //!
 //! Example:
 //!
-//! ```norun
+//! ```ignore
 //! #[derive(Object)]
 //! #[pdf(Type = "XRef")]
 //! pub struct XRefInfo {
@@ -73,7 +73,7 @@
 //! ## 3. Enum from PDF Name
 //! Example:
 //!
-//! ```norun
+//! ```ignore
 //! #[derive(Object, Debug)]
 //! pub enum StreamFilter {
 //!     ASCIIHexDecode,
