@@ -95,6 +95,12 @@ pub enum CryptMethod {
     AESV2
 }
 
+pub enum StandardSecurityHandlerRevision {
+    R2,
+    R3,
+    R4,
+}
+
 #[derive(Object, Debug, Clone, Copy)]
 pub enum AuthEvent {
     DocOpen,
@@ -122,6 +128,7 @@ pub struct Decoder {
     key_size: usize,
     key: [u8; 16], // maximum length
     method: CryptMethod,
+    revision: StandardSecurityHandlerRevision,
     /// A reference to the /Encrypt dictionary, if it is in an indirect
     /// object. The strings in this dictionary are not encrypted, so
     /// decryption must be skipped when accessing them.
@@ -153,10 +160,16 @@ impl Decoder {
                             CryptMethod::AESV2,
                         )
                     }
-                    m => panic!("unimplemented crypt method {:?}", m),
+                    m => err!(format!("unimplemented crypt method {:?}", m).into()),
                 }
             },
-            v => panic!("unsupported V value {}", v),
+            v => err!(format!("unsupported V value {}", v).into()),
+        };
+        let revision = match dict.r {
+            2 => StandardSecurityHandlerRevision::R2,
+            3 => StandardSecurityHandlerRevision::R3,
+            4 => StandardSecurityHandlerRevision::R4,
+            other => err!(format!("unsupported standard security handler revision {}", other).into()),
         };
         // 7.6.3.3 - Algorithm 2
         // get important data first
@@ -207,6 +220,7 @@ impl Decoder {
             key: data,
             key_size,
             method,
+            revision,
             encrypt_indirect_object: None,
         };
         if decoder.check_password(dict, id) {
@@ -215,35 +229,52 @@ impl Decoder {
             Err(PdfError::InvalidPassword)
         }
     }
-    fn compute_u(&self, id: &[u8]) -> [u8; 16] {
-        // algorithm 5
-        // a) we created self already.
-        
-        // b)
-        let mut hash = md5::Context::new();
-        hash.consume(&PADDING);
-        
-        // c)
-        hash.consume(id);
-        
-        // d)
-        let mut data = *hash.compute();
-        Rc4::encrypt(self.key(), &mut data);
-        
-        // e)
-        for i in 1u8 ..= 19 {
-            let mut key = self.key;
-            for b in &mut key {
-                *b ^= i;
+    fn compute_u(&self, id: &[u8]) -> Vec<u8> {
+        match self.revision {
+            StandardSecurityHandlerRevision::R2 => {
+                // algorithm 4
+                let mut data = PADDING.to_vec();
+                Rc4::encrypt(self.key(), &mut data);
+                data
             }
-            Rc4::encrypt(&key[.. self.key_size], &mut data);
+            StandardSecurityHandlerRevision::R3 | StandardSecurityHandlerRevision::R4 => {
+                // algorithm 5
+                // a) we created self already.
+
+                // b)
+                let mut hash = md5::Context::new();
+                hash.consume(&PADDING);
+
+                // c)
+                hash.consume(id);
+
+                // d)
+                let mut data = *hash.compute();
+                Rc4::encrypt(self.key(), &mut data);
+
+                // e)
+                for i in 1u8..=19 {
+                    let mut key = self.key;
+                    for b in &mut key {
+                        *b ^= i;
+                    }
+                    Rc4::encrypt(&key[..self.key_size], &mut data);
+                }
+
+                // f)
+                data.to_vec()
+            }
         }
-        
-        // f)
-        data
     }
     pub fn check_password(&self, dict: &CryptDict, id: &[u8]) -> bool {
-        self.compute_u(id) == dict.u.as_bytes()[.. 16]
+        let computed_u = self.compute_u(id);
+        let document_u = dict.u.as_bytes();
+        match self.revision {
+            StandardSecurityHandlerRevision::R2 => computed_u == document_u,
+            StandardSecurityHandlerRevision::R3 | StandardSecurityHandlerRevision::R4 => {
+                computed_u == &document_u[..16]
+            }
+        }
     }
     pub fn decrypt<'buf>(&self, id: u64, gen: u16, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
         if self.encrypt_indirect_object == Some(PlainRef { id, gen }) {
