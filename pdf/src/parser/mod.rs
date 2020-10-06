@@ -193,7 +193,7 @@ pub fn parse_stream(data: &[u8], resolve: &impl Resolve, ctx: Option<&Context>) 
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>) -> Result<PdfStream> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, _ctx: Option<&Context>) -> Result<PdfStream> {
     let first_lexeme = t!(lexer.next());
 
     let obj = if first_lexeme.equals(b"<<") {

@@ -225,7 +225,7 @@ pub struct ObjectStream {
     /// Byte offset of each object. Index is the object number.
     offsets:    Vec<usize>,
     /// The object number of this object.
-    id:         ObjNr,
+    _id:         ObjNr,
     
     inner:      Stream<ObjStmInfo>
 }
@@ -250,7 +250,7 @@ impl Object for ObjectStream {
 
         Ok(ObjectStream {
             offsets,
-            id: 0, // TODO
+            _id: 0, // TODO
             inner: stream
         })
     }

@@ -193,7 +193,7 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     }
 }
 
-fn dct_decode(data: &[u8], params: &DCTDecodeParams) -> Result<Vec<u8>> {
+fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
     use jpeg_decoder::Decoder;
     let mut decoder = Decoder::new(data);
     let pixels = decoder.decode()?;
