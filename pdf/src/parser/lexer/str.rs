@@ -59,14 +59,27 @@ impl<'a> StringLexer<'a> {
                     b'f' => Some(b'\x0c'),
                     b'(' => Some(b'('),
                     b')' => Some(b')'),
-                    b'\n' => self.next_lexeme()?, // ignore \\\n
+                    b'\n' => {
+                        // ignore end-of-line marker
+                        if let Ok(b'\r') = self.peek_byte() {
+                            let _ = self.next_byte();
+                        }
+                        self.next_lexeme()?
+                    }
+                    b'\r' => {
+                        // ignore end-of-line marker
+                        if let Ok(b'\n') = self.peek_byte() {
+                            let _ = self.next_byte();
+                        }
+                        self.next_lexeme()?
+                    }
                     b'\\' => Some(b'\\'),
 
                     _ => {
                         self.back()?;
                         let _start = self.get_offset();
                         let mut char_code: u8 = 0;
-                        
+
                         // A character code must follow. 1-3 numbers.
                         for _ in 0..3 {
                             let c = self.peek_byte()?;
@@ -253,21 +266,57 @@ mod tests {
         let vec = b"a\\nb\\rc\\td\\(f/)\\\\hei)";
         let mut lexer = StringLexer::new(vec);
         let lexemes: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
-        assert_eq!(
-            lexemes,
-            vec![
-                b'a',
-                b'\n',
-                b'b',
-                b'\r',
-                b'c',
-                b'\t',
-                b'd',
-                b'(',
-                b'f',
-                b'/',
-            ]
-        );
+        assert_eq!(lexemes, b"a\nb\rc\td(f/");
+    }
+
+    #[test]
+    fn string_split_lines() {
+        {
+            let data = b"These \\\ntwo strings \\\nare the same.)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"These two strings are the same.");
+        }
+        {
+            let data = b"These \\\rtwo strings \\\rare the same.)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"These two strings are the same.");
+        }
+        {
+            let data = b"These \\\r\ntwo strings \\\r\nare the same.)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"These two strings are the same.");
+        }
+    }
+
+    #[test]
+    fn octal_escape() {
+        {
+            let data = b"This string contains\\245two octal characters\\307.)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, &b"This string contains\xa5two octal characters\xc7."[..]);
+        }
+        {
+            let data = b"\\0053)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"\x053");
+        }
+        {
+            let data = b"\\053)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"+");
+        }
+        {
+            let data = b"\\53)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"+");
+        }
     }
 
     #[test]
