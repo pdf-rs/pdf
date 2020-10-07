@@ -125,13 +125,13 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         let mut array = Vec::new();
         // Array
         loop {
-            let element = t!(parse_with_lexer_ctx(lexer, r, ctx));
-            array.push(element.clone());
-
             // Exit if closing delimiter
             if lexer.peek()?.equals(b"]") {
                 break;
             }
+
+            let element = t!(parse_with_lexer_ctx(lexer, r, ctx));
+            array.push(element);
         }
         t!(lexer.next()); // Move beyond closing delimiter
 
@@ -294,5 +294,15 @@ mod tests {
             assert_eq!(dict.len(), 2);
             assert_eq!(dict.get("").unwrap().as_bool().unwrap(), true);
         }
+    }
+
+    #[test]
+    fn empty_array() {
+        use crate::object::NoResolve;
+
+        let data = b"[]";
+        let primitive = super::parse(data, &NoResolve).unwrap();
+        let array = primitive.into_array(&NoResolve).unwrap();
+        assert!(array.is_empty());
     }
 }
