@@ -1,11 +1,11 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 
 use crate as pdf;
-use aes::block_cipher::generic_array::GenericArray;
+use aes::block_cipher::generic_array::{sequence::Split, GenericArray};
 use aes::{Aes128, Aes256, NewBlockCipher};
 use block_modes::block_padding::{NoPadding, Pkcs7};
 use block_modes::{BlockMode, Cbc};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
 use std::collections::HashMap;
 use crate::object::PlainRef;
@@ -109,6 +109,7 @@ pub enum StandardSecurityHandlerRevision {
     R3,
     R4,
     R5,
+    R6,
 }
 
 #[derive(Object, Debug, Clone, Copy)]
@@ -155,7 +156,7 @@ impl Decoder {
         let (key_bits, method) = match dict.v {
             1 => (40, CryptMethod::V2),
             2 => (dict.bits, CryptMethod::V2),
-            4 | 5 => {
+            4 | 5 | 6 => {
                 let default = dict
                     .crypt_filters
                     .get(dict.default_crypt_filter.as_ref().unwrap().as_str())
@@ -165,13 +166,13 @@ impl Decoder {
                         default.length.map(|n| 8 * n).unwrap_or(dict.bits),
                         default.method,
                     ),
-                    CryptMethod::AESV3 if dict.v == 5 => (
+                    CryptMethod::AESV3 if dict.v == 5 || dict.v == 6 => (
                         default.length.map(|n| 8 * n).unwrap_or(dict.bits),
                         default.method,
                     ),
                     m => err!(format!("unimplemented crypt method {:?}", m).into()),
                 }
-            },
+            }
             v => err!(format!("unsupported V value {}", v).into()),
         };
         let revision = match dict.r {
@@ -179,6 +180,7 @@ impl Decoder {
             3 => StandardSecurityHandlerRevision::R3,
             4 => StandardSecurityHandlerRevision::R4,
             5 => StandardSecurityHandlerRevision::R5,
+            6 => StandardSecurityHandlerRevision::R6,
             other => {
                 err!(format!("unsupported standard security handler revision {}", other).into())
             }
@@ -243,7 +245,7 @@ impl Decoder {
             } else {
                 Err(PdfError::InvalidPassword)
             }
-        } else if level == 5 {
+        } else if level == 5 || level == 6 {
             let u = dict.u.as_bytes();
             if u.len() != 48 {
                 err!(format!(
@@ -266,18 +268,29 @@ impl Decoder {
                 password_encoded = &password_encoded[..127];
             }
 
-            let mut check_hash = Sha256::new();
-            check_hash.update(password_encoded);
-            check_hash.update(user_validation_salt);
-            let computed_hash = check_hash.finalize();
-            if computed_hash.as_slice() != user_hash {
-                err!(PdfError::InvalidPassword);
-            }
+            let intermediate_key = if level == 6 {
+                let hash = Self::revision_6_kdf(password_encoded, user_validation_salt);
+                if hash != user_hash {
+                    err!(PdfError::InvalidPassword);
+                }
 
-            let mut intermediate_kdf_hash = Sha256::new();
-            intermediate_kdf_hash.update(password_encoded);
-            intermediate_kdf_hash.update(user_key_salt);
-            let intermediate_key = intermediate_kdf_hash.finalize();
+                Self::revision_6_kdf(password_encoded, user_key_salt).into()
+            } else {
+                // level == 5
+
+                let mut check_hash = Sha256::new();
+                check_hash.update(password_encoded);
+                check_hash.update(user_validation_salt);
+                let computed_hash = check_hash.finalize();
+                if computed_hash.as_slice() != user_hash {
+                    err!(PdfError::InvalidPassword);
+                }
+
+                let mut intermediate_kdf_hash = Sha256::new();
+                intermediate_kdf_hash.update(password_encoded);
+                intermediate_kdf_hash.update(user_key_salt);
+                intermediate_kdf_hash.finalize()
+            };
 
             let zero_iv = GenericArray::from_slice(&[0u8; 16]);
             let key_unwrap_cipher: Cbc<Aes256, NoPadding> =
@@ -306,6 +319,70 @@ impl Decoder {
             err!(format!("unsupported V value {}", level).into())
         }
     }
+
+    fn revision_6_kdf(password: &[u8], salt: &[u8]) -> [u8; 32] {
+        let mut data = [0u8; (128 + 64 + 48) * 64];
+        let mut data_total_len = 0;
+
+        let mut sha256 = Sha256::new();
+        let mut sha384 = Sha384::new();
+        let mut sha512 = Sha512::new();
+
+        let mut input_sha256 = Sha256::new();
+        input_sha256.update(password);
+        input_sha256.update(salt);
+        let input = input_sha256.finalize();
+        let (mut key, mut iv) = input.clone().split();
+
+        let mut block = [0u8; 64];
+        let mut block_size = 32;
+        (block[..block_size]).copy_from_slice(&input[..block_size]);
+
+        let mut i = 0;
+        while i < 64 || i < data[data_total_len - 1] as usize + 32 {
+            let aes: Cbc<Aes128, NoPadding> = Cbc::new(Aes128::new(&key), &iv);
+
+            let data_repeat_len = password.len() + block_size;
+            data[..password.len()].copy_from_slice(password);
+            data[password.len()..data_repeat_len].copy_from_slice(&block[..block_size]);
+            for j in 1..64 {
+                data.copy_within(..data_repeat_len, j * data_repeat_len);
+            }
+            data_total_len = data_repeat_len * 64;
+
+            // The plaintext length will always be a multiple of the block size, unwrap is okay
+            let encrypted = aes
+                .encrypt(&mut data[..data_total_len], data_total_len)
+                .unwrap();
+
+            let sum: usize = encrypted[..16].iter().map(|byte| *byte as usize).sum();
+            block_size = sum % 3 * 16 + 32;
+            match block_size {
+                32 => {
+                    sha256.update(encrypted);
+                    (block[..block_size]).copy_from_slice(&sha256.finalize_reset());
+                }
+                48 => {
+                    sha384.update(encrypted);
+                    (block[..block_size]).copy_from_slice(&sha384.finalize_reset());
+                }
+                64 => {
+                    sha512.update(encrypted);
+                    (block[..block_size]).copy_from_slice(&sha512.finalize_reset());
+                }
+                _ => unreachable!(),
+            }
+
+            key.copy_from_slice(&block[..16]);
+            iv.copy_from_slice(&block[16..32]);
+
+            i += 1;
+        }
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&block[..32]);
+        hash
+    }
+
     fn compute_u(&self, id: &[u8]) -> Vec<u8> {
         match self.revision {
             StandardSecurityHandlerRevision::R2 => {
@@ -341,7 +418,9 @@ impl Decoder {
                 // f)
                 data.to_vec()
             }
-            StandardSecurityHandlerRevision::R5 => unreachable!(),
+            StandardSecurityHandlerRevision::R5 | StandardSecurityHandlerRevision::R6 => {
+                unreachable!()
+            }
         }
     }
     pub fn check_password(&self, dict: &CryptDict, id: &[u8]) -> bool {
@@ -352,7 +431,9 @@ impl Decoder {
             StandardSecurityHandlerRevision::R3 | StandardSecurityHandlerRevision::R4 => {
                 computed_u == &document_u[..16]
             }
-            StandardSecurityHandlerRevision::R5 => unreachable!(),
+            StandardSecurityHandlerRevision::R5 | StandardSecurityHandlerRevision::R6 => {
+                unreachable!()
+            }
         }
     }
     pub fn decrypt<'buf>(&self, id: u64, gen: u16, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
