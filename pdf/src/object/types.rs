@@ -813,7 +813,6 @@ pub struct StructElem {
     page: Option<Ref<Page>>,
 }
 
-
 #[derive(Object, Debug)]
 pub enum StructType {
     Document,
@@ -866,5 +865,30 @@ pub enum StructType {
     Figure,
     Formula,
     Form,
+    #[pdf(other)]
+    Other(String),
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::{
+        object::{NoResolve, Object, StructType},
+        primitive::Primitive,
+    };
+
+    #[test]
+    fn parse_struct_type() {
+        assert!(matches!(
+            StructType::from_primitive(Primitive::Name("BibEntry".to_string()), &NoResolve),
+            Ok(StructType::BibEntry)
+        ));
+
+        let result =
+            StructType::from_primitive(Primitive::Name("CustomStructType".to_string()), &NoResolve);
+        if let Ok(StructType::Other(name)) = &result {
+            assert_eq!(name, "CustomStructType");
+        } else {
+            panic!("Incorrect result of {:?}", &result);
+        }
+    }
+}
