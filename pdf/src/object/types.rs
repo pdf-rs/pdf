@@ -474,8 +474,8 @@ impl<T: Object> Object for NameTree<T> {
         let kids = dict.remove("Kids");
         let names = dict.remove("Names");
         // If no `kids`, try `names`. Else there is an error.
-        Ok(match kids {
-            Some(kids) => {
+        Ok(match (kids, names) {
+            (Some(kids), _) => {
                 let kids = kids.into_array(resolve)?.iter().map(|kid|
                     Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
                 ).collect::<Result<Vec<_>>>()?;
@@ -484,24 +484,20 @@ impl<T: Object> Object for NameTree<T> {
                     node: NameTreeNode::Intermediate (kids)
                 }
             }
-
-            None =>
-                match names {
-                    Some(names) => {
-                        let names = names.into_array(resolve)?;
-                        let mut new_names = Vec::new();
-                        for pair in names.chunks(2) {
-                            let name = pair[0].clone().into_string()?;
-                            let value = T::from_primitive(pair[1].clone(), resolve)?;
-                            new_names.push((name, value));
-                        }
-                        NameTree {
-                            limits,
-                            node: NameTreeNode::Leaf (new_names),
-                        }
-                    }
-                    None => bail!("Neither Kids nor Names present in NameTree node.")
+            (None, Some(names)) => {
+                let names = names.into_array(resolve)?;
+                let mut new_names = Vec::new();
+                for pair in names.chunks(2) {
+                    let name = pair[0].clone().into_string()?;
+                    let value = T::from_primitive(pair[1].clone(), resolve)?;
+                    new_names.push((name, value));
                 }
+                NameTree {
+                    limits,
+                    node: NameTreeNode::Leaf (new_names),
+                }
+            }
+            (None, None) => bail!("Neither Kids nor Names present in NameTree node.")
         })
     }
 }
@@ -509,7 +505,7 @@ impl<T: Object> Object for NameTree<T> {
 #[derive(Debug, Clone)]
 pub enum DestView {
     // left, top, zoom
-    XYZ { left: f32, top: f32, zoom: f32 },
+    XYZ { left: Option<f32>, top: Option<f32>, zoom: f32 },
     Fit,
     FitH { top: f32 },
     FitV { left: f32 },
@@ -541,14 +537,24 @@ impl Object for Dest {
         let kind = try_opt!(array.get(1));
         let view = match kind.as_name()? {
             "XYZ" => DestView::XYZ {
-                left: try_opt!(array.get(2)).as_number()?,
-                top: try_opt!(array.get(3)).as_number()?,
+                left: match try_opt!(array.get(2)) {
+                    &Primitive::Null => None,
+                    &Primitive::Integer(n) => Some(n as f32),
+                    &Primitive::Number(f) => Some(f),
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                },
+                top: match try_opt!(array.get(3)) {
+                    &Primitive::Null => None,
+                    &Primitive::Integer(n) => Some(n as f32),
+                    &Primitive::Number(f) => Some(f),
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                },
                 zoom: match try_opt!(array.get(4)) {
                     &Primitive::Null => 0.0,
                     &Primitive::Integer(n) => n as f32,
                     &Primitive::Number(f) => f,
-                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() })
-                }
+                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                },
             },
             "Fit" => DestView::Fit,
             "FitH" => DestView::FitH {
@@ -807,7 +813,6 @@ pub struct StructElem {
     page: Option<Ref<Page>>,
 }
 
-
 #[derive(Object, Debug)]
 pub enum StructType {
     Document,
@@ -823,8 +828,67 @@ pub enum StructType {
     NonStruct,
     Private,
     Book,
+    P,
+    H,
+    H1,
+    H2,
+    H3,
+    H4,
+    H5,
+    H6,
+    L,
+    Ll,
     Lbl,
+    LBody,
+    Table,
+    TR,
+    TH,
+    TD,
+    THead,
+    TBody,
+    TFoot,
+    Span,
+    Quote,
+    Note,
     Reference,
-    P
+    BibEntry,
+    Code,
+    Link,
+    Annot,
+    Ruby,
+    RB,
+    RT,
+    RP,
+    Warichu,
+    WT,
+    WP,
+    Figure,
+    Formula,
+    Form,
+    #[pdf(other)]
+    Other(String),
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::{
+        object::{NoResolve, Object, StructType},
+        primitive::Primitive,
+    };
+
+    #[test]
+    fn parse_struct_type() {
+        assert!(matches!(
+            StructType::from_primitive(Primitive::Name("BibEntry".to_string()), &NoResolve),
+            Ok(StructType::BibEntry)
+        ));
+
+        let result =
+            StructType::from_primitive(Primitive::Name("CustomStructType".to_string()), &NoResolve);
+        if let Ok(StructType::Other(name)) = &result {
+            assert_eq!(name, "CustomStructType");
+        } else {
+            panic!("Incorrect result of {:?}", &result);
+        }
+    }
+}

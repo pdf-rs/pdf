@@ -247,24 +247,64 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let pairs: Vec<_> = data.variants.iter().map(|var| {
+    let mut pairs = Vec::with_capacity(data.variants.len());
+    let mut other = None;
+    for var in data.variants.iter() {
         let attrs = FieldAttrs::parse(&var.attrs);
         let var_ident = &var.ident;
-        let name = attrs.name.map(|lit| lit.value()).unwrap_or_else(|| var.ident.to_string());
-        (name, quote! { #id::#var_ident })
-    }).collect();
-
-    let ser_code = pairs.iter().map(|(name, var)| {
-        quote! {
-            #var => #name
+        let name = attrs
+            .name
+            .map(|lit| lit.value())
+            .unwrap_or_else(|| var_ident.to_string());
+        if attrs.other {
+            if other.is_some() {
+                panic!("only one 'other' variant is allowed in a name enum");
+            }
+            match &var.fields {
+                Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {}
+                _ => {
+                    panic!(
+                        "the 'other' variant in a name enum should have exactly one unnamed field",
+                    );
+                }
+            }
+            other = Some(quote! { #id::#var_ident });
+        } else {
+            pairs.push((name, quote! { #id::#var_ident }));
         }
-    });
+    }
 
-    let parts = pairs.iter().map(|(name, var)| {
-        quote! {
-            #name => Ok(#var)
-        }
-    });
+    let mut ser_code: Vec<_> = pairs
+        .iter()
+        .map(|(name, var)| {
+            quote! {
+                #var => #name
+            }
+        })
+        .collect();
+
+    let mut parts: Vec<_> = pairs
+        .iter()
+        .map(|(name, var)| {
+            quote! {
+                #name => Ok(#var)
+            }
+        })
+        .collect();
+
+    if let Some(other_tokens) = other {
+        ser_code.push(quote! {
+            #other_tokens(ref name) => name.as_str()
+        });
+
+        parts.push(quote! {
+            s => Ok(#other_tokens(s.to_string()))
+        });
+    } else {
+        parts.push(quote! {
+            s => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() })
+        });
+    }
 
     quote! {
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
@@ -281,7 +321,6 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
                     pdf::primitive::Primitive::Name(name) => {
                         match name.as_str() {
                             #( #parts, )*
-                            s => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() }),
                         }
                     }
                     _ => Err(pdf::error::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),

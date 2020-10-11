@@ -17,7 +17,7 @@ threads = ["jpeg-decoder/default"]
 standard-fonts = []
 
 [dependencies]
-pdf_derive = "0.1.20"
+pdf_derive = { path = "../pdf_derive" }
 snafu = "0.4"
 num-traits = "0.1.36"
 inflate = "0.4.5"
