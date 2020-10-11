@@ -1,4 +1,4 @@
-use std::{str, fs};
+use std::str;
 use std::rc::Rc;
 use pdf::file::File;
 use pdf::object::*;
@@ -26,7 +26,7 @@ fn open_file() {
     #[cfg(feature = "mmap")]
     let _ = run!({
         use memmap::Mmap;
-        let file = fs::File::open(file_path!("example.pdf")).expect("can't open file");
+        let file = std::fs::File::open(file_path!("example.pdf")).expect("can't open file");
         let mmap = unsafe { Mmap::map(&file).expect("can't mmap file") };
         File::from_data(mmap)
     });

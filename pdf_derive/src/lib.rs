@@ -18,7 +18,7 @@
 //!
 //! Examples:
 //!
-//! ```norun
+//! ```ignore
 //! #[derive(Object)]
 //! #[pdf(Type="XObject", Subtype="Image")]
 //! /// A variant of XObject
@@ -47,7 +47,7 @@
 //!
 //! Example:
 //!
-//! ```norun
+//! ```ignore
 //! #[derive(Object)]
 //! #[pdf(Type = "XRef")]
 //! pub struct XRefInfo {
@@ -73,7 +73,7 @@
 //! ## 3. Enum from PDF Name
 //! Example:
 //!
-//! ```norun
+//! ```ignore
 //! #[derive(Object, Debug)]
 //! pub enum StreamFilter {
 //!     ASCIIHexDecode,
@@ -137,9 +137,6 @@ impl FieldAttrs {
     }
     fn key(&self) -> &LitStr {
         self.key.as_ref().expect("no 'key' in field attributes")
-    }
-    fn name(&self) -> &LitStr {
-        self.name.as_ref().expect("no 'name' in field attributes")
     }
     fn default(&self) -> Option<Expr> {
         self.default.as_ref().map(|s| parse_str(&s.value()).expect("can't parse `default` as EXPR"))
