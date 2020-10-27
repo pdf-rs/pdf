@@ -1,7 +1,7 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 
 use crate as pdf;
-use aes::block_cipher::generic_array::{sequence::Split, GenericArray};
+use aes::cipher::block::generic_array::{sequence::Split, GenericArray};
 use aes::{Aes128, Aes256, NewBlockCipher};
 use block_modes::block_padding::{NoPadding, Pkcs7};
 use block_modes::{BlockMode, Cbc};
