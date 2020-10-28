@@ -33,8 +33,8 @@ log = "0.4.8"
 tempfile = { version = "3.1.0", optional = true }
 md5 = "0.6"
 jpeg-decoder = { version = "0.1", default-features = false }
-aes = "0.5.0"
-block-modes = "0.6.1"
+aes = "0.6.0"
+block-modes = "0.7.0"
 stringprep = "0.1.2"
 sha2 = "0.9.1"
 
