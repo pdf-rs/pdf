@@ -52,6 +52,27 @@ fn read_pages() {
 }
 
 #[test]
+fn user_password() {
+    for entry in glob(file_path!("password_protected/*.pdf"))
+        .expect("Failed to read glob pattern")
+    {
+        match entry {
+            Ok(path) => {
+                println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
+
+                let path = path.to_str().unwrap();
+                let file = run!(File::<Vec<u8>>::open_password(path, b"userpassword"));
+                for i in 0 .. file.num_pages() {
+                    println!("\nRead page {}", i);
+                    let _ = file.get_page(i);
+                }
+            }
+            Err(e) => println!("{:?}", e)
+        }
+    }
+}
+
+#[test]
 fn parse_objects_from_stream() {
     use pdf::object::NoResolve;
     let file = run!(File::<Vec<u8>>::open(file_path!("xelatex.pdf")));
