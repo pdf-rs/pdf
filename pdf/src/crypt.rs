@@ -442,6 +442,10 @@ impl Decoder {
             return Ok(data);
         }
 
+        if data.len() == 0 {
+            return Ok(data);
+        }
+
         // Algorithm 1
         // a) we have those already
 
@@ -477,6 +481,9 @@ impl Decoder {
                 // d)
                 type Aes128Cbc = Cbc<Aes128, Pkcs7>;
                 let key = &key[..(n + 5).min(16)];
+                if data.len() < 16 {
+                    return Err(PdfError::DecryptionFailure);
+                }
                 let (iv, ciphertext) = data.split_at_mut(16);
                 let cipher =
                     t!(Aes128Cbc::new_var(key, iv).map_err(|_| PdfError::DecryptionFailure));
@@ -486,6 +493,9 @@ impl Decoder {
             }
             CryptMethod::AESV3 => {
                 type Aes256Cbc = Cbc<Aes256, Pkcs7>;
+                if data.len() < 16 {
+                    return Err(PdfError::DecryptionFailure);
+                }
                 let (iv, ciphertext) = data.split_at_mut(16);
                 let cipher =
                     t!(Aes256Cbc::new_var(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
