@@ -442,7 +442,7 @@ impl Decoder {
             return Ok(data);
         }
 
-        if data.len() == 0 {
+        if data.is_empty() {
             return Ok(data);
         }
 
