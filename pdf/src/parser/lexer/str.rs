@@ -78,19 +78,19 @@ impl<'a> StringLexer<'a> {
                     _ => {
                         self.back()?;
                         let _start = self.get_offset();
-                        let mut char_code: u8 = 0;
+                        let mut char_code: u16 = 0;
 
                         // A character code must follow. 1-3 numbers.
                         for _ in 0..3 {
                             let c = self.peek_byte()?;
-                            if c >= b'0' && c <= b'9' {
+                            if c >= b'0' && c <= b'7' {
                                 self.next_byte()?;
-                                char_code = char_code * 8 + (c - b'0');
+                                char_code = char_code * 8 + (c - b'0') as u16;
                             } else {
                                 break;
                             }
                         }
-                        Some(char_code)
+                        Some(char_code as u8)
                     }
                 }
                 )
@@ -316,6 +316,13 @@ mod tests {
             let mut lexer = StringLexer::new(data);
             let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
             assert_eq!(result, b"+");
+        }
+        {
+            // overflow is ignored
+            let data = b"\\541)";
+            let mut lexer = StringLexer::new(data);
+            let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
+            assert_eq!(result, b"a");
         }
     }
 
