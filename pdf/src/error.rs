@@ -102,7 +102,7 @@ pub enum PdfError {
     #[snafu(display("Entry {} in xref table unspecified", id))]
     UnspecifiedXRefEntry {id: ObjNr},
     
-    #[snafu(display("Invalid user password"))]
+    #[snafu(display("Invalid password"))]
     InvalidPassword,
 
     #[snafu(display("Decryption failure"))]
