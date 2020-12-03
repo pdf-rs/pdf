@@ -607,7 +607,7 @@ pub struct NameDictionary {
     pub urls: Option<NameTree<Primitive>>,
     
     #[pdf(key="EmbeddedFiles")]
-    pub embedded_files: Option<FileSpec>,
+    pub embedded_files: Option<NameTree<FileSpec>>,
     /*
     #[pdf(key="AlternativePresentations")]
     alternate_presentations: NameTree<AlternatePresentation>,
@@ -626,7 +626,7 @@ pub struct NameDictionary {
 #[derive(Object, Debug, Clone)]
 pub struct FileSpec {
     #[pdf(key="EF")]
-    ef: Option<Files<EmbeddedFile>>,
+    ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
     /*
     #[pdf(key="RF")]
     rf: Option<Files<RelatedFilesArray>>,
