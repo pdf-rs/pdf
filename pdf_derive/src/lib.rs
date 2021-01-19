@@ -95,8 +95,9 @@ extern crate syn;
 extern crate quote;
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use syn::*;
-type SynStream = syn::export::TokenStream2;
+type SynStream = TokenStream2;
 
 // Debugging:
 /*
