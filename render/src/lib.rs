@@ -257,7 +257,7 @@ impl<'a> TextState<'a> {
     
     // move to the next line
     fn next_line(&mut self) {
-        self.translate(Vector2F::new(0., -self.leading * self.font_size));
+        self.translate(Vector2F::new(0., -self.leading));
     }
     // set text and line matrix
     fn set_matrix(&mut self, m: Transform2F) {
