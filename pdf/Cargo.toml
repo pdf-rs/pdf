@@ -1,6 +1,6 @@
 [package]
 name = "pdf"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["Erlend Langseth <3rlendhl@gmail.com>", "Sebastian Köln <s3bk@protonmail.com>"]
 repository = "https://github.com/pdf-rs"
 readme = "../README.md"
@@ -18,25 +18,25 @@ standard-fonts = []
 
 [dependencies]
 pdf_derive = { path = "../pdf_derive" }
-snafu = "0.4"
-num-traits = "0.1.36"
+snafu = "0.6.10"
+num-traits = "0.2.14"
 inflate = "0.4.5"
-byteorder = "1.0.0"
-itertools = "0.6.0"
-ordermap = "0.2.9"
+byteorder = "1.4.2"
+itertools = "0.10.0"
+ordermap = "0.4.2"
 memmap = { version = "0.7.0", optional = true }
 lzw = "0.10.0"
-glob = "0.2.11"
-chrono = "0.4.0"
-once_cell = "0.2"
-log = "0.4.8"
-tempfile = { version = "3.1.0", optional = true }
-md5 = "0.6"
+glob = "0.3.0"
+chrono = "0.4.19"
+once_cell = "1.5.2"
+log = "0.4.14"
+tempfile = { version = "3.2.0", optional = true }
+md5 = "0.7"
 jpeg-decoder = { version = "0.1", default-features = false }
 aes = "0.6.0"
 block-modes = "0.7.0"
 stringprep = "0.1.2"
-sha2 = "0.9.1"
+sha2 = "0.9.2"
 
 [lib]
 doctest = false
