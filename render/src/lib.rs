@@ -577,7 +577,7 @@ impl Cache {
         
         let scale = 25.4 / 72.;
         let mut scene = Scene::new();
-        let view_box = RectF::new(Vector2F::default(), rect.size() * scale);
+        let view_box = transform * RectF::new(Vector2F::default(), rect.size() * scale);
         scene.set_view_box(view_box);
         
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
