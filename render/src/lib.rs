@@ -488,11 +488,22 @@ fn convert_color(cs: &ColorSpace, ops: &[Primitive]) -> Result<Paint> {
         ColorSpace::DeviceCMYK => ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
             Ok(cmyk2fill(c, m, y, k))
         }),
-        ColorSpace::Separation(_, _, ref f) => ops!(ops, x: f32 => {
-            let mut rgb = [0.0, 0.0, 0.0];
-            f.apply(x, &mut rgb);
-            let [r, g, b] = rgb;
-            Ok(rgb2fill(r, g, b))
+        ColorSpace::Separation(ref name, ref alt, ref f) => ops!(ops, x: f32 => {
+            match &**alt {
+                &ColorSpace::DeviceCMYK => {
+                    let mut cmyk = [0.0; 4];
+                    f.apply(x, &mut cmyk);
+                    let [c, m, y, k] = cmyk;
+                    Ok(cmyk2fill(c, m, y, k))
+                },
+                &ColorSpace::DeviceRGB => {
+                    let mut rgb = [0.0, 0.0, 0.0];
+                    f.apply(x, &mut rgb);
+                    let [r, g, b] = rgb;
+                    Ok(rgb2fill(r, g, b))
+                },
+                c => unimplemented!("{:?}", c)
+            }
         }),
         ColorSpace::Indexed(ref cs, ref lut) => ops!(ops, i: i32 => {
             match **cs {

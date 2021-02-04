@@ -124,7 +124,13 @@ pub enum PdfError {
     Try { file: &'static str, line: u32, column: u32, source: Box<PdfError> },
 
     #[snafu(display("TryContext at {}:{}:{}: {:?}", file, line, column, context))]
-    TryContext { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> }
+    TryContext { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> },
+
+    #[snafu(display("PostScriptParseError"))]
+    PostScriptParse,
+
+    #[snafu(display("PostScriptExecError"))]
+    PostScriptExec,
 }
 impl PdfError {
     pub fn trace(&self) {
