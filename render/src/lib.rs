@@ -309,7 +309,7 @@ impl<'a> TextState<'a> {
                 let transform = self.text_matrix * tr;
                 let path = glyph.path;
                 if path.len() != 0 {
-                    bbox.add(path.bounds());
+                    bbox.add(gs.transform * transform * path.bounds());
                     gs.draw_transform(scene, &path, draw_mode, FillRule::Winding, transform);
                 }
             } else {
