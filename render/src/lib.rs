@@ -287,7 +287,7 @@ impl<'a> TextState<'a> {
                 text.push(c);
             }
 
-            debug!("cid {} -> gid {:?}", cid, gid);
+            //debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
                 Some(gid) => gid,
                 None => {

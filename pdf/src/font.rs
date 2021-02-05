@@ -102,6 +102,7 @@ impl Object for Font {
     }
 }
 
+#[derive(Debug)]
 pub struct Widths {
     values: Vec<f32>,
     default: f32,
@@ -122,13 +123,17 @@ impl Widths {
             first_char: 0
         }
     }
-    fn ensure_capacity(&mut self, n: usize) {
-        if n > self.values.capacity() {
-            let missing = n - self.values.len();
+    fn ensure_cid(&mut self, cid: usize) {
+        if cid - self.first_char > self.values.capacity() {
+            let missing = cid - self.values.len();
             self.values.reserve(missing);
         }
     }
     fn set(&mut self, cid: usize, width: f32) {
+        self._set(cid, width);
+        debug_assert_eq!(self.get(cid), width);
+    }
+    fn _set(&mut self, cid: usize, width: f32) {
         use std::iter::repeat;
 
         if self.values.is_empty() {
@@ -149,9 +154,9 @@ impl Widths {
             return;
         }
 
-        if cid - self.first_char > self.values.len() {
-            self.ensure_capacity(cid - self.first_char);
-            self.values.extend(repeat(self.default).take(cid - self.first_char - 1));
+        if cid > self.values.len() + self.first_char {
+            self.ensure_cid(cid);
+            self.values.extend(repeat(self.default).take(cid - self.first_char - self.values.len()));
             self.values.push(width);
             return;
         }
@@ -208,7 +213,7 @@ impl Font {
                     let c1 = p.as_integer()? as usize;
                     match iter.next() {
                         Some(&Primitive::Array(ref array)) => {
-                            widths.ensure_capacity(c1 + array.len());
+                            widths.ensure_cid(c1 + array.len() - 1);
                             for (i, w) in array.iter().enumerate() {
                                 widths.set(c1 + i, w.as_number()?);
                             }
@@ -268,7 +273,7 @@ pub struct CIDFont {
     #[pdf(key="FontDescriptor")]
     font_descriptor: FontDescriptor,
     
-    #[pdf(key="DW", default="0.")]
+    #[pdf(key="DW", default="1000.")]
     default_width: f32,
     
     #[pdf(key="W")]
