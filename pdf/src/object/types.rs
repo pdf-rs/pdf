@@ -246,6 +246,9 @@ pub struct Resources {
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
     pub fonts: HashMap<String, Rc<Font>>,
+
+    #[pdf(key="Properties")]
+    pub properties: HashMap<String, Rc<Dictionary>>,
 }
 impl Resources {
     pub fn fonts(&self) -> impl Iterator<Item=(&str, &Rc<Font>)> {
