@@ -41,6 +41,20 @@ impl fmt::Display for Primitive {
     }
 }
 
+#[derive(Debug)]
+pub struct Name<'a>(&'a str);
+impl<'a> Deref for Name<'a> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+impl<'a> fmt::Display for Name<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "/{}", self.0)
+    }
+}
+
 /// Primitive Dictionary type.
 #[derive(Default, Clone)]
 pub struct Dictionary {
@@ -373,6 +387,11 @@ impl From<bool> for Primitive {
         Primitive::Boolean(x)
     }
 }
+impl<'a> From<Name<'a>> for Primitive {
+    fn from(Name(s): Name<'a>) -> Primitive {
+        Primitive::Name(s.into())
+    }
+}
 impl From<PdfString> for Primitive {
     fn from(x: PdfString) -> Primitive {
         Primitive::String (x)
@@ -414,6 +433,18 @@ impl<'a> TryInto<i32> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<i32> {
         self.as_integer()
+    }
+}
+impl<'a> TryInto<Name<'a>> for &'a Primitive {
+    type Error = PdfError;
+    fn try_into(self) -> Result<Name<'a>> {
+        match self {
+            &Primitive::Name(ref s) => Ok(Name(s.as_str())),
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Name",
+                found: p.get_debug_name()
+            })
+        }
     }
 }
 impl<'a> TryInto<&'a [Primitive]> for &'a Primitive {
