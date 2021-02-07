@@ -35,6 +35,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     }
     fn init(&mut self, ctx: &mut Context, sender: Emitter<Self::Event>) {
         ctx.num_pages = self.num_pages;
+        ctx.set_icon(image::load_from_memory_with_format(include_bytes!("../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8().into());
     }
     fn scene(&mut self, ctx: &mut Context) -> Scene {
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();

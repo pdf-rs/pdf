@@ -69,7 +69,6 @@ fn main() -> Result<(), PdfError> {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
         let (scene, _) = cache.render_page(&file, p, transform)?;
-        dbg!(scene.view_box());
         let output = if opt.pages > 1 {
             let replacement = format!("{page:0digits$}", page=i, digits=opt.digits);
             opt.output.replace(opt.placeholder.as_str(), &replacement)

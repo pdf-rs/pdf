@@ -29,6 +29,8 @@ console_error_panic_hook = "*"
 [target.x86_64-unknown-linux-gnu.dependencies]
 #pdf = { path = "../pdf", features=["mmap", "dump"] }
 env_logger = "*"
+image = "*"
+pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view", features = ["icon"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
