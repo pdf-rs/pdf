@@ -38,15 +38,19 @@ pub enum Function {
     PostScript(PsFunc),
 }
 impl Function {
-    pub fn apply(&self, x: f32, out: &mut [f32]) {
+    pub fn apply(&self, x: f32, out: &mut [f32]) -> Result<()> {
         match *self {
             Function::Interpolated(ref parts) => {
+                if parts.len() != out.len() {
+                    bail!("incorrect output length: expected {}, found {}.", parts.len(), out.len())
+                }
                 for (f, y) in parts.iter().zip(out) {
                     *y = f.apply(x);
                 }
+                Ok(())
             }
-            Function::PostScript(ref func) => func.exec(x, out).unwrap(),
-            _ => panic!("unimplemted function {:?}", self)
+            Function::PostScript(ref func) => func.exec(x, out),
+            _ => bail!("unimplemted function {:?}", self)
         }
     }
 }
@@ -66,7 +70,7 @@ impl Object for Function {
                     (Some(range), _, _) => range.len() / 2,
                     (_, Some(c0), _) => c0.len(),
                     (_, _, Some(c1)) => c1.len(),
-                    _ => panic!("unknown dimensions")
+                    _ => bail!("unknown dimensions")
                 };
                 let input_range = (raw.domain[0], raw.domain[1]);
                 for dim in 0 .. n_dim {
@@ -83,9 +87,9 @@ impl Object for Function {
                 }
                 Ok(Function::Interpolated(parts))
             },
-            _ => {
+            i => {
                 dbg!(raw);
-                unimplemented!()
+                bail!("unsupported function type {}", i)
             }
         }
     }
@@ -95,7 +99,7 @@ impl Object for Function {
             Primitive::Stream(s) => {
                 match s.info.get("FunctionType") {
                     Some(Primitive::Integer(4)) => {},
-                    _ => panic!()
+                    p => bail!("found a function stream with type {:?}", p)
                 }
                 let stream = Stream::<()>::from_stream(s, resolve)?;
                 let data = stream.decode()?;
@@ -104,7 +108,7 @@ impl Object for Function {
                 Ok(Function::PostScript(func))
             },
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
-            _ => unimplemented!()
+            _ => bail!("double indirection")
         }
     }
 }
@@ -143,9 +147,7 @@ macro_rules! op {
 }
 
 impl PsFunc {
-    pub fn exec(&self, input: f32, output: &mut [f32]) -> Result<(), PostScriptError> {
-        let mut stack = Vec::with_capacity(10);
-        stack.push(input);
+    fn exec_inner(&self, stack: &mut Vec<f32>) -> Result<(), PostScriptError> {
         for &op in &self.ops {
             match op {
                 PsOp::Value(v) => stack.push(v),
@@ -155,6 +157,18 @@ impl PsFunc {
                 PsOp::Mul => op!(stack; a, b => a * b),
                 PsOp::Abs => op!(stack; a => a.abs()),
             }
+        }
+        Ok(())
+    }
+    pub fn exec(&self, input: f32, output: &mut [f32]) -> Result<()> {
+        let mut stack = Vec::with_capacity(10);
+        stack.push(input);
+        match self.exec_inner(&mut stack) {
+            Ok(()) => {},
+            Err(_) => return Err(PdfError::PostScriptExec)
+        }
+        if output.len() != stack.len() {
+            bail!("incorrect output length: expected {}, found {}.", stack.len(), output.len())
         }
         output.copy_from_slice(&stack);
         Ok(())
