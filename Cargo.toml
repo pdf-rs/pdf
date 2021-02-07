@@ -2,9 +2,6 @@
 members = [
     "pdf",
     "pdf_derive",
-    "view",
-    "render",
-    "convert",
     "examples/read",
     "examples/text",
     "examples/names",
@@ -14,15 +11,3 @@ default-members = [
     "pdf",
     "pdf_derive",
 ]
-
-[patch.crates-io]
-pathfinder_gl = { git = "https://github.com/servo/pathfinder" }
-pathfinder_webgl = { git = "https://github.com/servo/pathfinder" }
-pathfinder_gpu = { git = "https://github.com/servo/pathfinder" }
-pathfinder_content = { git = "https://github.com/servo/pathfinder" }
-pathfinder_color = { git = "https://github.com/servo/pathfinder" }
-pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
-pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
-pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
-pathfinder_export = { git = "https://github.com/servo/pathfinder" }
-pathfinder_simd = { git = "https://github.com/servo/pathfinder" }
