@@ -198,6 +198,19 @@ macro_rules! t {
     };
 }
 
+#[macro_export]
+macro_rules! ctx {
+    ($e:expr, $($c:expr),*) => {
+        match $e {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
+                Err($crate::PdfError::TryContext { file: file!(), line: line!(), column: column!(), context, source: e.into() })
+            }
+        }
+    };
+}
+
 macro_rules! err_from {
     ($($st:ty),* => $variant:ident) => (
         $(

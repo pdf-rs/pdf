@@ -307,17 +307,18 @@ pub struct FontDescriptor {
     #[pdf(key="ItalicAngle")]
     italic_angle: f32,
     
+    // required as per spec, but still missing in some cases
     #[pdf(key="Ascent")]
-    ascent: f32,
+    ascent: Option<f32>,
     
     #[pdf(key="Descent")]
-    descent: f32,
+    descent: Option<f32>,
     
     #[pdf(key="Leading", default="0.")]
     leading: f32,
     
     #[pdf(key="CapHeight")]
-    cap_height: f32,
+    cap_height: Option<f32>,
     
     #[pdf(key="XHeight", default="0.")]
     xheight: f32,

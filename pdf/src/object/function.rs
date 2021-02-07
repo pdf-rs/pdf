@@ -90,7 +90,6 @@ impl Object for Function {
         }
     }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        dbg!(&p);
         match p {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),
             Primitive::Stream(s) => {
@@ -101,7 +100,6 @@ impl Object for Function {
                 let stream = Stream::<()>::from_stream(s, resolve)?;
                 let data = stream.decode()?;
                 let s = std::str::from_utf8(&*data)?;
-                println!("{}", s);
                 let func = PsFunc::parse(s)?;
                 Ok(Function::PostScript(func))
             },

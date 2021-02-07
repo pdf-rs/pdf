@@ -89,7 +89,7 @@ impl<'a> Cache <'a> {
         }
     }
     fn add_font(&mut self, name: &'a str, font: &'a Font) {
-        dbg!(font);
+        info!("add_font({:?})", font);
         if let Some(to_unicode) = font.to_unicode() {
             let cmap = parse_cmap(to_unicode.data().unwrap());
             self.fonts.insert(name, FontInfo { font, cmap });
@@ -168,7 +168,6 @@ fn main() {
                 // text font
                 "Tf" => {
                     let font_name = operands[0].as_name().expect("font name is not a string");
-                    dbg!(font_name);
                     current_font = cache.get_font(font_name);
                 }
                 "Tj" | "TJ" | "BT" => {
