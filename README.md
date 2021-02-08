@@ -14,5 +14,8 @@ To build additional parts, pass `--package=read` to build the subcrate you are i
 # Examples
 Currently we only have two very minimal examples `read` and `text`. However the library has grown a lot since they have been written.
 
+# Renderer and Viewer
+A library for rendering PDFs via [Pathfinder](https://github.com/servo/pathfinder) and minimal viewer can be found [here](https://github.com/pdf-rs/pdf_render).
+
 # Inspect
 There is a tool for visualizing a PDF file as an interactive hierarchy of primitives at [inspect-prim](https://github.com/pdf-rs/inspect-prim). Just clone and `cargo run`.
