@@ -100,9 +100,9 @@ impl Object for Content {
 
 impl Display for Content {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "Content: ")?;
+        writeln!(f, "Content:")?;
         for operation in &self.operations {
-            write!(f, "{}", operation)?;
+            writeln!(f, "  {}", operation)?;
         }
         Ok(())
     }
