@@ -368,6 +368,9 @@ pub struct ImageDict {
     #[pdf(key="ID")]
     pub id: Option<PdfString>,
 
+    #[pdf(key="SMask")]
+    pub smask: Option<Rc<Stream<ImageDict>>>,
+
     // OPI: dict
     // Metadata: stream
     // OC: dict
