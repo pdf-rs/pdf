@@ -72,7 +72,6 @@ impl XRefTable {
             None => Err(PdfError::UnspecifiedXRefEntry {id}),
         }
     }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }

@@ -1,27 +1,14 @@
 extern crate pdf;
 
-use std::rc::Rc;
 use std::env::args;
 use std::fmt;
 use std::collections::HashMap;
 use std::borrow::Cow;
 use pdf::file::File;
-use pdf::object::{Resolve, OutlineItem, Dest, Page, Ref, PagesNode};
+use pdf::object::{Resolve, OutlineItem, Dest, Page, Ref, PagesNode, RcRef, PlainRef};
 use pdf::primitive::{PdfString, Primitive};
 use std::hash::{Hash, Hasher};
 
-struct RcPointerId<T>(Rc<T>);
-impl<T> PartialEq for RcPointerId<T> {
-    fn eq(&self, other: &Self) -> bool {
-        &*self.0 as *const T == &*other.0 as *const T
-    }
-}
-impl<T> Eq for RcPointerId<T> {}
-impl<T> Hash for RcPointerId<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (&*self.0 as *const T).hash(state);
-    } 
-}
 struct Indent(usize);
 impl fmt::Display for Indent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -32,7 +19,7 @@ impl fmt::Display for Indent {
     } 
 }
 
-fn walk_outline(r: &impl Resolve, mut node: Rc<OutlineItem>, map: &impl Fn(&str) -> usize, depth: usize) {
+fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&str) -> usize, depth: usize) {
     let indent = Indent(depth);
     loop {
         if let Some(ref title) = node.title {
@@ -80,7 +67,7 @@ fn main() {
     }
 
     let mut pages = HashMap::new();
-    fn add_node(r: &impl Resolve, pages: &mut HashMap<RcPointerId<PagesNode>, usize>, node: Rc<PagesNode>, current_page: &mut usize) {
+    fn add_node(r: &impl Resolve, pages: &mut HashMap<PlainRef, usize>, node: RcRef<PagesNode>, current_page: &mut usize) {
         let page = *current_page;
         match *node {
             PagesNode::Tree(ref tree) => {
@@ -93,14 +80,13 @@ fn main() {
                 *current_page += 1;
             }
         }
-        pages.insert(RcPointerId(node), page);
+        pages.insert(node.get_ref(), page);
     }
-    add_node(&file, &mut pages, Rc::clone(&catalog.pages), &mut 0);
+    add_node(&file, &mut pages, catalog.pages.clone(), &mut 0);
     
     let get_page_nr = |name: &str| -> usize {
         let rc = file.get(pages_map[name].page).unwrap();
-        let rc = RcPointerId(rc);
-        pages[&rc]
+        pages[&rc.get_ref()]
     };
 
     if let Some(ref outlines) = catalog.outlines {

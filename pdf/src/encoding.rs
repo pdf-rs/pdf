@@ -23,7 +23,6 @@ pub enum BaseEncoding {
     None
 }
 impl Object for Encoding {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             name @ Primitive::Name(_) => { 

@@ -1,13 +1,15 @@
 use itertools::Itertools;
 use inflate::{inflate_bytes_zlib, inflate_bytes};
+use deflate::deflate_bytes;
 
 use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, Resolve};
 use crate::primitive::{Primitive, Dictionary};
+use std::convert::TryInto;
 
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     predictor: i32,
@@ -20,8 +22,19 @@ pub struct LZWFlateParams {
     #[pdf(key="EarlyChange", default="1")]
     early_change: i32,
 }
+impl Default for LZWFlateParams {
+    fn default() -> LZWFlateParams {
+        LZWFlateParams {
+            predictor: 1,
+            n_components: 1,
+            bits_per_component: 8,
+            columns: 1,
+            early_change: 1
+        }
+    }
+}
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.
@@ -62,6 +75,7 @@ impl StreamFilter {
     }
 }
 
+#[inline]
 fn decode_nibble(c: u8) -> Option<u8> {
     match c {
         n @ b'0' ..= b'9' => Some(n - b'0'),
@@ -70,6 +84,16 @@ fn decode_nibble(c: u8) -> Option<u8> {
         _ => None
     }
 }
+
+#[inline]
+fn encode_nibble(c: u8) -> u8 {
+    match c {
+        0 ..= 9 => b'0'+ c,
+        10 ..= 15 => b'a'+ c,
+        _ => unreachable!()
+    }
+}
+
 
 pub fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(data.len() / 2);
@@ -82,6 +106,14 @@ pub fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     }
     Ok(out)
 }
+pub fn encode_hex(data: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(data.len() * 2);
+    for &b in data {
+        buf.push(encode_nibble(b >> 4));
+        buf.push(encode_nibble(b & 0xf));
+    }
+    buf
+}
 
 #[inline]
 fn sym_85(byte: u8) -> Option<u8> {
@@ -90,50 +122,114 @@ fn sym_85(byte: u8) -> Option<u8> {
         _ => None
     }
 }
-fn word_85(input: &[u8]) -> Option<(u8, [u8; 4])> {
-    match input.get(0).cloned() {
-        Some(b'z') => Some((1, [0; 4])),
-        Some(a) => {
-            if let [b, c, d, e] = input[1 .. 5] {
-                let q: u32 = (
-                    (   (   (
-                                sym_85(a)? as u32 * 85
-                            ) + sym_85(b)? as u32 * 85
-                        ) + sym_85(c)? as u32 * 85
-                    ) + sym_85(d)? as u32 * 85
-                ) + e as u32;
-                Some((5, [(q >> 24) as u8, (q >> 16) as u8, (q >> 8) as u8, q as u8]))
-            } else {
-                None
-            }
-        }
-        None => None
-    }
-}
 
-fn substr(data: &[u8], needle: &[u8]) -> Option<usize> {
-    data.windows(needle.len()).position(|w| w == needle)
+fn word_85([a, b, c, d, e]: [u8; 5]) -> Option<[u8; 4]> {
+    fn s(b: u8) -> Option<u32> { sym_85(b).map(|n| n as u32) }
+    let (a, b, c, d, e) = (s(a)?, s(b)?, s(c)?, s(d)?, s(e)?);
+    let q = (((a * 85 + b) * 85 + c) * 85 + d) * 85 + e;
+    Some(q.to_be_bytes())
 }
 
 fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity((data.len() + 4) / 5 * 4);
     
-    let mut pos = 0;
-    while let Some((advance, word)) = word_85(&data[pos..]) {
-        out.extend_from_slice(&word);
-        pos += advance as usize;
+    let mut stream = data.iter().cloned()
+        .filter(|&b| !matches!(b, b' ' | b'\n' | b'\r' | b'\t'));
+
+    let mut symbols = stream.by_ref()
+        .take_while(|&b| b != b'~');
+
+    let (tail_len, tail) = loop {
+        match symbols.next() {
+            Some(b'z') => out.extend_from_slice(&[0; 4]),
+            Some(a) => {
+                let (b, c, d, e) = match (symbols.next(), symbols.next(), symbols.next(), symbols.next()) {
+                    (Some(b), Some(c), Some(d), Some(e)) => (b, c, d, e),
+                    (None, _, _, _) => break (1, [a, b'u', b'u', b'u', b'u']),
+                    (Some(b), None, _, _) => break (2, [a, b, b'u', b'u', b'u']),
+                    (Some(b), Some(c), None, _) => break (3, [a, b, c, b'u', b'u']),
+                    (Some(b), Some(c), Some(d), None) => break (4, [a, b, c, d, b'u']),
+                };
+                out.extend_from_slice(&word_85([a, b, c, d, e]).ok_or(PdfError::Ascii85TailError)?);
+            }
+            None => break (0, [b'u'; 5])
+        }
+    };
+
+    if tail_len > 0 {
+        let last = word_85(tail).ok_or(PdfError::Ascii85TailError)?;
+        out.extend_from_slice(&last[.. tail_len-1]);
     }
-    let tail_len = substr(&data[pos..], b"~>").ok_or(PdfError::Ascii85TailError)?;
-    assert!(tail_len < 5);
-    if data.len() < pos+tail_len {
-        return Err(PdfError::Ascii85TailError);
+
+    match (stream.next(), stream.next()) {
+        (Some(b'>'), None) => Ok(out),
+        _ => Err(PdfError::Ascii85TailError)
     }
-    let mut tail = [b'u'; 5];
-    tail[.. tail_len].copy_from_slice(&data[pos..pos+tail_len]);
+}
+
+#[inline]
+fn divmod(n: u32, m: u32) -> (u32, u32) {
+    (n / m, n % m)
+}
+
+#[inline]
+fn a85(n: u32) -> u8 {
+    n as u8 + 0x21
+}
+
+#[inline]
+fn base85_chunk(c: [u8; 4]) -> [u8; 5] {
+    let n = u32::from_be_bytes(c);
+    let (n, e) = divmod(n, 85);
+    let (n, d) = divmod(n, 85);
+    let (n, c) = divmod(n, 85);
+    let (a, b) = divmod(n, 85);
     
-    let (_, last) = word_85(&tail).ok_or(PdfError::Ascii85TailError)?;
-    out.extend_from_slice(&last[.. tail_len-1]);
-    Ok(out)
+    [a85(a), a85(b), a85(c), a85(d), a85(e)]
+}
+
+fn encode_85(data: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity((data.len() / 4) * 5 + 10);
+    let mut chunks = data.chunks_exact(4);
+    for chunk in chunks.by_ref() {
+        let c: [u8; 4] = chunk.try_into().unwrap();
+        if c == [0; 4] {
+            buf.push(b'z');
+        } else {
+            buf.extend_from_slice(&base85_chunk(c));
+        }
+    }
+
+    let r = chunks.remainder();
+    if r.len() > 0 {
+        let mut c = [0; 4];
+        c[.. r.len()].copy_from_slice(r);
+        let out = base85_chunk(c);
+        buf.extend_from_slice(&out[.. r.len() + 1]);
+    }
+    buf.extend_from_slice(b"~>");
+    buf
+}
+
+#[test]
+fn base_85() {
+    fn s(b: &[u8]) -> &str { std::str::from_utf8(b).unwrap() }
+
+    let case = &b"hello world!"[..];
+    let encoded = encode_85(case);
+    assert_eq!(s(&encoded), "BOu!rD]j7BEbo80~>");
+    let decoded = decode_85(&encoded).unwrap();
+    assert_eq!(case, &*decoded);
+
+    assert_eq!(
+        s(&decode_85(
+            &lzw_decode(
+                &decode_85(&include_bytes!("data/t01_lzw+base85.txt")[..]).unwrap(),
+                &LZWFlateParams::default()
+            ).unwrap()
+        ).unwrap()),
+        include_str!("data/t01_plain.txt")
+    );
 }
 
 
@@ -169,7 +265,6 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         let mut last_out_off = 0; // last offset to output buffer
         
         while in_off < inp.len() {
-            
             let predictor = PredictorType::from_u8(inp[in_off])?;
             in_off += 1; // +1 because the first byte on each row is predictor
             
@@ -192,6 +287,9 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         Ok(decoded)
     }
 }
+fn flate_encode(data: &[u8]) -> Vec<u8> {
+    deflate_bytes(data)
+}
 
 fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
     use jpeg_decoder::Decoder;
@@ -200,16 +298,59 @@ fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
     Ok(pixels)
 }
 
+fn lzw_decode(mut data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+    use lzw::{MsbReader, Decoder, DecoderEarlyChange};
+    let mut out = vec![];
+    if params.early_change != 0 {
+        let mut decoder = DecoderEarlyChange::new(MsbReader::new(), 9);
+        while data.len() > 0 {
+            let (len, bytes) = decoder.decode_bytes(data)?;
+            out.extend_from_slice(bytes);
+
+            data = &data[len ..];
+        }
+    } else {
+        let mut decoder = Decoder::new(MsbReader::new(), 9);
+        while data.len() > 0 {
+            let (len, bytes) = decoder.decode_bytes(data)?;
+            out.extend_from_slice(bytes);
+
+            data = &data[len ..];
+        }
+    }
+
+    Ok(out)
+}
+fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+    use lzw::MsbWriter;
+    if params.early_change != 0 {
+        bail!("encoding early_change != 0 is not supported");
+    }
+    let mut compressed = vec![];
+    lzw::encode(data, MsbWriter::new(&mut compressed), 9).unwrap();
+    Ok(compressed)
+}
+
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
         StreamFilter::ASCII85Decode => decode_85(data),
-        StreamFilter::FlateDecode (ref params) => flate_decode(data, params),
+        StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
+        StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
         _ => unimplemented!(),
     }
 }
 
+pub fn encode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
+    match *filter {
+        StreamFilter::ASCIIHexDecode => Ok(encode_hex(data)),
+        StreamFilter::ASCII85Decode => Ok(encode_85(data)),
+        StreamFilter::LZWDecode(ref params) => lzw_encode(data, params),
+        StreamFilter::FlateDecode (ref params) => Ok(flate_encode(data)),
+        _ => unimplemented!(),
+    }
+}
 
 /*
  * Predictor - copied and adapted from PNG crate..

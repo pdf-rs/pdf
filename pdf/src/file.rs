@@ -44,9 +44,9 @@ pub struct Storage<B: Backend> {
 
     decoder:    Option<Decoder>,
 
-    backend: B,
+    backend:    B,
 
-    /// Position of the PDF header in the file.
+    // Position of the PDF header in the file.
     start_offset: usize,
 }
 impl<B: Backend> Storage<B> {
@@ -59,6 +59,24 @@ impl<B: Backend> Storage<B> {
             changes: HashMap::new(),
             decoder: None,
         }
+    }
+
+    pub fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        let id = self.refs.len() as u64;
+        
+        self.refs.push(XRef::Promised);
+        
+        PromisedRef {
+            inner: PlainRef {
+                id:     id,
+                gen:    0
+            },
+            _marker:    PhantomData
+        }
+    }
+    
+    pub fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
+        self.update(promise.inner, obj)
     }
 }
 impl<B: Backend> Resolve for Storage<B> {
@@ -83,11 +101,11 @@ impl<B: Backend> Resolve for Storage<B> {
             }
         }
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
         if let Some(any) = self.cache.borrow().get(&key) {
-            return any.clone().downcast();
+            return Ok(RcRef::new(key, any.clone().downcast()?));
         }
 
         let primitive = t!(self.resolve(key));
@@ -95,7 +113,33 @@ impl<B: Backend> Resolve for Storage<B> {
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
         
-        Ok(rc)
+        Ok(RcRef::new(key, rc))
+    }
+}
+impl<B: Backend> Updater for Storage<B> {
+    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
+        let id = self.refs.len() as u64;
+        self.refs.push(XRef::Promised);
+        let primitive = obj.to_primitive(self)?;
+        self.changes.insert(id, primitive);
+        let rc = Rc::new(obj);
+        let r = PlainRef { id, gen: 0 };
+        
+        Ok(RcRef::new(r, rc))
+    }
+    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
+        let r = match self.refs.get(old.id)? {
+            XRef::Free { .. } => panic!(),
+            XRef::Raw { gen_nr, .. } => PlainRef { id: old.id, gen: gen_nr + 1 },
+            XRef::Stream { .. } => return self.create(obj),
+            XRef::Promised => PlainRef { id: old.id, gen: 0 },
+            XRef::Invalid => panic!()
+        };
+        let primitive = obj.to_primitive(self)?;
+        self.changes.insert(old.id, primitive);
+        let rc = Rc::new(obj);
+        
+        Ok(RcRef::new(r, rc))
     }
 }
 
@@ -138,7 +182,7 @@ impl<B: Backend> Resolve for File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         self.storage.resolve(r)
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>> {
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.storage.get(r)
     }
 }
@@ -195,98 +239,9 @@ impl<B: Backend> File<B> {
         }
     }
 
-    /*
-    pub fn get_images(&self) -> Vec<ImageXObject> {
-        let mut images = Vec::<ImageXObject>::new();
-        scan_pages(&self.trailer.root.pages, 0, &mut |page| {
-            println!("Found page!");
-            match page.resources {
-                Some(ref res) => {
-                    match res.xobject {
-                        Some(ref xobjects) => {
-                            for (name, xobject) in xobjects {
-                                match *xobject {
-                                    XObject::Image (ref img_xobject) => {
-                                        images.push(img_xobject.clone())
-                                    }
-                                    _ => {},
-                                }
-                            }
-                        },
-                        None => {},
-                    }
-                },
-                None => {},
-            }
-        });
-        images
+    pub fn update_catalog(&mut self, catalog: Catalog) {
+        self.trailer.root = catalog;
     }
-    
-    // tail call to trick borrowck
-    fn update_pages(&self, pages: &mut PageTree, mut offset: i32, page_nr: i32, page: Page) -> Result<()>  {
-        for kid in &mut pages.kids.iter_mut() {
-            // println!("{}/{} {:?}", offset, page_nr, kid);
-            match *(self.get(kid)?) {
-                PagesNode::Tree(ref mut t) => {
-                    if offset + t.count < page_nr {
-                        offset += t.count;
-                    } else {
-                        return self.update_pages(t, offset, page_nr, page);
-                    }
-                },
-                PagesNode::Leaf(ref mut p) => {
-                    if offset < page_nr {
-                        offset += 1;
-                    } else {
-                        assert_eq!(offset, page_nr);
-                        *p = page;
-                        return Ok(());
-                    }
-                }
-            }
-            
-        }
-        Err(PdfError::PageNotFound {page_nr: page_nr})
-    }
-    
-    pub fn update_page(&mut self, page_nr: i32, page: Page) -> Result<()> {
-        self.update_pages(&mut self.trailer.root.pages, 0, page_nr, page)
-    }
-    
-    pub fn update(&mut self, id: ObjNr, primitive: Primitive) {
-        self.changes.insert(id, primitive);
-    }
-    
-    pub fn promise<T: Object>(&mut self) -> PromisedRef<T> {
-        let id = self.refs.len() as u64;
-        
-        self.refs.push(XRef::Promised);
-        
-        PromisedRef {
-            inner: PlainRef {
-                id:     id,
-                gen:    0
-            },
-            _marker:    PhantomData
-        }
-    }
-    
-    pub fn fulfill<T>(&mut self, promise: PromisedRef<T>, obj: T) -> Ref<T>
-    where T: Into<Primitive>
-    {
-        self.update(promise.inner.id, obj.into());
-        
-        Ref::new(promise.inner)
-    }
-    
-    pub fn add<T>(&mut self, obj: T) -> Ref<T> where T: Into<Primitive> {
-        let id = self.refs.len() as u64;
-        self.refs.push(XRef::Promised);
-        self.update(id, obj.into());
-        
-        Ref::from_id(id)
-    }
-    */
 }
 
     

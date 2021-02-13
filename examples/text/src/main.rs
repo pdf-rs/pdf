@@ -10,8 +10,9 @@ use pdf::primitive::Primitive;
 use pdf::font::*;
 use pdf::parser::Lexer;
 use pdf::parser::parse_with_lexer;
-use pdf::object::{Resolve, NoResolve};
+use pdf::object::{Resolve, NoResolve, RcRef};
 use pdf::encoding::BaseEncoding;
+use pdf::error::PdfError;
 
 use byteorder::BE;
 use utf16_ext::Utf16ReadExt;
@@ -75,28 +76,28 @@ fn parse_cmap(data: &[u8]) -> HashMap<u16, String> {
     map
 }
 
-struct FontInfo<'a> {
-    font: &'a Font,
+struct FontInfo {
+    font: RcRef<Font>,
     cmap: HashMap<u16, String>
 }
-struct Cache<'a> {
-    fonts: HashMap<&'a str, FontInfo<'a>>
+struct Cache {
+    fonts: HashMap<String, FontInfo>
 }
-impl<'a> Cache <'a> {
+impl Cache {
     fn new() -> Self {
         Cache {
             fonts: HashMap::new()
         }
     }
-    fn add_font(&mut self, name: &'a str, font: &'a Font) {
-        info!("add_font({:?})", font);
+    fn add_font(&mut self, name: impl Into<String>, font: RcRef<Font>) {
+        println!("add_font({:?})", font);
         if let Some(to_unicode) = font.to_unicode() {
             let cmap = parse_cmap(to_unicode.data().unwrap());
-            self.fonts.insert(name, FontInfo { font, cmap });
+            self.fonts.insert(name.into(), FontInfo { font, cmap });
         }
     }
-    fn get_font<'b>(&self, name: &'b str) -> Option<&FontInfo<'a>> {
-        self.fonts.get(&*name)
+    fn get_font(&self, name: &str) -> Option<&FontInfo> {
+        self.fonts.get(name)
     }
 }
 
@@ -133,27 +134,28 @@ fn add_primitive(p: &Primitive, out: &mut String, info: &FontInfo) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
     let file = File::<Vec<u8>>::open(&path).unwrap();
     
     let mut out = String::new();
     for page in file.pages() {
-        let resources = page.as_ref().unwrap().resources(&file).unwrap();
+        let page = page?;
+        let resources = file.get(page.resources()?)?;
         let mut cache = Cache::new();
         
         // make sure all fonts are in the cache, so we can reference them
-        for (name, font) in &resources.fonts {
-            cache.add_font(name, font);
+        for (name, &font) in &resources.fonts {
+            cache.add_font(name, file.get(font)?);
         }
         for gs in resources.graphics_states.values() {
-            if let Some((ref font, _)) = gs.font {
-                cache.add_font(font.name.as_str(), font);
+            if let Some((font, _)) = gs.font {
+                let font = file.get(font)?;
+                cache.add_font(font.name.clone(), font);
             }
         }
         let mut current_font = None;
-        let page = page.unwrap();
         let contents = page.contents.as_ref().unwrap();
         for Operation { ref operator, ref operands } in &contents.operations {
             // println!("{} {:?}", operator, operands);
@@ -161,7 +163,8 @@ fn main() {
                 "gs" => {
                     let gs = resources.graphics_states.get(operands[0].as_name().unwrap()).unwrap();
                     
-                    if let Some((ref font, _)) = gs.font {
+                    if let Some((font, _)) = gs.font {
+                        let font = file.get(font)?;
                         current_font = cache.get_font(&font.name);
                     }
                 }
@@ -183,4 +186,6 @@ fn main() {
         }
     }
     println!("{}", out);
+
+    Ok(())
 }

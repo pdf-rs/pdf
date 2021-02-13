@@ -15,7 +15,7 @@ use std::fmt;
 
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
-pub struct Stream<I: Object=()> {
+pub struct Stream<I=()> {
     pub info: StreamInfo<I>,
     raw_data: Vec<u8>,
     decoded: OnceCell<Vec<u8>>
@@ -25,6 +25,19 @@ impl<I: Object + fmt::Debug> Stream<I> {
         let PdfStream {info, data} = s;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
         Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
+    }
+
+    pub fn new(i: I, data: Vec<u8>) -> Stream<I> {
+        Stream {
+            info: StreamInfo {
+                filters: Vec::new(),
+                file: None,
+                file_filters: Vec::new(),
+                info: i
+            },
+            raw_data: data,
+            decoded: OnceCell::new()
+        }
     }
 
     /// decode the data.
@@ -59,7 +72,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
         }
     }
 }
-        
+
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         self.info.info.fmt(f)
@@ -67,16 +80,56 @@ impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
 }
 
 impl<I: Object + fmt::Debug> Object for Stream<I> {
-    /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, _: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let s = PdfStream::from_primitive(p, resolve)?;
         Stream::from_stream(s, resolve)
     }
 }
+impl<I> ObjectWrite for Stream<I> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let mut info = Dictionary::new();
+        let mut params = None;
+        if self.info.filters.len() > 0 {
+            for f in self.info.filters.iter() {
+                if let Some(para) = match f {
+                    StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
+                    StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
+                    StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
+                    _ => None
+                } {
+                    if params.is_some() {
+                        panic!();
+                    }
+                    params = Some(para);
+                }
+            }
+            let filters = self.info.filters.iter().map(|filter| match filter {
+                StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
+                StreamFilter::ASCII85Decode => "ASCII85Decode",
+                StreamFilter::LZWDecode(ref p) => "LZWDecode",
+                StreamFilter::FlateDecode(ref p) => "FlateDecode",
+                StreamFilter::JPXDecode => "JPXDecode",
+                StreamFilter::DCTDecode(ref p) => "DCTDecode",
+                StreamFilter::CCITTFaxDecode => "CCITTFaxDecode",
+                StreamFilter::Crypt => "Crypt",
+            })
+            .map(|s| Primitive::Name(s.into()));
+            info.insert("Filters", Primitive::array::<Primitive, _, _, _>(filters, update)?);
+        }
+        if let Some(para) = params {
+            info.insert("DecodeParms", para);
+        }
+        info.insert("Length", Primitive::Integer(self.raw_data.len() as _));
 
-impl<I:Object> Deref for Stream<I> {
+        Ok(Primitive::Stream(PdfStream {
+            info,
+            data: self.raw_data.clone()
+        }))
+    }
+}
+
+impl<I: Object> Deref for Stream<I> {
     type Target = StreamInfo<I>;
     fn deref(&self) -> &StreamInfo<I> {
         &self.info
@@ -143,9 +196,6 @@ impl<T> StreamInfo<T> {
     }
 }
 impl<T: Object> Object for StreamInfo<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
 
@@ -216,7 +266,7 @@ pub struct ObjStmInfo {
 
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
-    pub extends: Option<Rc<Stream>>,
+    pub extends: Option<Ref<Stream>>,
 
 }
 
@@ -231,9 +281,6 @@ pub struct ObjectStream {
 }
 
 impl Object for ObjectStream {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<ObjectStream> {
         let stream: Stream<ObjStmInfo> = Stream::from_primitive(p, resolve)?;
 

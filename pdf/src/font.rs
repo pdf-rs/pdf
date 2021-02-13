@@ -55,7 +55,6 @@ pub enum FontData {
 }
 
 impl Object for Font {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = p.into_dictionary(resolve)?;
         dict.expect("Font", "Type", "Font", true)?;
@@ -259,7 +258,7 @@ pub struct TFont {
 #[derive(Object, Debug)]
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
-    descendant_fonts: Vec<Rc<Font>>,
+    descendant_fonts: Vec<RcRef<Font>>,
     
     #[pdf(key="ToUnicode")]
     to_unicode: Option<Stream>,

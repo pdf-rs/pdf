@@ -118,6 +118,14 @@ pub fn object(input: TokenStream) -> TokenStream {
     impl_object(&ast)
 }
 
+#[proc_macro_derive(ObjectWrite, attributes(pdf))]
+pub fn objectwrite(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    // Build the impl
+    impl_objectwrite(&ast)
+}
+
 #[derive(Default)]
 struct FieldAttrs {
     key: Option<LitStr>,
@@ -243,10 +251,17 @@ fn impl_object(ast: &DeriveInput) -> TokenStream {
         (_, _) => unimplemented!()
     }
 }
-/// Accepts Name to construct enum
-fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
+fn impl_objectwrite(ast: &DeriveInput) -> TokenStream {
+    let attrs = GlobalAttrs::from_ast(&ast);
+    match (attrs.is_stream, &ast.data) {
+        (false, Data::Struct(ref data)) => impl_objectwrite_for_struct(ast, &data.fields).into(),
+        (false, Data::Enum(ref variants)) => impl_objectwrite_for_enum(ast, variants).into(),
+        (_, _) => unimplemented!()
+    }
+}
+
+fn enum_pairs(ast: &DeriveInput, data: &DataEnum) -> (Vec<(String, TokenStream2)>, Option<TokenStream2>) {
     let id = &ast.ident;
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     let mut pairs = Vec::with_capacity(data.variants.len());
     let mut other = None;
@@ -275,14 +290,15 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
         }
     }
 
-    let mut ser_code: Vec<_> = pairs
-        .iter()
-        .map(|(name, var)| {
-            quote! {
-                #var => #name
-            }
-        })
-        .collect();
+    (pairs, other)
+}
+
+/// Accepts Name to construct enum
+fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
+    let id = &ast.ident;
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    let (pairs, other) = enum_pairs(ast, data);
 
     let mut parts: Vec<_> = pairs
         .iter()
@@ -294,10 +310,6 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
         .collect();
 
     if let Some(other_tokens) = other {
-        ser_code.push(quote! {
-            #other_tokens(ref name) => name.as_str()
-        });
-
         parts.push(quote! {
             s => Ok(#other_tokens(s.to_string()))
         });
@@ -309,14 +321,6 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
 
     quote! {
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> pdf::error::Result<()> {
-                writeln!(out, "/{}",
-                    match *self {
-                        #( #ser_code, )*
-                    }
-                )?;
-                Ok(())
-            }
             fn from_primitive(p: pdf::primitive::Primitive, _resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
                 match p {
                     pdf::primitive::Primitive::Name(name) => {
@@ -326,6 +330,40 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
                     }
                     _ => Err(pdf::error::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
                 }
+            }
+        }
+    }
+}
+/// Accepts Name to construct enum
+fn impl_objectwrite_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
+    let id = &ast.ident;
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    let (pairs, other) = enum_pairs(ast, data);
+
+    let mut ser_code: Vec<_> = pairs
+        .iter()
+        .map(|(name, var)| {
+            quote! {
+                #var => #name
+            }
+        })
+        .collect();
+
+    if let Some(other_tokens) = other {
+        ser_code.push(quote! {
+            #other_tokens(ref name) => name.as_str()
+        });
+    }
+
+    quote! {
+        impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
+            fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<Primitive> {
+                let name = match *self {
+                    #( #ser_code, )*
+                };
+                
+                Ok(Primitive::Name(name.into()))
             }
         }
     }
@@ -360,9 +398,6 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
 
     quote! {
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> pdf::error::Result<()> {
-                unimplemented!();
-            }
             fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
                 let mut stream = PdfStream::from_primitive(p, resolve)?;
                 #ty_check
@@ -380,40 +415,34 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
     }
 }
 
+fn is_option(f: &Field) -> Option<Type> {
+    match f.ty {
+        Type::Path(ref p) => {
+            let first = p.path.segments.first().unwrap();
+            match first {
+                PathSegment { ident, arguments: PathArguments::AngleBracketed(args) } if ident == "Option" => {
+                    match args.args.first().unwrap() {
+                        GenericArgument::Type(t) => Some(t.clone()),
+                        _ => panic!()
+                    }
+                }
+                _ => None
+            }
+        }
+        _ => None
+    }
+}
+
 /// Accepts Dictionary to construct a struct
 fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
 
-    let parts: Vec<_> = fields.iter()
-    .map(|field| {
-        (field.ident.clone(), FieldAttrs::parse(&field.attrs))
-    }).collect();
-
-    // Implement serialize()
-    let fields_ser = parts.iter()
-    .map( |&(ref field, ref attrs)|
-        if attrs.skip | attrs.other {
-            quote!()
-        } else {
-            let key = attrs.key();
-            quote! {
-                write!(out, "{} ", #key)?;
-                self.#field.serialize(out)?;
-                writeln!(out, "")?;
-            }
-        }
-    );
-    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
-        quote! {
-            writeln!(out, "/{} /{}", #key, #val)?;
-        }
-    );
-
     ///////////////////////
     let typ = id.to_string();
     let let_parts = fields.iter().map(|field| {
+        
         let name = &field.ident;
         let attrs = FieldAttrs::parse(&field.attrs);
         if attrs.skip {
@@ -503,23 +532,64 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         })
     };
 
-    let pdf_type = match attrs.type_name {
-        Some(ref ty) => quote! { writeln!(out, "/Type /{}", #ty)?; },
-        None => quote! {}
-    };
 
     quote! {
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, out: &mut W) -> pdf::error::Result<()> {
-                writeln!(out, "<<")?;
+            fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
+                #from_primitive_code
+            }
+        }
+    }
+}
+
+fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
+    let id = &ast.ident;
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+    let attrs = GlobalAttrs::from_ast(&ast);
+
+    let parts: Vec<_> = fields.iter()
+    .map(|field| {
+        (field.ident.clone(), FieldAttrs::parse(&field.attrs), is_option(&field))
+    }).collect();
+
+    let fields_ser = parts.iter()
+    .map( |&(ref field, ref attrs, ref opt)|
+        if attrs.skip | attrs.other {
+            quote!()
+        } else {
+            let key = attrs.key();
+            if let Some(ref ty) = opt {
+                quote! {
+                    if let Some(ref val) = self.#field {
+                        dict.insert(#key, pdf::object::ObjectWrite::to_primitive(val, updater)?);
+                    }
+                }
+            } else {
+                quote! {
+                    dict.insert(#key, pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?);
+                }
+            }
+        }
+    );
+    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
+        quote! {
+            dict.insert(#key, Primitive::Name(#val.into()));
+        }
+    );
+    let pdf_type = match attrs.type_name {
+        Some(ref ty) => quote! {
+            dict.insert("Type", Primitive::Name(#ty.into()));
+        },
+        None => quote! {}
+    };
+    quote! {
+        impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
+            fn to_primitive(&self, updater: &mut impl pdf::object::Updater) -> Result<Primitive> {
+                let mut dict = Dictionary::new();
                 #pdf_type
                 #( #checks_code )*
                 #(#fields_ser)*
-                writeln!(out, ">>")?;
-                Ok(())
-            }
-            fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
-                #from_primitive_code
+                Ok(Primitive::Dictionary(dict))
             }
         }
     }
@@ -545,16 +615,6 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
 
     quote! {
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
-            fn serialize<W: ::std::io::Write>(&self, _out: &mut W) -> pdf::error::Result<()> {
-                unimplemented!();
-                /*
-                writeln!(out, "<<")?;
-                #type_code
-                #(#fields_ser)*
-                writeln!(out, ">>")?;
-                Ok(())
-                */
-            }
             fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
                 let pdf::primitive::PdfStream {info, data}
                     = p.to_stream(resolve)?;

@@ -1,19 +1,15 @@
 use std::any::TypeId;
 use std::rc::Rc;
-use crate::object::Object;
+use crate::object::{Object};
 use crate::error::{Result, PdfError};
 
 pub trait AnyObject {
-    fn serialize(&self, out: &mut Vec<u8>);
     fn type_name(&self) -> &'static str;
     fn type_id(&self) -> TypeId;
 }
 impl<T> AnyObject for T
     where T: Object + 'static
 {
-    fn serialize(&self, out: &mut Vec<u8>) {
-        Object::serialize(self, out).expect("write error on Vec<u8> ?!?")
-    }
     fn type_name(&self) -> &'static str {
         std::any::type_name::<T>()
     }

@@ -8,7 +8,7 @@ pub struct IccInfo {
     pub components: u32,
 
     #[pdf(key="Alternate")]
-    pub alternate: Option<Rc<ColorSpace>>,
+    pub alternate: Option<Box<ColorSpace>>,
 
     #[pdf(key="Range")]
     pub range: Option<Vec<f32>>,
@@ -21,9 +21,9 @@ pub struct IccInfo {
 pub enum ColorSpace {
     DeviceRGB,
     DeviceCMYK,
-    Indexed(Rc<ColorSpace>, Vec<u8>),
-    Separation(String, Rc<ColorSpace>, Function),
-    Icc(Box<Stream<IccInfo>>),
+    Indexed(Box<ColorSpace>, Vec<u8>),
+    Separation(String, Box<ColorSpace>, Function),
+    Icc(RcRef<Stream<IccInfo>>),
     Other(Vec<Primitive>)
 }
 
@@ -33,9 +33,6 @@ fn get_index(arr: &[Primitive], idx: usize) -> Result<&Primitive> {
 }
 
 impl Object for ColorSpace {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!()
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<ColorSpace> {
         if let Ok(name) = p.as_name() {
             let cs = match name {
@@ -58,7 +55,7 @@ impl Object for ColorSpace {
                 let lookup = match lookup {
                     Primitive::String(string) => string.into_bytes(),
                     Primitive::Stream(stream) => {
-                        let s = Stream::<()>::from_stream(stream, resolve)?;
+                        let s: Stream::<()> = Stream::from_stream(stream, resolve)?;
                         t!(s.decode()).into_owned()
                     },
                     p => return Err(PdfError::UnexpectedPrimitive {
@@ -75,8 +72,8 @@ impl Object for ColorSpace {
                 Ok(ColorSpace::Separation(name, alternate, tint))
             }
             "ICCBased" => {
-                let s: Stream<IccInfo> = t!(Stream::from_primitive(t!(get_index(&arr, 1)).clone(), resolve));
-                Ok(ColorSpace::Icc(Box::new(s)))
+                let s = t!(RcRef::from_primitive(t!(get_index(&arr, 1)).clone(), resolve));
+                Ok(ColorSpace::Icc(s))
             }
             _ => Ok(ColorSpace::Other(arr))
         }

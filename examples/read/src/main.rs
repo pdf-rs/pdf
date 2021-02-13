@@ -35,16 +35,21 @@ fn main() -> Result<(), PdfError> {
     let mut fonts = HashMap::new();
     
     for page in file.pages() {
-        let resources = page.as_ref().unwrap().resources(&file).unwrap();
-        for font in resources.fonts.values() {
+        let resources = file.get(page.as_ref().unwrap().resources().unwrap())?;
+        for &font in resources.fonts.values() {
+            let font = file.get(font)?;
             fonts.insert(font.name.clone(), font.clone());
         }
         images.extend(resources.xobjects.iter().map(|(name, &r)| file.get(r).unwrap())
-            .filter_map(|o| match &*o { XObject::Image(im) => Some(im.clone()), _ => None })
+            .filter(|o| matches!(**o, XObject::Image(_)))
         );
     }
 
-    for (i,img) in images.iter().enumerate() {
+    for (i, o) in images.iter().enumerate() {
+        let img = match **o {
+            XObject::Image(ref im) => im,
+            _ => continue
+        };
         let fname = format!("extracted_image_{}.jpeg", i);
         if let Some(data) = img.as_jpeg() {
             fs::write(fname.as_str(), data).unwrap();

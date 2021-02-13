@@ -1,36 +1,53 @@
 //! Models of PDF types
 
-use std::io;
-use std::rc::Rc;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 use crate::content::Content;
 use crate::font::Font;
-use crate::file::File;
-use crate::backend::Backend;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
 pub enum PagesNode {
-    Tree(Rc<PageTree>),
-    Leaf(Rc<Page>),
+    Tree(RcRef<PageTree>),
+    Leaf(RcRef<Page>),
 }
-impl Object for PagesNode {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        match *self {
-            PagesNode::Tree (ref t) => t.serialize(out),
-            PagesNode::Leaf (ref l) => l.serialize(out),
+impl PagesNode {
+    pub fn to_tree(node: &RcRef<PagesNode>) -> PageTree {
+        match **node {
+            PagesNode::Tree(ref t) => (**t).clone(),
+            PagesNode::Leaf(ref p) => PageTree {
+                parent: None,
+                kids: vec![Ref::from(node)],
+                count: 1,
+                resources: None,
+                media_box: None,
+                crop_box: None
+            }
         }
     }
-    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<PagesNode> {
-        let dict = Dictionary::from_primitive(p, r)?;
-        match dict["Type"].clone().into_name()?.as_str() {
-            "Page" => Ok(PagesNode::Leaf (Object::from_primitive(Primitive::Dictionary(dict), r)?)),
-            "Pages" => Ok(PagesNode::Tree (Object::from_primitive(Primitive::Dictionary(dict), r)?)),
+}
+
+impl Object for PagesNode {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PagesNode> {
+        let r = p.into_reference()?;
+        let mut dict: Dictionary = resolve.resolve(r)?.into_dictionary(resolve)?;
+        
+        match dict.require("PagesNode", "Type")?.as_name()? {
+            "Page" => Ok(PagesNode::Leaf(RcRef::new(r, Rc::new(Page::from_dict(dict, resolve)?)))),
+            "Pages" => Ok(PagesNode::Tree(RcRef::new(r, Rc::new(PageTree::from_dict(dict, resolve)?)))),
             other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
+        }
+    }
+}
+impl ObjectWrite for PagesNode {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match *self {
+            PagesNode::Tree(ref t) => t.to_primitive(update),
+            PagesNode::Leaf(ref l) => l.to_primitive(update),
         }
     }
 }
@@ -48,14 +65,14 @@ impl PagesNode {
 }
 */
 
-pub type PageRc = Rc<Page>;
+pub type PageRc = RcRef<Page>;
 
 
 #[derive(Object, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: Rc<PagesNode>,
+    pub pages: RcRef<PagesNode>,
 
 // PageLabels: number_tree,
     #[pdf(key="Names")]
@@ -94,21 +111,18 @@ pub struct Catalog {
 // NeedsRendering: bool
 }
 
-#[derive(Object, Debug, Default)]
+#[derive(Object, ObjectWrite, Debug, Default, Clone)]
 #[pdf(Type = "Pages")]
 pub struct PageTree {
     #[pdf(key="Parent")]
-    pub parent: Option<Ref<PagesNode>>,
+    pub parent: Option<RcRef<PagesNode>>,
     #[pdf(key="Kids")]
     pub kids:   Vec<Ref<PagesNode>>,
     #[pdf(key="Count")]
     pub count:  u32,
 
-    /// Exists to be inherited to a 'Page' object. Note: *Inheritable*.
-    // Note about inheritance..= if we wanted to 'inherit' things at the time of reading, we would
-    // want Option<Ref<Resources>> here most likely.
     #[pdf(key="Resources")]
-    pub resources: Option<Rc<Resources>>,
+    pub resources: Option<Ref<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -138,7 +152,34 @@ impl PageTree {
         }
         Err(PdfError::PageOutOfBounds {page_nr, max: pos})
     }
+
     /*
+    pub fn update_pages(&mut self, mut offset: u32, page_nr: u32, page: Page) -> Result<()> {
+        for kid in &self.kids {
+            // println!("{}/{} {:?}", offset, page_nr, kid);
+            match *(self.get(*kid)?) {
+                PagesNode::Tree(ref mut t) => {
+                    if offset + t.count < page_nr {
+                        offset += t.count;
+                    } else {
+                        return self.update_pages(t, offset, page_nr, page);
+                    }
+                },
+                PagesNode::Leaf(ref mut p) => {
+                    if offset < page_nr {
+                        offset += 1;
+                    } else {
+                        assert_eq!(offset, page_nr);
+                        let p = self.storage.create(page)?;
+                        self.storage.update(kid.get_inner(), PagesNode::Leaf(p));
+                        return Ok(());
+                    }
+                }
+            }
+            
+        }
+        Err(PdfError::PageNotFound {page_nr: page_nr})
+    }
     pub fn pages<'a>(&'a self, resolve: &'a impl Resolve) -> impl Iterator<Item=Result<PageRc>> + 'a {
         self.kids.iter().flat_map(move |&r| {
             match resolve.get(r) {
@@ -149,13 +190,14 @@ impl PageTree {
     }
     */
 }
-#[derive(Object, Debug)]
+
+#[derive(Object, ObjectWrite, Debug)]
 pub struct Page {
     #[pdf(key="Parent")]
-    pub parent: Ref<PagesNode>,
+    pub parent: RcRef<PagesNode>,
 
     #[pdf(key="Resources")]
-    pub resources: Option<Rc<Resources>>,
+    pub resources: Option<Ref<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -169,14 +211,14 @@ pub struct Page {
     #[pdf(key="Contents")]
     pub contents:   Option<Content>
 }
-fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -> Result<Option<T>>
+fn inherit<T, F>(mut parent: &PagesNode, f: F) -> Result<Option<T>>
     where F: Fn(&PageTree) -> Option<T>
 {
-    while let PagesNode::Tree(ref page_tree) = *file.get(parent)? {
+    while let PagesNode::Tree(ref page_tree) = *parent {
         debug!("parent: {:?}", page_tree);
-        match (page_tree.parent, f(&page_tree)) {
+        match (&page_tree.parent, f(&page_tree)) {
             (_, Some(t)) => return Ok(Some(t)),
-            (Some(ref p), None) => parent = *p,
+            (Some(ref p), None) => parent = p,
             (None, None) => return Ok(None)
         }
     }
@@ -184,7 +226,7 @@ fn inherit<T, F, B: Backend>(mut parent: Ref<PagesNode>, file: &File<B>, f: F) -
 }
 
 impl Page {
-    pub fn new(parent: Ref<PagesNode>) -> Page {
+    pub fn new(parent: RcRef<PagesNode>) -> Page {
         Page {
             parent,
             media_box:  None,
@@ -194,26 +236,26 @@ impl Page {
             contents:   None
         }
     }
-    pub fn media_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
+    pub fn media_box(&self) -> Result<Rect> {
         match self.media_box {
             Some(b) => Ok(b),
-            None => inherit(self.parent, file, |pt| pt.media_box)?
+            None => inherit(&*self.parent, |pt| pt.media_box)?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
         }
     }
-    pub fn crop_box<B: Backend>(&self, file: &File<B>) -> Result<Rect> {
+    pub fn crop_box(&self) -> Result<Rect> {
         match self.crop_box {
             Some(b) => Ok(b),
-            None => match inherit(self.parent, file, |pt| pt.crop_box)? {
+            None => match inherit(&*self.parent, |pt| pt.crop_box)? {
                 Some(b) => Ok(b),
-                None => self.media_box(file)
+                None => self.media_box()
             }
         }
     }
-    pub fn resources<B: Backend>(&self, file: &File<B>) -> Result<Rc<Resources>> {
+    pub fn resources(&self) -> Result<Ref<Resources>> {
         match self.resources {
             Some(ref r) => Ok(r.clone()),
-            None => inherit(self.parent, file, |pt| pt.resources.clone())?
+            None => inherit(&*self.parent, |pt| pt.resources.clone())?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
@@ -245,13 +287,13 @@ pub struct Resources {
     pub xobjects: HashMap<String, Ref<XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: HashMap<String, Rc<Font>>,
+    pub fonts: HashMap<String, Ref<Font>>,
 
     #[pdf(key="Properties")]
-    pub properties: HashMap<String, Rc<Dictionary>>,
+    pub properties: HashMap<String, Ref<Dictionary>>,
 }
 impl Resources {
-    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Rc<Font>)> {
+    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {
         self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
@@ -291,7 +333,7 @@ pub struct GraphicsStateParameters {
     pub rendering_intent: Option<String>,
     
     #[pdf(key="Font")]
-    pub font: Option<(Rc<Font>, f32)>,
+    pub font: Option<(Ref<Font>, f32)>,
 
     #[pdf(other)]
     _other: Dictionary
@@ -307,11 +349,11 @@ pub enum XObject {
 }
 
 /// A variant of XObject
-pub type PostScriptXObject = Rc<Stream<PostScriptDict>>;
+pub type PostScriptXObject = Stream<PostScriptDict>;
 /// A variant of XObject
-pub type ImageXObject = Rc<Stream<ImageDict>>;
+pub type ImageXObject = Stream<ImageDict>;
 /// A variant of XObject
-pub type FormXObject = Rc<Stream<FormDict>>;
+pub type FormXObject = Stream<FormDict>;
 
 #[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="PS")]
@@ -369,7 +411,7 @@ pub struct ImageDict {
     pub id: Option<PdfString>,
 
     #[pdf(key="SMask")]
-    pub smask: Option<Rc<Stream<ImageDict>>>,
+    pub smask: Option<Ref<Stream<ImageDict>>>,
 
     // OPI: dict
     // Metadata: stream
@@ -404,17 +446,17 @@ pub enum Counter {
     AlphaLower
 }
 impl Object for Counter {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        let style_code = match *self {
-            Counter::Arabic     => "D",
-            Counter::RomanLower => "r",
-            Counter::RomanUpper => "R",
-            Counter::AlphaLower => "a",
-            Counter::AlphaUpper => "A"
-        };
-        out.write_all(style_code.as_bytes())?;
-        Ok(())
-    }
+    // fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+    //     let style_code = match *self {
+    //         Counter::Arabic     => "D",
+    //         Counter::RomanLower => "r",
+    //         Counter::RomanUpper => "R",
+    //         Counter::AlphaLower => "a",
+    //         Counter::AlphaUpper => "A"
+    //     };
+    //     out.write_all(style_code.as_bytes())?;
+    //     Ok(())
+    // }
     fn from_primitive(_: Primitive, _: &impl Resolve) -> Result<Self> {
         unimplemented!();
     }
@@ -455,9 +497,6 @@ impl<T: Object> NameTree<T> {
 }
 
 impl<T: Object> Object for NameTree<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = p.into_dictionary(resolve)?;
         
@@ -526,9 +565,6 @@ pub struct Dest {
     pub view: DestView
 }
 impl Object for Dest {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let p = match p {
             Primitive::Reference(r) => resolve.resolve(r)?,
@@ -682,29 +718,6 @@ pub struct EmbeddedFileParamDict {
     */
 }
 
-
-
-
-
-
-pub fn write_list<'a, W, T: 'a, I>(out: &mut W, mut iter: I) -> Result<()>
-    where W: io::Write, T: Object, I: Iterator<Item=&'a T>
-{
-    write!(out, "[")?;
-    
-    if let Some(first) = iter.next() {
-        first.serialize(out)?;
-        
-        for other in iter {
-            out.write_all(b", ")?;
-            other.serialize(out)?;
-        }
-    }
-    
-    write!(out, "]")?;
-    Ok(())
-}
-
 #[derive(Object, Debug, Clone)]
 pub struct OutlineItem {
     #[pdf(key="Title")]
@@ -763,10 +776,6 @@ pub struct Rect {
     pub top:    f32,
 }
 impl Object for Rect {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "[{} {} {} {}]", self.left, self.top, self.right, self.bottom)?;
-        Ok(())
-    }
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         let arr = p.into_array(r)?;
         if arr.len() != 4 {
@@ -778,6 +787,11 @@ impl Object for Rect {
             right:  arr[2].as_number()?,
             top:    arr[3].as_number()?
         })
+    }
+}
+impl ObjectWrite for Rect {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Primitive::array::<f32, _, _, _>([self.left, self.top, self.right, self.bottom].iter(), update)
     }
 }
 

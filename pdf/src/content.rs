@@ -18,9 +18,9 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn new(operator: String, operands: Vec<Primitive>) -> Operation {
+    pub fn new(operator: impl Into<String>, operands: Vec<Primitive>) -> Operation {
         Operation{
-            operator,
+            operator: operator.into(),
             operands,
         }
     }
@@ -71,8 +71,6 @@ impl Content {
 }
 
 impl Object for Content {
-    /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {unimplemented!()}
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
@@ -94,6 +92,24 @@ impl Object for Content {
                 )
             }
         }
+    }
+}
+impl ObjectWrite for Content {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        use std::io::Write;
+        
+        let mut data: Vec<u8> = Vec::new();
+        for op in &self.operations {
+            if op.operands.len() == 0 {
+                writeln!(data, "{}", op.operator)?;
+            } else {
+                for arg in &op.operands {
+                    data.push(b' ');
+                    arg.serialize(&mut data)?;
+                }
+            }
+        }
+        Stream::new((), data).to_primitive(update)
     }
 }
 

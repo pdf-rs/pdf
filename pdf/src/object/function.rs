@@ -55,9 +55,6 @@ impl Function {
     }
 }
 impl Object for Function {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!()
-    }
     fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
         use std::f32::INFINITY;
         let raw = RawFunction::from_dict(dict, resolve)?;

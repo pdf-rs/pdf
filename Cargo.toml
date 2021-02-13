@@ -6,8 +6,5 @@ members = [
     "examples/text",
     "examples/names",
     "examples/metadata",
-]
-default-members = [
-    "pdf",
-    "pdf_derive",
+    "examples/content",
 ]

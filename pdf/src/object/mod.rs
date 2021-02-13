@@ -16,18 +16,18 @@ use crate::primitive::*;
 use crate::error::*;
 use crate::enc::*;
 
-use std::io;
 use std::fmt;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::ops::Deref;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
 
 pub trait Resolve: {
     fn resolve(&self, r: PlainRef) -> Result<Primitive>;
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<Rc<T>>;
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>>;
 }
 
 pub struct NoResolve;
@@ -35,21 +35,29 @@ impl Resolve for NoResolve {
     fn resolve(&self, _: PlainRef) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
-    fn get<T: Object>(&self, _r: Ref<T>) -> Result<Rc<T>> {
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         Err(PdfError::Reference)
     }
 }
 
 /// A PDF Object
 pub trait Object: Sized + 'static {
-    /// Write object as a byte stream
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>;
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
     
     fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
         Self::from_primitive(Primitive::Dictionary(dict), resolve)
     }
+}
+
+pub trait Updater {
+    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>>;
+    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>>;
+}
+
+pub trait ObjectWrite {
+    /// Write object as a byte stream
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive>;
 }
 
 ///////
@@ -63,12 +71,13 @@ pub struct PlainRef {
     pub gen:    GenNr,
 }
 impl Object for PlainRef {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
-        write!(out, "{} {} R", self.id, self.gen)?;
-        Ok(())
-    }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         p.into_reference()
+    }
+}
+impl ObjectWrite for PlainRef {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Reference(*self))
     }
 }
 
@@ -106,35 +115,113 @@ impl<T> Ref<T> {
         self.inner
     }
 }
-impl<T: Object> Ref<T> {
-    pub fn resolve(&self, r: &impl Resolve) -> Result<T> {
-        T::from_primitive(r.resolve(self.inner)?, r)
-    }
-}
 impl<T: Object> Object for Ref<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
-        self.inner.serialize(out)
-    }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         Ok(Ref::new(p.into_reference()?))
     }
 }
-
+impl<T> ObjectWrite for Ref<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.inner.to_primitive(update)
+    }
+}
 impl<T> fmt::Debug for Ref<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Ref({})", self.inner.id)
     }
 }
 
+#[derive(Debug)]
+pub struct RcRef<T> {
+    inner: PlainRef,
+    data: Rc<T>
+}
+
+impl<T> RcRef<T> {
+    pub fn new(inner: PlainRef, data: Rc<T>) -> RcRef<T> {
+        RcRef { inner, data }
+    }
+    pub fn get_ref(&self) -> PlainRef {
+        self.inner
+    }
+}
+impl<T: Object + std::fmt::Debug> Object for RcRef<T> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Reference(r) => resolve.get(Ref::new(r)),
+            p => Err(PdfError::UnexpectedPrimitive {expected: "Reference", found: p.get_debug_name()})
+        }
+    }
+}
+impl<T: ObjectWrite> ObjectWrite for RcRef<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.inner.to_primitive(update)
+    }
+}
+impl<T> Deref for RcRef<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &*self.data
+    }
+}
+impl<T> Clone for RcRef<T> {
+    fn clone(&self) -> RcRef<T> {
+        RcRef {
+            inner: self.inner,
+            data: self.data.clone(),
+        }
+    }
+}
+impl<'a, T> From<&'a RcRef<T>> for Ref<T> {
+    fn from(r: &'a RcRef<T>) -> Ref<T> {
+        Ref::new(r.inner)
+    }
+}
+
+#[derive(Debug)]
+pub enum MaybeRef<T> {
+    Direct(Rc<T>),
+    Indirect(RcRef<T>),
+}
+impl<T: Object> Object for MaybeRef<T> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        Ok(match p {
+            Primitive::Reference(r) => MaybeRef::Indirect(resolve.get(Ref::new(r))?),
+            p => MaybeRef::Direct(Rc::new(T::from_primitive(p, resolve)?))
+        })
+    }
+}
+impl<T: ObjectWrite> ObjectWrite for MaybeRef<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            MaybeRef::Direct(ref inner) => inner.to_primitive(update),
+            MaybeRef::Indirect(r) => r.to_primitive(update)
+        }
+    }
+}
+impl<T> Deref for MaybeRef<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        match *self {
+            MaybeRef::Direct(ref t) => t,
+            MaybeRef::Indirect(ref r) => &**r
+        }
+    }
+}
+impl<T> Clone for MaybeRef<T> {
+    fn clone(&self) -> Self {
+        match *self {
+            MaybeRef::Direct(ref rc) => MaybeRef::Direct(rc.clone()),
+            MaybeRef::Indirect(ref r) => MaybeRef::Indirect(r.clone())
+        }
+    }
+}
+ 
 //////////////////////////////////////
 // Object for Primitives & other types
 //////////////////////////////////////
 
 impl Object for i32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "{}", self)?;
-        Ok(())
-    }
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_integer(),
@@ -142,11 +229,13 @@ impl Object for i32 {
         }
     }
 }
-impl Object for u32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "{}", self)?;
-        Ok(())
+impl ObjectWrite for i32 {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Integer(*self))
     }
+}
+
+impl Object for u32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_u32(),
@@ -154,11 +243,13 @@ impl Object for u32 {
         }
     }
 }
-impl Object for usize {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "{}", self)?;
-        Ok(())
+impl ObjectWrite for u32 {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Integer(*self as _))
     }
+}
+
+impl Object for usize {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => Ok(r.resolve(id)?.as_u32()? as usize),
@@ -166,11 +257,13 @@ impl Object for usize {
         }
     }
 }
-impl Object for f32 {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "{}", self)?;
-        Ok(())
+impl ObjectWrite for usize {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Integer(*self as _))
     }
+}
+
+impl Object for f32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_number(),
@@ -178,11 +271,13 @@ impl Object for f32 {
         }
     }
 }
-impl Object for bool {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "{}", self)?;
-        Ok(())
+impl ObjectWrite for f32 {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Number(*self))
     }
+}
+
+impl Object for bool {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_bool(),
@@ -190,16 +285,13 @@ impl Object for bool {
         }
     }
 }
-impl Object for Dictionary {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "<<")?;
-        for (key, val) in self.iter() {
-            write!(out, "/{} ", key)?;
-            val.serialize(out)?;
-        }
-        write!(out, ">>")?;
-        Ok(())
+impl ObjectWrite for bool {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Boolean(*self))
     }
+}
+
+impl Object for Dictionary {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Dictionary(dict) => Ok(dict),
@@ -210,26 +302,12 @@ impl Object for Dictionary {
 }
 
 impl Object for String {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        for b in self.as_str().chars() {
-            match b {
-                '\\' | '(' | ')' => write!(out, r"\")?,
-                c if c > '~' => panic!("only ASCII"),
-                _ => ()
-            }
-            write!(out, "{}", b)?;
-        }
-        Ok(())
-    }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         Ok(p.into_name()?)
     }
 }
 
 impl<T: Object> Object for Vec<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write_list(out, self.iter())
-    }
     /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         Ok(
@@ -247,6 +325,11 @@ impl<T: Object> Object for Vec<T> {
             _ => vec![T::from_primitive(p, r)?]
         }
         )
+    }
+}
+impl<T: ObjectWrite> ObjectWrite for Vec<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Primitive::array::<T, _, _, _>(self.iter(), update)
     }
 }
 /*
@@ -274,30 +357,17 @@ impl Object for Data {
 }*/
 
 impl Object for Primitive {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        match *self {
-            Primitive::Null => write!(out, "null")?,
-            Primitive::Integer (ref x) => x.serialize(out)?,
-            Primitive::Number (ref x) => x.serialize(out)?,
-            Primitive::Boolean (ref x) => x.serialize(out)?,
-            Primitive::String (ref x) => x.serialize(out)?,
-            Primitive::Stream (ref x) => x.serialize(out)?,
-            Primitive::Dictionary (ref x) => x.serialize(out)?,
-            Primitive::Array (ref x) => x.serialize(out)?,
-            Primitive::Reference (ref x) => x.serialize(out)?,
-            Primitive::Name (ref x) => x.serialize(out)?,
-        }
-        Ok(())
-    }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         Ok(p)
     }
 }
+impl ObjectWrite for Primitive {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(self.clone())
+    }
+}
 
 impl<V: Object> Object for HashMap<String, V> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(HashMap::new()),
@@ -309,30 +379,12 @@ impl<V: Object> Object for HashMap<String, V> {
                 Ok(new)
             }
             Primitive::Reference (id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
-            p =>  Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()})
-        }
-    }
-}
-
-impl<T: Object + std::fmt::Debug> Object for Rc<T> {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        (**self).serialize(out)
-    }
-    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        match p {
-            Primitive::Reference(r) => resolve.get(Ref::new(r)),
-            p => Ok(Rc::new(T::from_primitive(p, resolve)?))
+            p => Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()})
         }
     }
 }
 
 impl<T: Object> Object for Option<T> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        // TODO: the Option here is most often or always about whether the entry exists in a
-        // dictionary. Hence it should probably be more up to the Dictionary impl of serialize, to
-        // handle Options. 
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(None),
@@ -347,25 +399,30 @@ impl<T: Object> Object for Option<T> {
     }
 }
 
-impl Object for () {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "null")?;
-        Ok(())
+impl<T: Object> Object for Box<T> {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        T::from_primitive(p, resolve).map(Box::new)
     }
+}
+impl<T: ObjectWrite> ObjectWrite for Box<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        (**self).to_primitive(update)
+    }
+}
+
+
+impl Object for () {
     fn from_primitive(_p: Primitive, _resolve: &impl Resolve) -> Result<Self> {
         Ok(())
     }
 }
+impl ObjectWrite for () {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Null)
+    }
+}
 
 impl<T, U> Object for (T, U) where T: Object, U: Object {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
-        write!(out, "[")?;
-        self.0.serialize(out)?;
-        write!(out, " ")?;
-        self.1.serialize(out)?;
-        write!(out, "]")?;
-        Ok(())
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut arr = p.into_array(resolve)?;
         if arr.len() != 2 {
@@ -374,5 +431,11 @@ impl<T, U> Object for (T, U) where T: Object, U: Object {
         let b = arr.pop().unwrap();
         let a = arr.pop().unwrap();
         Ok((T::from_primitive(a, resolve)?, U::from_primitive(b, resolve)?))
+    }
+}
+
+impl<T, U> ObjectWrite for (T, U) where T: ObjectWrite, U: ObjectWrite {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Array(vec![self.0.to_primitive(update)?, self.1.to_primitive(update)?]))
     }
 }

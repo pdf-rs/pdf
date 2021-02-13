@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::object::{PlainRef, Resolve, Object, NoResolve};
+use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
 
 use std::collections::{btree_map, BTreeMap};
 use std::{str, fmt, io};
@@ -7,7 +7,7 @@ use std::ops::{Index, Range};
 use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
 use std::convert::TryInto;
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use itertools::Itertools;
 
 #[derive(Clone, Debug)]
@@ -39,6 +39,55 @@ impl fmt::Display for Primitive {
             Primitive::Name(ref s) => write!(f, "/{}", s)
         }
     }
+}
+impl Primitive {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+        match self {
+            Primitive::Null => write!(out, "null")?,
+            Primitive::Integer(i) => write!(out, "{}", i)?,
+            Primitive::Number(n) => write!(out, "{}", n)?,
+            Primitive::Boolean(b) => write!(out, "{}", b)?,
+            Primitive::String(ref s) => s.serialize(out)?,
+            Primitive::Stream(ref s) => s.serialize(out)?,
+            Primitive::Dictionary(ref d) => d.serialize(out)?,
+            Primitive::Array(ref arr) => serialize_list(arr, out)?,
+            Primitive::Reference(r) => write!(out, "@{}", r.id)?,
+            Primitive::Name(ref s) => serialize_name(s, out)?,
+        }
+        Ok(())
+    }
+    pub fn array<O, T, I, U>(i: I, update: &mut U) -> Result<Primitive>
+        where O: ObjectWrite, I: Iterator<Item=T>,
+        T: Borrow<O>, U: Updater
+    {
+        i.map(|t| t.borrow().to_primitive(update)).collect::<Result<_>>().map(Primitive::Array)
+    }
+}
+
+fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
+    let mut parts = arr.iter();
+    write!(out, "[")?;
+    if let Some(first) = parts.next() {
+        first.serialize(out)?;
+    }
+    for p in parts {
+        write!(out, ", ")?;
+        p.serialize(out)?;
+    }
+    write!(out, "]")?;
+    Ok(())
+}
+
+fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
+    for b in s.chars() {
+        match b {
+            '\\' | '(' | ')' => write!(out, r"\")?,
+            c if c > '~' => panic!("only ASCII"),
+            _ => ()
+        }
+        write!(out, "{}", b)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -73,8 +122,8 @@ impl Dictionary {
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }
-    pub fn insert(&mut self, key: String, val: Primitive) -> Option<Primitive> {
-        self.dict.insert(key, val)
+    pub fn insert(&mut self, key: impl Into<String>, val: Primitive) -> Option<Primitive> {
+        self.dict.insert(key.into(), val)
     }
     pub fn iter(&self) -> btree_map::Iter<String, Primitive> {
         self.dict.iter()
@@ -118,6 +167,17 @@ impl Deref for Dictionary {
         &self.dict
     }
 }
+impl Dictionary {
+    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+        write!(out, "<<")?;
+        for (key, val) in self.iter() {
+            write!(out, "/{} ", key)?;
+            val.serialize(out)?;
+        }
+        write!(out, ">>")?;
+        Ok(())
+    }
+}
 impl fmt::Debug for Dictionary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{{")?;
@@ -153,20 +213,6 @@ pub struct PdfStream {
     pub data: Vec<u8>,
 }
 impl Object for PdfStream {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()>  {
-        writeln!(out, "<<")?;
-        for (k, v) in &self.info {
-            write!(out, "  {} ", k)?;
-            v.serialize(out)?;
-            writeln!(out)?;
-        }
-        writeln!(out, ">>")?;
-        
-        writeln!(out, "stream")?;
-        out.write_all(&self.data)?;
-        writeln!(out, "\nendstream")?;
-        Ok(())
-    }
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Stream (stream) => Ok(stream),
@@ -175,7 +221,16 @@ impl Object for PdfStream {
         }
     }
 }
-
+impl PdfStream {
+    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+        self.info.serialize(out)?;
+        
+        writeln!(out, "stream")?;
+        out.write_all(&self.data)?;
+        writeln!(out, "\nendstream")?;
+        Ok(())
+    }
+}
 
 
 macro_rules! unexpected_primitive {
@@ -207,7 +262,16 @@ impl fmt::Debug for PdfString {
     }
 }
 impl Object for PdfString {
-    fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::String (string) => Ok(string),
+            Primitive::Reference(id) => PdfString::from_primitive(r.resolve(id)?, &NoResolve),
+            _ => unexpected_primitive!(String, p.get_debug_name()),
+        }
+    }
+}
+impl PdfString {
+    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         write!(out, r"\")?;
         for &b in &self.data {
             match b {
@@ -218,13 +282,6 @@ impl Object for PdfString {
             write!(out, "{}", b)?;
         }
         Ok(())
-    }
-    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        match p {
-            Primitive::String (string) => Ok(string),
-            Primitive::Reference(id) => PdfString::from_primitive(r.resolve(id)?, &NoResolve),
-            _ => unexpected_primitive!(String, p.get_debug_name()),
-        }
     }
 }
 impl AsRef<[u8]> for PdfString {
@@ -500,10 +557,6 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
 }
 
 impl Object for DateTime<FixedOffset> {
-    fn serialize<W: io::Write>(&self, _out: &mut W) -> Result<()> {
-        // TODO: smal/avg amount of work.
-        unimplemented!();
-    }
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
