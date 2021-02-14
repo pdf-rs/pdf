@@ -62,6 +62,9 @@ impl Primitive {
     {
         i.map(|t| t.borrow().to_primitive(update)).collect::<Result<_>>().map(Primitive::Array)
     }
+    pub fn name(name: impl Into<String>) -> Primitive {
+        Primitive::Name(name.into())
+    }
 }
 
 fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
@@ -159,6 +162,11 @@ impl Dictionary {
             None if required => Err(PdfError::MissingEntry { typ, field: key.into() }),
             None => Ok(())
         }
+    }
+}
+impl ObjectWrite for Dictionary {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Dictionary(self.clone()))
     }
 }
 impl Deref for Dictionary {
@@ -270,6 +278,12 @@ impl Object for PdfString {
         }
     }
 }
+impl ObjectWrite for PdfString {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::String(self.clone()))
+    }
+}
+
 impl PdfString {
     fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         write!(out, r"\")?;

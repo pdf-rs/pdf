@@ -17,6 +17,7 @@ pub mod parser;
 pub mod font;
 pub mod any;
 pub mod encoding;
+pub mod build;
 
 // mod content;
 mod enc;

@@ -5,7 +5,7 @@ use std::fmt;
 use std::collections::HashMap;
 use std::borrow::Cow;
 use pdf::file::File;
-use pdf::object::{Resolve, OutlineItem, Dest, Page, Ref, PagesNode, RcRef, PlainRef};
+use pdf::object::{Resolve, OutlineItem, Dest, Page, Ref, PagesNode, PageTree, RcRef, PlainRef};
 use pdf::primitive::{PdfString, Primitive};
 use std::hash::{Hash, Hasher};
 
@@ -67,22 +67,21 @@ fn main() {
     }
 
     let mut pages = HashMap::new();
-    fn add_node(r: &impl Resolve, pages: &mut HashMap<PlainRef, usize>, node: RcRef<PagesNode>, current_page: &mut usize) {
-        let page = *current_page;
-        match *node {
-            PagesNode::Tree(ref tree) => {
-                for &node_ref in &tree.kids {
-                    let node = r.get(node_ref).unwrap();
-                    add_node(r, pages, node, current_page);
+    fn add_tree(r: &impl Resolve, pages: &mut HashMap<PlainRef, usize>, tree: &PageTree, current_page: &mut usize) {
+        for &node_ref in &tree.kids {
+            let node = r.get(node_ref).unwrap();
+            match *node {
+                PagesNode::Tree(ref tree) => {
+                    add_tree(r, pages, tree, current_page);
+                }
+                PagesNode::Leaf(ref page) => {
+                    pages.insert(page.get_ref(), *current_page);
+                    *current_page += 1;
                 }
             }
-            PagesNode::Leaf(ref page) => {
-                *current_page += 1;
-            }
         }
-        pages.insert(node.get_ref(), page);
     }
-    add_node(&file, &mut pages, catalog.pages.clone(), &mut 0);
+    add_tree(&file, &mut pages, &catalog.pages, &mut 0);
     
     let get_page_nr = |name: &str| -> usize {
         let rc = file.get(pages_map[name].page).unwrap();

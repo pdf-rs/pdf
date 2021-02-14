@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::io::Write;
 use crate::error::*;
 use crate::object::*;
 
@@ -43,6 +44,7 @@ impl XRef {
 
 
 /// Runtime lookup table of all objects
+#[derive(Clone)]
 pub struct XRefTable {
     // None means that it's not specified, and should result in an error if used
     // Thought: None could also mean Free?
@@ -59,11 +61,10 @@ impl XRefTable {
         }
     }
 
-    pub fn iter(&self) -> ObjectNrIter {
-        ObjectNrIter {
-            xref_table: self,
-            obj_nr: -1,
-        }
+    pub fn iter(&self) -> impl Iterator<Item=u32> + '_ {
+        self.entries.iter().enumerate()
+            .filter(|(_, xref)| matches!(xref, XRef::Raw { .. } | XRef::Stream { .. } ))
+            .map(|(i, _)| i as u32)
     }
 
     pub fn get(&self, id: ObjNr) -> Result<XRef> {
@@ -71,6 +72,9 @@ impl XRefTable {
             Some(&entry) => Ok(entry),
             None => Err(PdfError::UnspecifiedXRefEntry {id}),
         }
+    }
+    pub fn set(&mut self, id: ObjNr, r: XRef) {
+        self.entries[id as usize] = r;
     }
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -83,6 +87,24 @@ impl XRefTable {
     }
     pub fn num_entries(&self) -> usize {
         self.entries.len()
+    }
+    pub fn max_pos_and_gen(&self) -> (u64, GenNr) {
+        let mut max_pos = 0;
+        let mut max_gen = 0;
+        for &e in &self.entries {
+            match e {
+                XRef::Raw { pos, gen_nr } => {
+                    max_pos = max_pos.max(pos as u64);
+                    max_gen = max_gen.max(gen_nr);
+                }
+                XRef::Free { next_obj_nr, gen_nr } => {
+                    max_pos = max_pos.max(next_obj_nr);
+                    max_gen = max_gen.max(gen_nr);
+                }
+                _ => ()
+            }
+        }
+        (max_pos, max_gen)
     }
 
     pub fn add_entries_from(&mut self, section: XRefSection) {
@@ -101,6 +123,30 @@ impl XRefTable {
             }
         }
     }
+
+    pub fn write_old_format(&self, out: &mut Vec<u8>) {
+        for &x in self.entries.iter() {
+            let (n, g, f) = match x {
+                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr, 'f'),
+                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr, 'n'),
+                x => panic!("invalid xref entry: {:?}", x)
+            };
+            write!(out, "{:010x} {:05x} {} \n", n, g, f).unwrap();
+        }
+    }
+    /*
+    pub fn write_stream(&self) -> Vec<u8> {
+        let (max_pos, max_gen) = self.max_pos_and_gen();
+        let off_w = len_base16(max_pos);
+        let id_w = len_base16(self.len() as u64);
+        let gen_w = len_base16(max_gen as _);
+        unimplemented!()
+    }
+    */
+}
+
+fn len_base16(n: u64) -> u32 {
+    (67 - n.leading_zeros()) / 4 + (n == 0) as u32
 }
 
 impl Debug for XRefTable {
@@ -154,28 +200,6 @@ impl XRefSection {
     }
 }
 
-
-/// Iterates over the used object numbers in this xref table, skips the free objects.
-pub struct ObjectNrIter<'a> {
-    xref_table: &'a XRefTable,
-    obj_nr: i64,
-}
-
-impl<'a> Iterator for ObjectNrIter<'a> {
-    type Item = u32;
-    /// Item = (object number, xref entry)
-    fn next(&mut self) -> Option<u32> {
-        for (n, entry) in self.xref_table.entries.iter().enumerate().skip(self.obj_nr as usize) {
-            self.obj_nr += 1;
-            match *entry {
-                XRef::Raw { .. } | XRef::Stream { .. } => return Some(n as u32),
-                _ => {}
-            }
-        }
-        
-        None
-    }
-}
 
 // read_xref_table
 // read_xref_stream

@@ -1,11 +1,13 @@
 extern crate pdf;
 
-use std::env::args;
+use std::env;
+use std::path::PathBuf;
 
 use pdf::file::File;
 use pdf::object::*;
 use pdf::error::PdfError;
 use pdf::content::*;
+use pdf::build::*;
 
 macro_rules! ops {
     ($($name:ident $($arg:expr),* ;)*) => (
@@ -15,9 +17,11 @@ macro_rules! ops {
 
 
 fn main() -> Result<(), PdfError> {
-    let path = args().nth(1).expect("no file given");
+    let path = PathBuf::from(env::args_os().nth(1).expect("no file given"));
     
-    let file = File::<Vec<u8>>::open(&path).unwrap();
+    let mut file = File::<Vec<u8>>::open(&path).unwrap();
+
+    let mut pages = Vec::new();
     for page in file.pages().take(1) {
         let page = page.unwrap();
         if let Some(ref c) = page.contents {
@@ -33,23 +37,14 @@ fn main() -> Result<(), PdfError> {
                 S;
             ]
         };
-        let page2 = Page {
-            contents: Some(content),
-            media_box: Some(Rect {
-                top: 0.,
-                left: 0.,
-                bottom: 500.,
-                right: 500.
-            }),
-            crop_box: None,
-            trim_box: None,
-            parent: page.parent,
-            resources: None,
-        };
-
-        let mut pages = PagesNode::to_tree(&file.get_root().pages);
-        pages.add_page(page2);
+        pages.push(PageBuilder::from_content(content));
     }
+    let catalog = CatalogBuilder::from_pages(pages)
+        .build(&mut file).unwrap();
+    
+    file.update_catalog(catalog);
+
+    file.save_to(path.join(".modified.pdf"))?;
 
     Ok(())
 }

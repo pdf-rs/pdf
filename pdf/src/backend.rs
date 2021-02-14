@@ -111,18 +111,17 @@ impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
 /// by range syntax like `..`, `a..`, `..b` or `c..d`.
 pub trait IndexRange
 {
-    #[inline]
     /// Start index (inclusive)
-    fn start(&self) -> Option<usize> { None }
-    #[inline]
+    fn start(&self) -> Option<usize>;
+
     /// End index (exclusive)
-    fn end(&self) -> Option<usize> { None }
+    fn end(&self) -> Option<usize>;
 
     /// `len`: the size of whatever container that is being indexed
     fn to_range(&self, len: usize) -> Result<Range<usize>> {
         match (self.start(), self.end()) {
             (None, None) => Ok(0 .. len),
-            (Some(start), _) if start <= len => Ok(start .. len),
+            (Some(start), None) if start <= len => Ok(start .. len),
             (None, Some(end)) if end <= len => Ok(0 .. end),
             (Some(start), Some(end)) if start <= end && end <= len => Ok(start .. end),
             _ => Err(PdfError::ContentReadPastBoundary)
@@ -131,14 +130,24 @@ pub trait IndexRange
 }
 
 
-impl IndexRange for RangeFull {}
+impl IndexRange for RangeFull {
+    #[inline]
+    fn start(&self) -> Option<usize> { None }
+    #[inline]
+    fn end(&self) -> Option<usize> { None }
+
+}
 
 impl IndexRange for RangeFrom<usize> {
     #[inline]
     fn start(&self) -> Option<usize> { Some(self.start) }
+    #[inline]
+    fn end(&self) -> Option<usize> { None }
 }
 
 impl IndexRange for RangeTo<usize> {
+    #[inline]
+    fn start(&self) -> Option<usize> { None }
     #[inline]
     fn end(&self) -> Option<usize> { Some(self.end) }
 }

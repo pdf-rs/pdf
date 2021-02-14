@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::path::Path;
+use std::io::Write;
 
 use crate as pdf;
 use crate::error::*;
@@ -18,18 +19,17 @@ use crate::xref::{XRef, XRefTable};
 use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 
+#[must_use]
 pub struct PromisedRef<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
 }
-impl<'a, T> Into<PlainRef> for &'a PromisedRef<T> {
-    fn into(self) -> PlainRef {
+impl<T> PromisedRef<T> {
+    pub fn get_inner(&self) -> PlainRef {
         self.inner
     }
-}
-impl<'a, T> Into<Ref<T>> for &'a PromisedRef<T> {
-    fn into(self) -> Ref<T> {
-        Ref::new(self.into())
+    pub fn get_ref(&self) -> Ref<T> {
+        Ref::new(self.inner)
     }
 }
 
@@ -59,24 +59,6 @@ impl<B: Backend> Storage<B> {
             changes: HashMap::new(),
             decoder: None,
         }
-    }
-
-    pub fn promise<T: Object>(&mut self) -> PromisedRef<T> {
-        let id = self.refs.len() as u64;
-        
-        self.refs.push(XRef::Promised);
-        
-        PromisedRef {
-            inner: PlainRef {
-                id:     id,
-                gen:    0
-            },
-            _marker:    PhantomData
-        }
-    }
-    
-    pub fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
-        self.update(promise.inner, obj)
     }
 }
 impl<B: Backend> Resolve for Storage<B> {
@@ -141,6 +123,50 @@ impl<B: Backend> Updater for Storage<B> {
         
         Ok(RcRef::new(r, rc))
     }
+
+    fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        let id = self.refs.len() as u64;
+        
+        self.refs.push(XRef::Promised);
+        
+        PromisedRef {
+            inner: PlainRef {
+                id:     id,
+                gen:    0
+            },
+            _marker:    PhantomData
+        }
+    }
+    
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
+        self.update(promise.inner, obj)
+    }
+}
+
+impl Storage<Vec<u8>> {
+    pub fn save(&mut self, trailer: &Trailer) -> Result<&[u8]> {
+        let trailer = trailer.to_primitive(self)?;
+
+        let mut changes: Vec<_> = self.changes.iter().collect();
+        changes.sort_unstable_by_key(|&(id, _)| id);
+
+        for (&id, primitive) in changes.iter() {
+            let pos = self.backend.len();
+            self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
+            primitive.serialize(&mut self.backend)?;
+        }
+
+        let xref_pos = self.backend.len();
+        write!(self.backend, "xref\n{} {}\n", 0, self.refs.len()).unwrap();
+        self.refs.write_old_format(&mut self.backend);
+
+        write!(self.backend, "trailer\n").unwrap();
+        trailer.serialize(&mut self.backend).unwrap();
+
+        write!(self.backend, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
+
+        Ok(&self.backend)
+    }
 }
 
 pub fn load_storage_and_trailer<B: Backend>(backend: B) -> Result<(Storage<B>, Dictionary)> {
@@ -177,6 +203,7 @@ pub fn load_storage_and_trailer_password<B: Backend>(
 pub struct File<B: Backend> {
     storage:    Storage<B>,
     pub trailer:    Trailer,
+    pub version: u8,
 }
 impl<B: Backend> Resolve for File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
@@ -186,6 +213,21 @@ impl<B: Backend> Resolve for File<B> {
         self.storage.get(r)
     }
 }
+impl<B: Backend> Updater for File<B> {
+    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
+        self.storage.create(obj)
+    }
+    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
+        self.storage.update(old, obj)
+    }
+    fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        self.storage.promise()
+    }
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
+        self.storage.fulfill(promise, obj)
+    }
+}
+
 impl File<Vec<u8>> {
     /// Opens the file at `path` and uses Vec<u8> as backend.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -195,6 +237,11 @@ impl File<Vec<u8>> {
     /// Opens the file at `path`, with a password, and uses Vec<u8> as backend.
     pub fn open_password(path: impl AsRef<Path>, password: &[u8]) -> Result<Self> {
         Self::from_data_password(fs::read(path)?, password)
+    }
+
+    pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        std::fs::write(path, self.storage.save(&self.trailer)?)?;
+        Ok(())
     }
 }
 impl<B: Backend> File<B> {
@@ -207,12 +254,17 @@ impl<B: Backend> File<B> {
     }
 
     fn load_data(backend: B, password: &[u8]) -> Result<Self> {
+        let header: &[u8] = backend.read(0 .. 8)?;
+        if !(header[0 .. 7] == *b"%PDF-1." && (b'0' ..= b'7').contains(&header[7])) {
+            bail!("not a PDF");
+        }
+        let version = header[7] - b'0';
         let (storage, trailer) = load_storage_and_trailer_password(backend, password)?;
         let trailer = t!(Trailer::from_primitive(
             Primitive::Dictionary(trailer),
             &storage,
         ));
-        Ok(File { storage, trailer })
+        Ok(File { storage, trailer, version })
     }
 
     pub fn get_root(&self) -> &Catalog {
@@ -223,29 +275,21 @@ impl<B: Backend> File<B> {
         (0 .. self.num_pages()).map(move |n| self.get_page(n))
     }
     pub fn num_pages(&self) -> u32 {
-        match *self.trailer.root.pages {
-            PagesNode::Tree(ref tree) => tree.count,
-            PagesNode::Leaf(_) => 1
-        }
+        self.trailer.root.pages.count
     }
 
     pub fn get_page(&self, n: u32) -> Result<PageRc> {
-        match *self.trailer.root.pages {
-            PagesNode::Tree(ref tree) => {
-                tree.page(self, n)
-            }
-            PagesNode::Leaf(ref page) if n == 0 => Ok(page.clone()),
-            _ => Err(PdfError::PageOutOfBounds {page_nr: n, max: 1})
-        }
+        self.trailer.root.pages.page(self, n)
     }
 
     pub fn update_catalog(&mut self, catalog: Catalog) {
+        self.trailer.highest_id = self.storage.refs.len() as _;
         self.trailer.root = catalog;
     }
 }
 
     
-#[derive(Object)]
+#[derive(Object, ObjectWrite)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,
@@ -257,7 +301,7 @@ pub struct Trailer {
     pub root:               Catalog,
 
     #[pdf(key = "Encrypt")]
-    pub encrypt_dict:       Option<CryptDict>,
+    pub encrypt_dict:       Option<RcRef<CryptDict>>,
 
     #[pdf(key = "Info")]
     pub info_dict:          Option<Dictionary>,

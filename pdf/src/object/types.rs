@@ -12,8 +12,8 @@ use crate::font::Font;
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug)]
 pub enum PagesNode {
-    Tree(RcRef<PageTree>),
-    Leaf(RcRef<Page>),
+    Tree(MaybeRef<PageTree>),
+    Leaf(MaybeRef<Page>),
 }
 impl PagesNode {
     pub fn to_tree(node: &RcRef<PagesNode>) -> PageTree {
@@ -33,13 +33,24 @@ impl PagesNode {
 
 impl Object for PagesNode {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PagesNode> {
-        let r = p.into_reference()?;
-        let mut dict: Dictionary = resolve.resolve(r)?.into_dictionary(resolve)?;
-        
-        match dict.require("PagesNode", "Type")?.as_name()? {
-            "Page" => Ok(PagesNode::Leaf(RcRef::new(r, Rc::new(Page::from_dict(dict, resolve)?)))),
-            "Pages" => Ok(PagesNode::Tree(RcRef::new(r, Rc::new(PageTree::from_dict(dict, resolve)?)))),
-            other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
+        match p {
+            Primitive::Reference(r) => {
+                let mut dict: Dictionary = t!(resolve.resolve(r)).into_dictionary(resolve)?;
+                
+                match dict.require("PagesNode", "Type")?.as_name()? {
+                    "Page" => Ok(PagesNode::Leaf(RcRef::new(r, Rc::new(t!(Page::from_dict(dict, resolve)))).into())),
+                    "Pages" => Ok(PagesNode::Tree(RcRef::new(r, Rc::new(t!(PageTree::from_dict(dict, resolve)))).into())),
+                    other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
+                }
+            }
+            Primitive::Dictionary(mut dict) => {
+                match dict.require("PagesNode", "Type")?.as_name()? {
+                    "Page" => Ok(PagesNode::Leaf(Rc::new(t!(Page::from_dict(dict, resolve))).into())),
+                    "Pages" => Ok(PagesNode::Tree(Rc::new(t!(PageTree::from_dict(dict, resolve))).into())),
+                    other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
+                }
+            }
+            p => Err(PdfError::UnexpectedPrimitive { expected: "Reference or Dictionary", found: p.get_debug_name() })
         }
     }
 }
@@ -51,6 +62,7 @@ impl ObjectWrite for PagesNode {
         }
     }
 }
+
 /*
 use std::iter::once;
 use itertools::Either;
@@ -65,18 +77,18 @@ impl PagesNode {
 }
 */
 
-pub type PageRc = RcRef<Page>;
+pub type PageRc = MaybeRef<Page>;
 
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: RcRef<PagesNode>,
+    pub pages: MaybeRef<PageTree>,
 
 // PageLabels: number_tree,
     #[pdf(key="Names")]
-    pub names: Option<NameDictionary>,
+    pub names: Option<RcRef<NameDictionary>>,
     
     #[pdf(key="Dests")]
     pub dests: Option<Ref<Dictionary>>,
@@ -115,14 +127,14 @@ pub struct Catalog {
 #[pdf(Type = "Pages")]
 pub struct PageTree {
     #[pdf(key="Parent")]
-    pub parent: Option<RcRef<PagesNode>>,
+    pub parent: Option<RcRef<PageTree>>,
     #[pdf(key="Kids")]
     pub kids:   Vec<Ref<PagesNode>>,
     #[pdf(key="Count")]
     pub count:  u32,
 
     #[pdf(key="Resources")]
-    pub resources: Option<Ref<Resources>>,
+    pub resources: Option<RcRef<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -190,14 +202,15 @@ impl PageTree {
     }
     */
 }
+impl SubType<PagesNode> for PageTree {}
 
 #[derive(Object, ObjectWrite, Debug)]
 pub struct Page {
     #[pdf(key="Parent")]
-    pub parent: RcRef<PagesNode>,
+    pub parent: RcRef<PageTree>,
 
     #[pdf(key="Resources")]
-    pub resources: Option<Ref<Resources>>,
+    pub resources: Option<RcRef<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -211,22 +224,21 @@ pub struct Page {
     #[pdf(key="Contents")]
     pub contents:   Option<Content>
 }
-fn inherit<T, F>(mut parent: &PagesNode, f: F) -> Result<Option<T>>
+fn inherit<T, F>(mut parent: &PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&PageTree) -> Option<T>
 {
-    while let PagesNode::Tree(ref page_tree) = *parent {
-        debug!("parent: {:?}", page_tree);
-        match (&page_tree.parent, f(&page_tree)) {
+    loop {
+        debug!("parent: {:?}", parent);
+        match (&parent.parent, f(&parent)) {
             (_, Some(t)) => return Ok(Some(t)),
             (Some(ref p), None) => parent = p,
             (None, None) => return Ok(None)
         }
     }
-    bail!("bad parent")
 }
 
 impl Page {
-    pub fn new(parent: RcRef<PagesNode>) -> Page {
+    pub fn new(parent: RcRef<PageTree>) -> Page {
         Page {
             parent,
             media_box:  None,
@@ -252,7 +264,7 @@ impl Page {
             }
         }
     }
-    pub fn resources(&self) -> Result<Ref<Resources>> {
+    pub fn resources(&self) -> Result<RcRef<Resources>> {
         match self.resources {
             Some(ref r) => Ok(r.clone()),
             None => inherit(&*self.parent, |pt| pt.resources.clone())?
@@ -260,6 +272,7 @@ impl Page {
         }
     }
 }
+impl SubType<PagesNode> for Page {}
 
 #[derive(Object)]
 pub struct PageLabel {
@@ -273,7 +286,7 @@ pub struct PageLabel {
     start:  Option<usize>
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<String, GraphicsStateParameters>,
@@ -299,20 +312,20 @@ impl Resources {
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2
 }
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
     Bevel = 2
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
@@ -498,7 +511,7 @@ impl<T: Object> NameTree<T> {
 
 impl<T: Object> Object for NameTree<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut dict = p.into_dictionary(resolve)?;
+        let mut dict = t!(p.into_dictionary(resolve));
         
         // Quite long function..=
         let limits = match dict.remove("Limits") {
@@ -513,7 +526,6 @@ impl<T: Object> Object for NameTree<T> {
                 Some((min, max))
             }
             None => None
-
         };
 
         let kids = dict.remove("Kids");
@@ -521,9 +533,9 @@ impl<T: Object> Object for NameTree<T> {
         // If no `kids`, try `names`. Else there is an error.
         Ok(match (kids, names) {
             (Some(kids), _) => {
-                let kids = kids.into_array(resolve)?.iter().map(|kid|
+                let kids = t!(kids.into_array(resolve)?.iter().map(|kid|
                     Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
-                ).collect::<Result<Vec<_>>>()?;
+                ).collect::<Result<Vec<_>>>());
                 NameTree {
                     limits,
                     node: NameTreeNode::Intermediate (kids)
@@ -534,7 +546,7 @@ impl<T: Object> Object for NameTree<T> {
                 let mut new_names = Vec::new();
                 for pair in names.chunks(2) {
                     let name = pair[0].clone().into_string()?;
-                    let value = T::from_primitive(pair[1].clone(), resolve)?;
+                    let value = t!(T::from_primitive(pair[1].clone(), resolve));
                     new_names.push((name, value));
                 }
                 NameTree {
@@ -561,7 +573,7 @@ pub enum DestView {
 
 #[derive(Debug, Clone)]
 pub struct Dest {
-    pub page: Ref<PagesNode>,
+    pub page: Ref<Page>,
     pub view: DestView
 }
 impl Object for Dest {
@@ -754,7 +766,7 @@ pub struct OutlineItem {
     pub flags: Option<i32>,
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 #[pdf(Type="Outlines?")]
 pub struct Outlines {
     #[pdf(key="Count", default="0")]
@@ -798,7 +810,7 @@ impl ObjectWrite for Rect {
 
 // Stuff from chapter 10 of the PDF 1.7 ref
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub struct MarkInformation { // TODO no /Type
     /// indicating whether the document conforms to Tagged PDF conventions
     #[pdf(key="Marked", default="false")]
@@ -811,13 +823,13 @@ pub struct MarkInformation { // TODO no /Type
     pub suspects: bool,
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 #[pdf(Type = "StructTreeRoot")]
 pub struct StructTreeRoot {
     #[pdf(key="K")]
     pub children: Vec<StructElem>,
 }
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub struct StructElem {
     #[pdf(key="S")]
     struct_type: StructType,
@@ -833,7 +845,7 @@ pub struct StructElem {
     page: Option<Ref<Page>>,
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub enum StructType {
     Document,
     Part,

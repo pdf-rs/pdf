@@ -11,6 +11,7 @@ pub use self::types::*;
 pub use self::stream::*;
 pub use self::color::*;
 pub use self::function::*;
+pub use crate::file::PromisedRef;
 
 use crate::primitive::*;
 use crate::error::*;
@@ -18,7 +19,7 @@ use crate::enc::*;
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::rc::Rc;
 use std::ops::Deref;
 
@@ -53,12 +54,16 @@ pub trait Object: Sized + 'static {
 pub trait Updater {
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>>;
     fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>>;
+    fn promise<T: Object>(&mut self) -> PromisedRef<T>;
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>>;
 }
 
 pub trait ObjectWrite {
     /// Write object as a byte stream
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive>;
 }
+
+pub trait SubType<T> {}
 
 ///////
 // Refs
@@ -114,6 +119,9 @@ impl<T> Ref<T> {
     pub fn get_inner(&self) -> PlainRef {
         self.inner
     }
+    pub fn upcast<U>(self) -> Ref<U> where T: SubType<U> {
+        Ref::new(self.inner)
+    }
 }
 impl<T: Object> Object for Ref<T> {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
@@ -153,7 +161,7 @@ impl<T: Object + std::fmt::Debug> Object for RcRef<T> {
         }
     }
 }
-impl<T: ObjectWrite> ObjectWrite for RcRef<T> {
+impl<T> ObjectWrite for RcRef<T> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         self.inner.to_primitive(update)
     }
@@ -214,6 +222,16 @@ impl<T> Clone for MaybeRef<T> {
             MaybeRef::Direct(ref rc) => MaybeRef::Direct(rc.clone()),
             MaybeRef::Indirect(ref r) => MaybeRef::Indirect(r.clone())
         }
+    }
+}
+impl<T> From<Rc<T>> for MaybeRef<T> {
+    fn from(r: Rc<T>) -> MaybeRef<T> {
+        MaybeRef::Direct(r)
+    }
+}
+impl<T> From<RcRef<T>> for MaybeRef<T> {
+    fn from(r: RcRef<T>) -> MaybeRef<T> {
+        MaybeRef::Indirect(r)
     }
 }
  
@@ -383,6 +401,20 @@ impl<V: Object> Object for HashMap<String, V> {
         }
     }
 }
+impl<V: ObjectWrite> ObjectWrite for HashMap<String, V> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        if self.len() == 0 {
+            Ok(Primitive::Null)
+        } else {
+            let mut dict = BTreeMap::new();
+            for (k, v) in self.iter() {
+                dict.insert(k.into(), v.to_primitive(update)?);
+            }
+            Ok(Primitive::Dictionary(Dictionary { dict }))
+        }
+    }
+}
+
 
 impl<T: Object> Object for Option<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
