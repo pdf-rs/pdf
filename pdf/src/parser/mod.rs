@@ -77,7 +77,13 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
 
     // decrypt it
     if let Some(ctx) = ctx {
-        data = t!(ctx.decrypt(&mut data)).to_vec();
+        data = match ctx.decrypt(&mut data) {
+            Ok(data) => data.to_vec(),
+            Err(err) => {
+                log::error!("Could not decrypt data: {:?}", err);
+                Vec::new()
+            },
+        };
     }
 
     Ok(PdfStream {
