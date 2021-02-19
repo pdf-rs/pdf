@@ -92,8 +92,8 @@ impl<I: Object + fmt::Debug> Object for Stream<I> {
         Stream::from_stream(s, resolve)
     }
 }
-impl<I: ObjectWrite> ObjectWrite for Stream<I> {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+impl<I: ObjectWrite> Stream<I> {
+    pub fn to_pdf_stream(&self, update: &mut impl Updater) -> Result<PdfStream> {
         let mut info = match self.info.info.to_primitive(update)? {
             Primitive::Dictionary(dict) => dict,
             Primitive::Null => Dictionary::new(),
@@ -140,10 +140,15 @@ impl<I: ObjectWrite> ObjectWrite for Stream<I> {
         }
         info.insert("Length", Primitive::Integer(self.raw_data.len() as _));
 
-        Ok(Primitive::Stream(PdfStream {
+        Ok(PdfStream {
             info,
             data: self.raw_data.clone()
-        }))
+        })
+    }
+}
+impl<I: ObjectWrite> ObjectWrite for Stream<I> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.to_pdf_stream(update).map(Primitive::Stream)
     }
 }
 

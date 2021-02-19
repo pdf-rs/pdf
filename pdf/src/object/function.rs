@@ -54,7 +54,7 @@ impl Function {
         }
     }
 }
-impl Object for Function {
+impl FromDict for Function {
     fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
         use std::f32::INFINITY;
         let raw = RawFunction::from_dict(dict, resolve)?;
@@ -90,6 +90,8 @@ impl Object for Function {
             }
         }
     }
+}
+impl Object for Function {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),

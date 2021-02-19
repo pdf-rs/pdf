@@ -148,7 +148,7 @@ impl Storage<Vec<u8>> {
         let xref_promise = self.promise::<Stream<XRefInfo>>();
 
         trailer.highest_id = self.refs.len() as _;
-        let trailer = trailer.to_primitive(self)?;
+        let trailer = trailer.to_dict(self)?;
 
         let mut changes: Vec<_> = self.changes.iter().collect();
         changes.sort_unstable_by_key(|&(id, _)| id);
@@ -167,13 +167,15 @@ impl Storage<Vec<u8>> {
         let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
 
         write!(&mut self.backend, "{} {} obj\n", xref_promise.get_inner().id, 0)?;
-        stream.to_primitive(&mut NoUpdate)?.serialize(&mut self.backend, 0)?;
+        let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
+        for (k, v) in trailer.into_iter() {
+            xref_and_trailer.info.insert(k, v);
+        }
+
+        xref_and_trailer.serialize(&mut self.backend)?;
         write!(self.backend, "endobj\n")?;
 
         let _ = self.fulfill(xref_promise, stream)?;
-
-        write!(self.backend, "trailer\n").unwrap();
-        trailer.serialize(&mut self.backend, 0).unwrap();
 
         write!(self.backend, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
 

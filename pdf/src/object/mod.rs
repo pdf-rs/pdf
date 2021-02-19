@@ -46,10 +46,6 @@ impl Resolve for NoResolve {
 pub trait Object: Sized + 'static {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
-    
-    fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
-        Self::from_primitive(Primitive::Dictionary(dict), resolve)
-    }
 }
 
 pub trait Updater {
@@ -68,8 +64,14 @@ impl Updater for NoUpdate {
 }
 
 pub trait ObjectWrite {
-    /// Write object as a byte stream
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive>;
+}
+
+pub trait FromDict: Sized {
+    fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self>;
+}
+pub trait ToDict: ObjectWrite {
+    fn to_dict(&self, update: &mut impl Updater) -> Result<Dictionary>;
 }
 
 pub trait SubType<T> {}

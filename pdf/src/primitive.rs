@@ -208,6 +208,13 @@ impl<'a> Index<&'a str> for Dictionary {
         self.dict.index(idx)
     }
 }
+impl IntoIterator for Dictionary {
+    type Item = (String, Primitive);
+    type IntoIter = btree_map::IntoIter<String, Primitive>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.dict.into_iter()
+    }
+}
 impl<'a> IntoIterator for &'a Dictionary {
     type Item = (&'a String, &'a Primitive);
     type IntoIter = btree_map::Iter<'a, String, Primitive>;
@@ -232,7 +239,7 @@ impl Object for PdfStream {
     }
 }
 impl PdfStream {
-    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         self.info.serialize(out, 0)?;
         
         writeln!(out, "stream")?;
@@ -287,7 +294,7 @@ impl ObjectWrite for PdfString {
 }
 
 impl PdfString {
-    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         if self.data.iter().any(|&b| b >= 0x80) {
             write!(out, "<")?;
             for &b in &self.data {
