@@ -3,7 +3,7 @@ use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::parser::Lexer;
-use crate::enc::decode;
+use crate::enc::{self, decode};
 
 use once_cell::unsync::OnceCell;
 
@@ -71,6 +71,12 @@ impl<I: Object + fmt::Debug> Stream<I> {
             _ => None
         }
     }
+
+    pub fn hexencode(mut self) -> Self {
+        self.raw_data = enc::encode_hex(&self.raw_data);
+        self.info.filters.push(StreamFilter::ASCIIHexDecode);
+        self
+    }
 }
 
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
@@ -86,9 +92,13 @@ impl<I: Object + fmt::Debug> Object for Stream<I> {
         Stream::from_stream(s, resolve)
     }
 }
-impl<I> ObjectWrite for Stream<I> {
+impl<I: ObjectWrite> ObjectWrite for Stream<I> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        let mut info = Dictionary::new();
+        let mut info = match self.info.info.to_primitive(update)? {
+            Primitive::Dictionary(dict) => dict,
+            Primitive::Null => Dictionary::new(),
+            p => bail!("stream info has to be a dictionary (found {:?})", p)
+        };
         let mut params = None;
         if self.info.filters.len() > 0 {
             for f in self.info.filters.iter() {
@@ -104,7 +114,7 @@ impl<I> ObjectWrite for Stream<I> {
                     params = Some(para);
                 }
             }
-            let filters = self.info.filters.iter().map(|filter| match filter {
+            let mut filters = self.info.filters.iter().map(|filter| match filter {
                 StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
                 StreamFilter::ASCII85Decode => "ASCII85Decode",
                 StreamFilter::LZWDecode(ref p) => "LZWDecode",
@@ -115,7 +125,15 @@ impl<I> ObjectWrite for Stream<I> {
                 StreamFilter::Crypt => "Crypt",
             })
             .map(|s| Primitive::Name(s.into()));
-            info.insert("Filters", Primitive::array::<Primitive, _, _, _>(filters, update)?);
+            match self.info.filters.len() {
+                0 => {},
+                1 => {
+                    info.insert("Filter", filters.next().unwrap().to_primitive(update)?);
+                }
+                _ => {
+                    info.insert("Filter", Primitive::array::<Primitive, _, _, _>(filters, update)?);
+                }
+            }
         }
         if let Some(para) = params {
             info.insert("DecodeParms", para);

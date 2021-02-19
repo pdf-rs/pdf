@@ -89,7 +89,7 @@ fn decode_nibble(c: u8) -> Option<u8> {
 fn encode_nibble(c: u8) -> u8 {
     match c {
         0 ..= 9 => b'0'+ c,
-        10 ..= 15 => b'a'+ c,
+        10 ..= 15 => b'a' - 10 + c,
         _ => unreachable!()
     }
 }

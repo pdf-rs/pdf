@@ -573,23 +573,20 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
     );
     let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
         quote! {
-            dict.insert(#key, Primitive::Name(#val.into()));
+            dict.insert(#key, pdf::primitive::Primitive::Name(#val.into()));
         }
     );
-    let pdf_type = match attrs.type_name {
-        Some(ref ty) => quote! {
-            dict.insert("Type", Primitive::Name(#ty.into()));
-        },
-        None => quote! {}
-    };
+    let pdf_type: String = attrs.type_name.clone()
+        .unwrap_or_else(|| id.to_string());
+
     quote! {
         impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
-            fn to_primitive(&self, updater: &mut impl pdf::object::Updater) -> Result<Primitive> {
-                let mut dict = Dictionary::new();
-                #pdf_type
+            fn to_primitive(&self, updater: &mut impl pdf::object::Updater) -> Result<pdf::primitive::Primitive> {
+                let mut dict = pdf::primitive::Dictionary::new();
+                dict.insert("Type", pdf::primitive::Primitive::Name(#pdf_type.into()));
                 #( #checks_code )*
                 #(#fields_ser)*
-                Ok(Primitive::Dictionary(dict))
+                Ok(pdf::primitive::Primitive::Dictionary(dict))
             }
         }
     }

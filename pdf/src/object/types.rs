@@ -106,7 +106,7 @@ pub struct Catalog {
 // AcroForm: dict
 // Metadata: stream
     #[pdf(key="Metadata")]
-    pub metadata: Option<Stream>,
+    pub metadata: Option<Ref<Stream>>,
 
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
@@ -124,7 +124,7 @@ pub struct Catalog {
 }
 
 #[derive(Object, ObjectWrite, Debug, Default, Clone)]
-#[pdf(Type = "Pages")]
+#[pdf(Type = "Pages?")]
 pub struct PageTree {
     #[pdf(key="Parent")]
     pub parent: Option<RcRef<PageTree>>,

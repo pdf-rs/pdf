@@ -15,7 +15,7 @@ use crate::backend::Backend;
 use crate::any::{Any};
 use crate::parser::Lexer;
 use crate::parser::{parse_indirect_object, parse};
-use crate::xref::{XRef, XRefTable};
+use crate::xref::{XRef, XRefTable, XRefInfo};
 use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 
@@ -144,7 +144,10 @@ impl<B: Backend> Updater for Storage<B> {
 }
 
 impl Storage<Vec<u8>> {
-    pub fn save(&mut self, trailer: &Trailer) -> Result<&[u8]> {
+    pub fn save(&mut self, trailer: &mut Trailer) -> Result<&[u8]> {
+        let xref_promise = self.promise::<Stream<XRefInfo>>();
+
+        trailer.highest_id = self.refs.len() as _;
         let trailer = trailer.to_primitive(self)?;
 
         let mut changes: Vec<_> = self.changes.iter().collect();
@@ -153,15 +156,24 @@ impl Storage<Vec<u8>> {
         for (&id, primitive) in changes.iter() {
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
-            primitive.serialize(&mut self.backend)?;
+            write!(&mut self.backend, "{} {} obj\n", id, 0)?;
+            primitive.serialize(&mut self.backend, 0)?;
+            write!(self.backend, "endobj\n")?;
         }
 
         let xref_pos = self.backend.len();
-        write!(self.backend, "xref\n{} {}\n", 0, self.refs.len()).unwrap();
-        self.refs.write_old_format(&mut self.backend);
+
+        // only write up to the xref stream obj id
+        let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
+
+        write!(&mut self.backend, "{} {} obj\n", xref_promise.get_inner().id, 0)?;
+        stream.to_primitive(&mut NoUpdate)?.serialize(&mut self.backend, 0)?;
+        write!(self.backend, "endobj\n")?;
+
+        let _ = self.fulfill(xref_promise, stream)?;
 
         write!(self.backend, "trailer\n").unwrap();
-        trailer.serialize(&mut self.backend).unwrap();
+        trailer.serialize(&mut self.backend, 0).unwrap();
 
         write!(self.backend, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
 
@@ -203,7 +215,6 @@ pub fn load_storage_and_trailer_password<B: Backend>(
 pub struct File<B: Backend> {
     storage:    Storage<B>,
     pub trailer:    Trailer,
-    pub version: u8,
 }
 impl<B: Backend> Resolve for File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
@@ -240,7 +251,7 @@ impl File<Vec<u8>> {
     }
 
     pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        std::fs::write(path, self.storage.save(&self.trailer)?)?;
+        std::fs::write(path, self.storage.save(&mut self.trailer)?)?;
         Ok(())
     }
 }
@@ -254,17 +265,13 @@ impl<B: Backend> File<B> {
     }
 
     fn load_data(backend: B, password: &[u8]) -> Result<Self> {
-        let header: &[u8] = backend.read(0 .. 8)?;
-        if !(header[0 .. 7] == *b"%PDF-1." && (b'0' ..= b'7').contains(&header[7])) {
-            bail!("not a PDF");
-        }
-        let version = header[7] - b'0';
         let (storage, trailer) = load_storage_and_trailer_password(backend, password)?;
+        dbg!(&trailer);
         let trailer = t!(Trailer::from_primitive(
             Primitive::Dictionary(trailer),
             &storage,
         ));
-        Ok(File { storage, trailer, version })
+        Ok(File { storage, trailer })
     }
 
     pub fn get_root(&self) -> &Catalog {
@@ -282,9 +289,9 @@ impl<B: Backend> File<B> {
         self.trailer.root.pages.page(self, n)
     }
 
-    pub fn update_catalog(&mut self, catalog: Catalog) {
-        self.trailer.highest_id = self.storage.refs.len() as _;
-        self.trailer.root = catalog;
+    pub fn update_catalog(&mut self, catalog: Catalog) -> Result<()> {
+        self.trailer.root = self.create(catalog)?;
+        Ok(())
     }
 }
 
@@ -298,7 +305,7 @@ pub struct Trailer {
     pub prev_trailer_pos:   Option<i32>,
 
     #[pdf(key = "Root")]
-    pub root:               Catalog,
+    pub root:               RcRef<Catalog>,
 
     #[pdf(key = "Encrypt")]
     pub encrypt_dict:       Option<RcRef<CryptDict>>,
@@ -308,26 +315,6 @@ pub struct Trailer {
 
     #[pdf(key = "ID")]
     pub id:                 Vec<PdfString>,
-}
-
-#[derive(Object, Debug)]
-#[pdf(Type = "XRef")]
-pub struct XRefInfo {
-    // XRefStream fields
-    #[pdf(key = "Size")]
-    pub size: i32,
-
-    //
-    #[pdf(key = "Index", default = "vec![0, size]")]
-    /// Array of pairs of integers for each subsection, (first object number, number of entries).
-    /// Default value (assumed when None): `(0, self.size)`.
-    pub index: Vec<i32>,
-
-    #[pdf(key = "Prev")]
-    prev: Option<i32>,
-
-    #[pdf(key = "W")]
-    pub w: Vec<i32>
 }
 
 /*

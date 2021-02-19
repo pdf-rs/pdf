@@ -100,14 +100,12 @@ impl ObjectWrite for Content {
         
         let mut data: Vec<u8> = Vec::new();
         for op in &self.operations {
-            if op.operands.len() == 0 {
-                writeln!(data, "{}", op.operator)?;
-            } else {
-                for arg in &op.operands {
-                    data.push(b' ');
-                    arg.serialize(&mut data)?;
-                }
+            for arg in &op.operands {
+                arg.serialize(&mut data, 0)?;
+                data.push(b' ');
             }
+            data.extend_from_slice(op.operator.as_bytes());
+            data.push(b'\n');
         }
         Stream::new((), data).to_primitive(update)
     }
