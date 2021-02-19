@@ -142,7 +142,7 @@ fn main() -> Result<(), PdfError> {
     let mut out = String::new();
     for page in file.pages() {
         let page = page?;
-        let resources = file.get(page.resources()?)?;
+        let resources = page.resources.as_ref().unwrap();
         let mut cache = Cache::new();
         
         // make sure all fonts are in the cache, so we can reference them
