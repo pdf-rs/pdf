@@ -134,14 +134,35 @@ pub struct Decoder {
     /// object. The strings in this dictionary are not encrypted, so
     /// decryption must be skipped when accessing them.
     pub(crate) encrypt_indirect_object: Option<PlainRef>,
+    /// A reference to the /Metadata dictionary, if it is an indirect
+    /// object. If /EncryptMedata is set to false in the /Encrypt dictionary,
+    /// then the strings in the /Metadata dictionary are not encrypted, so
+    /// decryption must be skipped when accessing them.
+    pub(crate) metadata_indirect_object: Option<PlainRef>,
+    /// Whether the metadata is encrypted, as indicated by /EncryptMetadata
+    /// in the /Encrypt dictionary.
+    encrypt_metadata: bool,
 }
 impl Decoder {
     pub fn default(dict: &CryptDict, id: &[u8]) -> Result<Decoder> {
         Decoder::from_password(dict, id, b"")
     }
+
     fn key(&self) -> &[u8] {
         &self.key[.. self.key_size]
     }
+
+    pub fn new(key: [u8; 32], key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
+        Decoder {
+            key_size,
+            key,
+            method,
+            encrypt_indirect_object: None,
+            metadata_indirect_object: None,
+            encrypt_metadata,
+        }
+    }
+
     pub fn from_password(dict: &CryptDict, id: &[u8], pass: &[u8]) -> Result<Decoder> {
         fn compute_u_rev_2(key: &[u8]) -> Vec<u8> {
             // algorithm 4
@@ -227,10 +248,6 @@ impl Decoder {
                 hash.consume([0xff, 0xff, 0xff, 0xff]);
             }
 
-            if !dict.encrypt_metadata {
-                warn!("metadata not encrypted. this is not implemented yet!");
-            }
-
             // g)
             let mut data = *hash.compute();
 
@@ -301,12 +318,7 @@ impl Decoder {
             let key = key_derivation_user_password_rc4(level, key_size, dict, id, pass);
 
             if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size]) {
-                let decoder = Decoder {
-                    key,
-                    key_size,
-                    method,
-                    encrypt_indirect_object: None,
-                };
+                let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
                 Ok(decoder)
             } else {
                 let password_wrap_key = key_derivation_owner_password_rc4(level, key_size, pass);
@@ -330,12 +342,7 @@ impl Decoder {
                 );
 
                 if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size]) {
-                    let decoder = Decoder {
-                        key,
-                        key_size,
-                        method,
-                        encrypt_indirect_object: None,
-                    };
+                    let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
                     Ok(decoder)
                 } else {
                     Err(PdfError::InvalidPassword)
@@ -448,12 +455,7 @@ impl Decoder {
             let mut key = [0u8; 32];
             key.copy_from_slice(key_slice);
 
-            let decoder = Decoder {
-                key,
-                key_size: 32,
-                method,
-                encrypt_indirect_object: None,
-            };
+            let decoder = Decoder::new(key,  32, method, dict.encrypt_metadata);
             Ok(decoder)
         } else {
             err!(format!("unsupported V value {}", level).into())
@@ -528,6 +530,12 @@ impl Decoder {
     pub fn decrypt<'buf>(&self, id: u64, gen: u16, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
         if self.encrypt_indirect_object == Some(PlainRef { id, gen }) {
             // Strings inside the /Encrypt dictionary are not encrypted
+            return Ok(data);
+        }
+
+        if !self.encrypt_metadata && self.metadata_indirect_object == Some(PlainRef { id, gen }) {
+            // Strings inside the /Metadata dictionary are not encrypted when /EncryptMetadata is
+            // false
             return Ok(data);
         }
 

@@ -126,6 +126,12 @@ pub fn load_storage_and_trailer_password<B: Backend>(
         if let Primitive::Reference(reference) = crypt {
             storage.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
         }
+        if let Some(Primitive::Reference(catalog_ref)) = trailer.get("Root") {
+            let catalog = t!(t!(storage.resolve(*catalog_ref)).into_dictionary(&storage));
+            if let Some(Primitive::Reference(metadata_ref)) = catalog.get("Metadata") {
+                storage.decoder.as_mut().unwrap().metadata_indirect_object = Some(*metadata_ref);
+            }
+        }
     }
     Ok((storage, trailer))
 }
