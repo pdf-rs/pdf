@@ -134,7 +134,7 @@ pub struct PageTree {
     pub count:  u32,
 
     #[pdf(key="Resources")]
-    pub resources: Option<RcRef<Resources>>,
+    pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -210,7 +210,7 @@ pub struct Page {
     pub parent: RcRef<PageTree>,
 
     #[pdf(key="Resources")]
-    pub resources: Option<RcRef<Resources>>,
+    pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
     pub media_box:  Option<Rect>,
@@ -224,8 +224,8 @@ pub struct Page {
     #[pdf(key="Contents")]
     pub contents:   Option<Content>
 }
-fn inherit<T, F>(mut parent: &PageTree, f: F) -> Result<Option<T>>
-    where F: Fn(&PageTree) -> Option<T>
+fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
+    where F: Fn(&'a PageTree) -> Option<T>
 {
     loop {
         debug!("parent: {:?}", parent);
@@ -264,10 +264,10 @@ impl Page {
             }
         }
     }
-    pub fn resources(&self) -> Result<RcRef<Resources>> {
+    pub fn resources(&self) -> Result<&MaybeRef<Resources>> {
         match self.resources {
-            Some(ref r) => Ok(r.clone()),
-            None => inherit(&*self.parent, |pt| pt.resources.clone())?
+            Some(ref r) => Ok(r),
+            None => inherit(&*self.parent, |pt| pt.resources.as_ref())?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
@@ -303,7 +303,7 @@ pub struct Resources {
     pub fonts: HashMap<String, Ref<Font>>,
 
     #[pdf(key="Properties")]
-    pub properties: HashMap<String, Ref<Dictionary>>,
+    pub properties: HashMap<String, RcRef<Dictionary>>,
 }
 impl Resources {
     pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {

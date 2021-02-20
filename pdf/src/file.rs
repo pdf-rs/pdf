@@ -259,7 +259,7 @@ impl File<Vec<u8>> {
 }
 impl<B: Backend> File<B> {
     pub fn from_data_password(backend: B, password: &[u8]) -> Result<Self> {
-        Self::load_data(backend, password).map_err(|e| dbg!(e))
+        Self::load_data(backend, password)
     }
 
     pub fn from_data(backend: B) -> Result<Self> {
@@ -268,7 +268,6 @@ impl<B: Backend> File<B> {
 
     fn load_data(backend: B, password: &[u8]) -> Result<Self> {
         let (storage, trailer) = load_storage_and_trailer_password(backend, password)?;
-        dbg!(&trailer);
         let trailer = t!(Trailer::from_primitive(
             Primitive::Dictionary(trailer),
             &storage,

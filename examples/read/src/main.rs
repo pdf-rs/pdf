@@ -35,7 +35,8 @@ fn main() -> Result<(), PdfError> {
     let mut fonts = HashMap::new();
     
     for page in file.pages() {
-        let resources = page.unwrap().resources().unwrap();
+        let page = page.unwrap();
+        let resources = page.resources().unwrap();
         for &font in resources.fonts.values() {
             let font = file.get(font)?;
             fonts.insert(font.name.clone(), font.clone());

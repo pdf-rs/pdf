@@ -269,6 +269,22 @@ impl<T> From<Rc<T>> for MaybeRef<T> {
         MaybeRef::Direct(r)
     }
 }
+impl<T> From<MaybeRef<T>> for Rc<T> {
+    fn from(r: MaybeRef<T>) -> Rc<T> {
+        match r {
+            MaybeRef::Direct(rc) => rc,
+            MaybeRef::Indirect(r) => r.data
+        }
+    }
+}
+impl<'a, T> From<&'a MaybeRef<T>> for Rc<T> {
+    fn from(r: &'a MaybeRef<T>) -> Rc<T> {
+        match r {
+            MaybeRef::Direct(ref rc) => rc.clone(),
+            MaybeRef::Indirect(ref r) => r.data.clone()
+        }
+    }
+}
 impl<T> From<RcRef<T>> for MaybeRef<T> {
     fn from(r: RcRef<T>) -> MaybeRef<T> {
         MaybeRef::Indirect(r)
