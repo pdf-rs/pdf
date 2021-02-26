@@ -275,6 +275,10 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
             }
         }
         Sub => {
+            for i in 0..bpp {
+                out[i] = inp[i];
+            }
+
             for i in bpp..len {
                 out[i] = inp[i].wrapping_add(out[i - bpp]);
             }
