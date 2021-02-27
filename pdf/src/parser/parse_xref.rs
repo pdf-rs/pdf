@@ -1,7 +1,6 @@
 use crate::error::*;
 use crate::parser::lexer::Lexer;
-use crate::xref::{XRef, XRefSection};
-use crate::file::XRefInfo;
+use crate::xref::{XRef, XRefSection, XRefInfo};
 use crate::primitive::{Primitive, Dictionary};
 use crate::object::*;
 use crate::parser::{parse_with_lexer};
@@ -37,11 +36,11 @@ fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32]
 /// Helper to read an integer with a certain amount of bits `width` from stream.
 fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
     let mut result = 0;
-    for i in 0..width {
-        let i = width - 1 - i; // (width, 0]
+    for i in (0..width).rev() {
+        let base = 8 * i; // (width, 0]
         let c: u8 = data[0];
         *data = &data[1..]; // Consume byte
-        result += u64::from(c) * 256.pow(i as u32);
+        result += u64::from(c) << base;
     }
     result
 }
@@ -50,7 +49,13 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 /// Reads xref sections (from stream) and trailer starting at the position of the Lexer.
 pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = t!(parse_indirect_stream(lexer, resolve, None)).1;
-    let trailer = xref_stream.info.clone();
+    let trailer = if t!(lexer.next()) == "trailer" {
+        let trailer = t!(parse_with_lexer(lexer, resolve));
+        t!(trailer.into_dictionary(resolve))
+    } else {
+        xref_stream.info.clone()
+    };
+
     let xref_stream = t!(Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve));
     let mut data_left = t!(xref_stream.data());
 
@@ -97,11 +102,11 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
         }
         sections.push(section);
     }
-    // Read trailer
+
     t!(lexer.next_expect("trailer"));
     let trailer = t!(parse_with_lexer(lexer, resolve));
     let trailer = t!(trailer.into_dictionary(resolve));
- 
+
     Ok((sections, trailer))
 }
 

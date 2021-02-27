@@ -1,10 +1,7 @@
-extern crate pdf;
-
 use std::env;
 use std::path::PathBuf;
 
 use pdf::file::File;
-use pdf::object::*;
 use pdf::error::PdfError;
 use pdf::content::*;
 use pdf::build::*;
@@ -42,9 +39,9 @@ fn main() -> Result<(), PdfError> {
     let catalog = CatalogBuilder::from_pages(pages)
         .build(&mut file).unwrap();
     
-    file.update_catalog(catalog);
+    file.update_catalog(catalog)?;
 
-    file.save_to(path.join(".modified.pdf"))?;
+    file.save_to(path.with_extension("modified.pdf"))?;
 
     Ok(())
 }

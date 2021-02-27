@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::io::Write;
 use crate::error::*;
 use crate::object::*;
+use crate as pdf;
 
 ///////////////////////////
 // Cross-reference table //
@@ -88,23 +89,20 @@ impl XRefTable {
     pub fn num_entries(&self) -> usize {
         self.entries.len()
     }
-    pub fn max_pos_and_gen(&self) -> (u64, GenNr) {
-        let mut max_pos = 0;
-        let mut max_gen = 0;
+    pub fn max_field_widths(&self) -> (u64, u64) {
+        let mut max_a = 0;
+        let mut max_b = 0;
         for &e in &self.entries {
-            match e {
-                XRef::Raw { pos, gen_nr } => {
-                    max_pos = max_pos.max(pos as u64);
-                    max_gen = max_gen.max(gen_nr);
-                }
-                XRef::Free { next_obj_nr, gen_nr } => {
-                    max_pos = max_pos.max(next_obj_nr);
-                    max_gen = max_gen.max(gen_nr);
-                }
-                _ => ()
-            }
+            let (a, b) = match e {
+                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr as u64),
+                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr as u64),
+                XRef::Stream { stream_id, index } => (stream_id as u64, index as u64),
+                _ => continue
+            };
+            max_a = max_a.max(a);
+            max_b = max_b.max(b);
         }
-        (max_pos, max_gen)
+        (max_a, max_b)
     }
 
     pub fn add_entries_from(&mut self, section: XRefSection) {
@@ -124,29 +122,35 @@ impl XRefTable {
         }
     }
 
-    pub fn write_old_format(&self, out: &mut Vec<u8>) {
-        for &x in self.entries.iter() {
-            let (n, g, f) = match x {
-                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr, 'f'),
-                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr, 'n'),
+    pub fn write_stream(&self, size: usize) -> Result<Stream<XRefInfo>> {
+        let (max_a, max_b) = self.max_field_widths();
+        let a_w = byte_len(max_a);
+        let b_w = byte_len(max_b);
+
+        let mut data = Vec::with_capacity((1 + a_w + b_w) * size);
+        for &x in self.entries.iter().take(size) {
+            let (t, a, b) = match x {
+                XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr as u64),
+                XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr as u64),
+                XRef::Stream { stream_id, index } => (2, stream_id as u64, index as u64),
                 x => panic!("invalid xref entry: {:?}", x)
             };
-            write!(out, "{:010x} {:05x} {} \n", n, g, f).unwrap();
+            data.push(t);
+            data.extend_from_slice(&a.to_be_bytes()[8 - a_w ..]);
+            data.extend_from_slice(&b.to_be_bytes()[8 - b_w ..]);
         }
+        let info = XRefInfo {
+            size: size as i32,
+            index: vec![0, size as i32],
+            prev: None,
+            w: vec![1, a_w as i32, b_w as i32],
+        };
+        Ok(Stream::new(info, data).hexencode())
     }
-    /*
-    pub fn write_stream(&self) -> Vec<u8> {
-        let (max_pos, max_gen) = self.max_pos_and_gen();
-        let off_w = len_base16(max_pos);
-        let id_w = len_base16(self.len() as u64);
-        let gen_w = len_base16(max_gen as _);
-        unimplemented!()
-    }
-    */
 }
 
-fn len_base16(n: u64) -> u32 {
-    (67 - n.leading_zeros()) / 4 + (n == 0) as u32
+fn byte_len(n: u64) -> usize {
+    (64 + 8 - 1 - n.leading_zeros()) as usize / 8 + (n == 0) as usize
 }
 
 impl Debug for XRefTable {
@@ -200,6 +204,26 @@ impl XRefSection {
     }
 }
 
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type = "XRef")]
+pub struct XRefInfo {
+    // XRefStream fields
+    #[pdf(key = "Size")]
+    pub size: i32,
+
+    //
+    #[pdf(key = "Index", default = "vec![0, size]")]
+    /// Array of pairs of integers for each subsection, (first object number, number of entries).
+    /// Default value (assumed when None): `(0, self.size)`.
+    pub index: Vec<i32>,
+
+    #[pdf(key = "Prev")]
+    prev: Option<i32>,
+
+    #[pdf(key = "W")]
+    pub w: Vec<i32>,
+}
 
 // read_xref_table
 // read_xref_stream

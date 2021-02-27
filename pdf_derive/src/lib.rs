@@ -521,22 +521,21 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         (None, _) => quote!{}
     };
 
-
-    let from_primitive_code = quote! {
-        let mut dict = pdf::primitive::Dictionary::from_primitive(p, resolve)?;
-        #ty_check
-        #( #checks )*
-        #( #let_parts )*
-        Ok(#id {
-            #( #field_parts )*
-        })
-    };
-
-
     quote! {
+        impl #impl_generics pdf::object::FromDict for #id #ty_generics #where_clause {
+            fn from_dict(mut dict: pdf::primitive::Dictionary, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
+                #ty_check
+                #( #checks )*
+                #( #let_parts )*
+                Ok(#id {
+                    #( #field_parts )*
+                })
+            }
+        }
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
             fn from_primitive(p: pdf::primitive::Primitive, resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
-                #from_primitive_code
+                let dict = pdf::primitive::Dictionary::from_primitive(p, resolve)?;
+                <Self as pdf::object::FromDict>::from_dict(dict, resolve)
             }
         }
     }
@@ -573,23 +572,29 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
     );
     let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
         quote! {
-            dict.insert(#key, Primitive::Name(#val.into()));
+            dict.insert(#key, pdf::primitive::Primitive::Name(#val.into()));
         }
     );
     let pdf_type = match attrs.type_name {
-        Some(ref ty) => quote! {
-            dict.insert("Type", Primitive::Name(#ty.into()));
+        Some(ref name) => quote! {
+            dict.insert("Type", pdf::primitive::Primitive::Name(#name.into()));
         },
         None => quote! {}
     };
+
     quote! {
         impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
-            fn to_primitive(&self, updater: &mut impl pdf::object::Updater) -> Result<Primitive> {
-                let mut dict = Dictionary::new();
+            fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<pdf::primitive::Primitive> {
+                pdf::object::ToDict::to_dict(self, update).map(pdf::primitive::Primitive::Dictionary)
+            }
+        }
+        impl #impl_generics pdf::object::ToDict for #id #ty_generics #where_clause {
+            fn to_dict(&self, updater: &mut impl pdf::object::Updater) -> Result<pdf::primitive::Dictionary> {
+                let mut dict = pdf::primitive::Dictionary::new();
                 #pdf_type
                 #( #checks_code )*
                 #(#fields_ser)*
-                Ok(Primitive::Dictionary(dict))
+                Ok(dict)
             }
         }
     }

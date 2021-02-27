@@ -22,6 +22,7 @@ use std::marker::PhantomData;
 use std::collections::{HashMap, BTreeMap};
 use std::rc::Rc;
 use std::ops::Deref;
+use std::hash::{Hash, Hasher};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -45,10 +46,6 @@ impl Resolve for NoResolve {
 pub trait Object: Sized + 'static {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
-    
-    fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
-        Self::from_primitive(Primitive::Dictionary(dict), resolve)
-    }
 }
 
 pub trait Updater {
@@ -58,9 +55,23 @@ pub trait Updater {
     fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>>;
 }
 
+pub struct NoUpdate;
+impl Updater for NoUpdate {
+    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> { panic!() }
+    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> { panic!() }
+    fn promise<T: Object>(&mut self) -> PromisedRef<T> { panic!() }
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> { panic!() }
+}
+
 pub trait ObjectWrite {
-    /// Write object as a byte stream
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive>;
+}
+
+pub trait FromDict: Sized {
+    fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self>;
+}
+pub trait ToDict: ObjectWrite {
+    fn to_dict(&self, update: &mut impl Updater) -> Result<Dictionary>;
 }
 
 pub trait SubType<T> {}
@@ -85,7 +96,6 @@ impl ObjectWrite for PlainRef {
         Ok(Primitive::Reference(*self))
     }
 }
-
 
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
 
@@ -138,6 +148,17 @@ impl<T> fmt::Debug for Ref<T> {
         write!(f, "Ref({})", self.inner.id)
     }
 }
+impl<T> Hash for Ref<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.inner.hash(state)
+    }
+}
+impl<T> PartialEq for Ref<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.inner.eq(&rhs.inner)
+    }
+}
+impl<T> Eq for Ref<T> {}
 
 #[derive(Debug)]
 pub struct RcRef<T> {
@@ -149,8 +170,8 @@ impl<T> RcRef<T> {
     pub fn new(inner: PlainRef, data: Rc<T>) -> RcRef<T> {
         RcRef { inner, data }
     }
-    pub fn get_ref(&self) -> PlainRef {
-        self.inner
+    pub fn get_ref(&self) -> Ref<T> {
+        Ref::new(self.inner)
     }
 }
 impl<T: Object + std::fmt::Debug> Object for RcRef<T> {
@@ -185,11 +206,30 @@ impl<'a, T> From<&'a RcRef<T>> for Ref<T> {
         Ref::new(r.inner)
     }
 }
+impl<T> Hash for RcRef<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::ptr::hash(&**self, state)
+    }
+}
+impl<T> PartialEq for RcRef<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        std::ptr::eq(&**self, &**rhs)
+    }
+}
+impl<T> Eq for RcRef<T> {}
 
 #[derive(Debug)]
 pub enum MaybeRef<T> {
     Direct(Rc<T>),
     Indirect(RcRef<T>),
+}
+impl<T> MaybeRef<T> {
+    pub fn as_ref(&self) -> Option<Ref<T>> {
+        match *self {
+            MaybeRef::Indirect(ref r) => Some(r.get_ref()),
+            _ => None
+        }
+    }
 }
 impl<T: Object> Object for MaybeRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -229,12 +269,39 @@ impl<T> From<Rc<T>> for MaybeRef<T> {
         MaybeRef::Direct(r)
     }
 }
+impl<T> From<MaybeRef<T>> for Rc<T> {
+    fn from(r: MaybeRef<T>) -> Rc<T> {
+        match r {
+            MaybeRef::Direct(rc) => rc,
+            MaybeRef::Indirect(r) => r.data
+        }
+    }
+}
+impl<'a, T> From<&'a MaybeRef<T>> for Rc<T> {
+    fn from(r: &'a MaybeRef<T>) -> Rc<T> {
+        match r {
+            MaybeRef::Direct(ref rc) => rc.clone(),
+            MaybeRef::Indirect(ref r) => r.data.clone()
+        }
+    }
+}
 impl<T> From<RcRef<T>> for MaybeRef<T> {
     fn from(r: RcRef<T>) -> MaybeRef<T> {
         MaybeRef::Indirect(r)
     }
 }
- 
+impl<T> Hash for MaybeRef<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::ptr::hash(&**self, state)
+    }
+}
+impl<T> PartialEq for MaybeRef<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        std::ptr::eq(&**self, &**rhs)
+    }
+}
+impl<T> Eq for MaybeRef<T> {}
+
 //////////////////////////////////////
 // Object for Primitives & other types
 //////////////////////////////////////
@@ -350,6 +417,7 @@ impl<T: ObjectWrite> ObjectWrite for Vec<T> {
         Primitive::array::<T, _, _, _>(self.iter(), update)
     }
 }
+
 /*
 pub struct Data(pub Vec<u8>);
 impl Object for Data {
@@ -385,6 +453,11 @@ impl ObjectWrite for Primitive {
     }
 }
 
+impl ObjectWrite for String {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Name(self.clone()))
+    }
+}
 impl<V: Object> Object for HashMap<String, V> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
@@ -406,11 +479,11 @@ impl<V: ObjectWrite> ObjectWrite for HashMap<String, V> {
         if self.len() == 0 {
             Ok(Primitive::Null)
         } else {
-            let mut dict = BTreeMap::new();
+            let mut dict = Dictionary::new();
             for (k, v) in self.iter() {
-                dict.insert(k.into(), v.to_primitive(update)?);
+                dict.insert(k, v.to_primitive(update)?);
             }
-            Ok(Primitive::Dictionary(Dictionary { dict }))
+            Ok(Primitive::Dictionary(dict))
         }
     }
 }

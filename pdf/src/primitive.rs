@@ -41,7 +41,7 @@ impl fmt::Display for Primitive {
     }
 }
 impl Primitive {
-    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
         match self {
             Primitive::Null => write!(out, "null")?,
             Primitive::Integer(i) => write!(out, "{}", i)?,
@@ -49,9 +49,9 @@ impl Primitive {
             Primitive::Boolean(b) => write!(out, "{}", b)?,
             Primitive::String(ref s) => s.serialize(out)?,
             Primitive::Stream(ref s) => s.serialize(out)?,
-            Primitive::Dictionary(ref d) => d.serialize(out)?,
-            Primitive::Array(ref arr) => serialize_list(arr, out)?,
-            Primitive::Reference(r) => write!(out, "@{}", r.id)?,
+            Primitive::Dictionary(ref d) => d.serialize(out, level)?,
+            Primitive::Array(ref arr) => serialize_list(arr, out, level)?,
+            Primitive::Reference(r) =>  write!(out, "{} {} R", r.id, r.gen)?,
             Primitive::Name(ref s) => serialize_name(s, out)?,
         }
         Ok(())
@@ -67,21 +67,22 @@ impl Primitive {
     }
 }
 
-fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
+fn serialize_list(arr: &[Primitive], out: &mut impl io::Write, level: usize) -> Result<()> {
     let mut parts = arr.iter();
-    write!(out, "[")?;
+    write!(out, "{:w$}[", "", w=2*level)?;
     if let Some(first) = parts.next() {
-        first.serialize(out)?;
+        first.serialize(out, level+1)?;
     }
     for p in parts {
-        write!(out, ", ")?;
-        p.serialize(out)?;
+        write!(out, " ")?;
+        p.serialize(out, level+1)?;
     }
     write!(out, "]")?;
     Ok(())
 }
 
 fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
+    write!(out, "/")?;
     for b in s.chars() {
         match b {
             '\\' | '(' | ')' => write!(out, r"\")?,
@@ -176,13 +177,14 @@ impl Deref for Dictionary {
     }
 }
 impl Dictionary {
-    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        write!(out, "<<")?;
+    fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+        write!(out, "<<\n")?;
         for (key, val) in self.iter() {
-            write!(out, "/{} ", key)?;
-            val.serialize(out)?;
+            write!(out, "{:w$}/{} ", "", key, w=2*level+2)?;
+            val.serialize(out, level+2)?;
+            out.write_all(b"\n")?;
         }
-        write!(out, ">>")?;
+        write!(out, "{:w$}>>\n", "", w=2*level)?;
         Ok(())
     }
 }
@@ -204,6 +206,13 @@ impl<'a> Index<&'a str> for Dictionary {
     type Output = Primitive;
     fn index(&self, idx: &'a str) -> &Primitive {
         self.dict.index(idx)
+    }
+}
+impl IntoIterator for Dictionary {
+    type Item = (String, Primitive);
+    type IntoIter = btree_map::IntoIter<String, Primitive>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.dict.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a Dictionary {
@@ -230,8 +239,8 @@ impl Object for PdfStream {
     }
 }
 impl PdfStream {
-    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        self.info.serialize(out)?;
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+        self.info.serialize(out, 0)?;
         
         writeln!(out, "stream")?;
         out.write_all(&self.data)?;
@@ -285,15 +294,23 @@ impl ObjectWrite for PdfString {
 }
 
 impl PdfString {
-    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        write!(out, r"\")?;
-        for &b in &self.data {
-            match b {
-                b'\\' | b'(' | b')' => write!(out, r"\")?,
-                c if c > b'~' => panic!("only ASCII"),
-                _ => ()
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+        if self.data.iter().any(|&b| b >= 0x80) {
+            write!(out, "<")?;
+            for &b in &self.data {
+                write!(out, "{:02x}", b)?;
             }
-            write!(out, "{}", b)?;
+            write!(out, ">")?;
+        } else {
+            write!(out, r"(")?;
+            for &b in &self.data {
+                match b {
+                    b'\\' | b'(' | b')' => write!(out, r"\")?,
+                    _ => ()
+                }
+                out.write_all(&[b])?;
+            }
+            write!(out, r")")?;
         }
         Ok(())
     }

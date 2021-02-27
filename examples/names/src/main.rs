@@ -5,7 +5,7 @@ use std::fmt;
 use std::collections::HashMap;
 use std::borrow::Cow;
 use pdf::file::File;
-use pdf::object::{Resolve, OutlineItem, Dest, Page, Ref, PagesNode, PageTree, RcRef, PlainRef};
+use pdf::object::{*};
 use pdf::primitive::{PdfString, Primitive};
 use std::hash::{Hash, Hasher};
 
@@ -50,12 +50,12 @@ fn main() {
     let file = File::<Vec<u8>>::open(&path).unwrap();
     let catalog = file.get_root();
 
-    let mut pages_map = HashMap::new();
+    let mut pages_map: HashMap<String, PlainRef> = HashMap::new();
 
     let mut count = 0;
     let mut dests_cb = |key: &PdfString, val: &Dest| {
         //println!("{:?} {:?}", key, val);
-        pages_map.insert(key.as_str().unwrap().into_owned(), val.clone());
+        pages_map.insert(key.as_str().unwrap().into_owned(), val.page.get_inner());
         
         count += 1;
     };
@@ -75,7 +75,7 @@ fn main() {
                     add_tree(r, pages, tree, current_page);
                 }
                 PagesNode::Leaf(ref page) => {
-                    pages.insert(page.get_ref(), *current_page);
+                    pages.insert(node_ref.get_inner(), *current_page);
                     *current_page += 1;
                 }
             }
@@ -84,8 +84,8 @@ fn main() {
     add_tree(&file, &mut pages, &catalog.pages, &mut 0);
     
     let get_page_nr = |name: &str| -> usize {
-        let rc = file.get(pages_map[name].page).unwrap();
-        pages[&rc.get_ref()]
+        let page = pages_map[name];
+        pages[&page]
     };
 
     if let Some(ref outlines) = catalog.outlines {

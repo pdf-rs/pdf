@@ -37,12 +37,12 @@ fn read_pages() {
     for entry in glob(file_path!("*.pdf")).expect("Failed to read glob pattern") {
         match entry {
             Ok(path) => {
-                println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
+                println!("\n == Now testing `{}` ==", path.to_str().unwrap());
 
                 let path = path.to_str().unwrap();
                 let file = run!(File::<Vec<u8>>::open(path));
                 for i in 0 .. file.num_pages() {
-                    println!("\nRead page {}", i);
+                    println!("Read page {}", i);
                     let _ = file.get_page(i);
                 }
             }
