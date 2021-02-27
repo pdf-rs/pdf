@@ -28,7 +28,7 @@ impl Operation {
 
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Content {
     pub operations: Vec<Operation>,
 }

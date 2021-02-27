@@ -10,47 +10,19 @@ use crate::content::Content;
 use crate::font::Font;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PagesNode {
-    Tree(MaybeRef<PageTree>),
-    Leaf(MaybeRef<Page>),
-}
-impl PagesNode {
-    pub fn to_tree(node: &RcRef<PagesNode>) -> PageTree {
-        match **node {
-            PagesNode::Tree(ref t) => (**t).clone(),
-            PagesNode::Leaf(ref p) => PageTree {
-                parent: None,
-                kids: vec![Ref::from(node)],
-                count: 1,
-                resources: None,
-                media_box: None,
-                crop_box: None
-            }
-        }
-    }
+    Tree(PageTree),
+    Leaf(Page),
 }
 
 impl Object for PagesNode {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PagesNode> {
-        match p {
-            Primitive::Reference(r) => {
-                let mut dict: Dictionary = t!(resolve.resolve(r)).into_dictionary(resolve)?;
-                
-                match dict.require("PagesNode", "Type")?.as_name()? {
-                    "Page" => Ok(PagesNode::Leaf(RcRef::new(r, Rc::new(t!(Page::from_dict(dict, resolve)))).into())),
-                    "Pages" => Ok(PagesNode::Tree(RcRef::new(r, Rc::new(t!(PageTree::from_dict(dict, resolve)))).into())),
-                    other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
-                }
-            }
-            Primitive::Dictionary(mut dict) => {
-                match dict.require("PagesNode", "Type")?.as_name()? {
-                    "Page" => Ok(PagesNode::Leaf(Rc::new(t!(Page::from_dict(dict, resolve))).into())),
-                    "Pages" => Ok(PagesNode::Tree(Rc::new(t!(PageTree::from_dict(dict, resolve))).into())),
-                    other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
-                }
-            }
-            p => Err(PdfError::UnexpectedPrimitive { expected: "Reference or Dictionary", found: p.get_debug_name() })
+        let mut dict = p.into_dictionary(resolve)?;
+        match dict.require("PagesNode", "Type")?.as_name()? {
+            "Page" => Ok(PagesNode::Leaf(t!(Page::from_dict(dict, resolve)))),
+            "Pages" => Ok(PagesNode::Tree(t!(PageTree::from_dict(dict, resolve)))),
+            other => Err(PdfError::WrongDictionaryType {expected: "Page or Pages".into(), found: other.into()}),
         }
     }
 }
@@ -77,7 +49,16 @@ impl PagesNode {
 }
 */
 
-pub type PageRc = MaybeRef<Page>;
+pub struct PageRc(RcRef<PagesNode>);
+impl Deref for PageRc {
+    type Target = Page;
+    fn deref(&self) -> &Page {
+        match *self.0 {
+            PagesNode::Leaf(ref page) => page,
+            _ => unreachable!()
+        }
+    }
+}
 
 
 #[derive(Object, ObjectWrite, Debug)]
@@ -146,8 +127,8 @@ impl PageTree {
     pub fn page(&self, resolve: &impl Resolve, page_nr: u32) -> Result<PageRc> {
         let mut pos = 0;
         for &kid in &self.kids {
-            let rc = resolve.get(kid)?;
-            match *rc {
+            let node = resolve.get(kid)?;
+            match *node {
                 PagesNode::Tree(ref tree) => {
                     if (pos .. pos + tree.count).contains(&page_nr) {
                         return tree.page(resolve, page_nr - pos);
@@ -156,7 +137,7 @@ impl PageTree {
                 }
                 PagesNode::Leaf(ref page) => {
                     if pos == page_nr {
-                        return Ok(page.clone());
+                        return Ok(PageRc(node));
                     }
                     pos += 1;
                 }
@@ -204,7 +185,7 @@ impl PageTree {
 }
 impl SubType<PagesNode> for PageTree {}
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct Page {
     #[pdf(key="Parent")]
     pub parent: RcRef<PageTree>,

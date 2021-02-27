@@ -50,12 +50,12 @@ fn main() {
     let file = File::<Vec<u8>>::open(&path).unwrap();
     let catalog = file.get_root();
 
-    let mut pages_map = HashMap::new();
+    let mut pages_map: HashMap<String, PlainRef> = HashMap::new();
 
     let mut count = 0;
     let mut dests_cb = |key: &PdfString, val: &Dest| {
         //println!("{:?} {:?}", key, val);
-        pages_map.insert(key.as_str().unwrap().into_owned(), val.clone());
+        pages_map.insert(key.as_str().unwrap().into_owned(), val.page.get_inner());
         
         count += 1;
     };
@@ -67,25 +67,24 @@ fn main() {
     }
 
     let mut pages = HashMap::new();
-    fn add_tree(r: &impl Resolve, pages: &mut HashMap<Ref<Page>, usize>, tree: &PageTree, current_page: &mut usize) {
+    fn add_tree(r: &impl Resolve, pages: &mut HashMap<PlainRef, usize>, tree: &PageTree, current_page: &mut usize) {
         for &node_ref in &tree.kids {
             let node = r.get(node_ref).unwrap();
             match *node {
                 PagesNode::Tree(ref tree) => {
                     add_tree(r, pages, tree, current_page);
                 }
-                PagesNode::Leaf(MaybeRef::Indirect(ref page)) => {
-                    pages.insert(page.get_ref(), *current_page);
+                PagesNode::Leaf(ref page) => {
+                    pages.insert(node_ref.get_inner(), *current_page);
                     *current_page += 1;
                 }
-                PagesNode::Leaf(MaybeRef::Direct(_)) => *current_page += 1
             }
         }
     }
     add_tree(&file, &mut pages, &catalog.pages, &mut 0);
     
     let get_page_nr = |name: &str| -> usize {
-        let page = &pages_map[name].page;
+        let page = pages_map[name];
         pages[&page]
     };
 

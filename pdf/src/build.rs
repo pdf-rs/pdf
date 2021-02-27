@@ -37,8 +37,12 @@ impl CatalogBuilder {
         }
     }
     pub fn build(self, update: &mut impl Updater) -> Result<Catalog> {
-        let kids_promise: Vec<_> = self.pages.iter().map(|page| update.promise::<Page>()).collect();
-        let kids: Vec<_> = kids_promise.iter().map(|p| p.get_ref().upcast()).collect();
+        let kids_promise: Vec<_> = self.pages.iter()
+            .map(|page| update.promise::<PagesNode>())
+            .collect();
+        let kids: Vec<_> = kids_promise.iter()
+            .map(|p| Ref::new(p.get_inner()))
+            .collect();
 
         let tree = update.create(PageTree {
             parent: None,
@@ -58,7 +62,7 @@ impl CatalogBuilder {
                 trim_box: page.trim_box,
                 resources: None,
             };
-            update.fulfill(promise, page)?;
+            update.fulfill(promise, PagesNode::Leaf(page))?;
         }
 
         Ok(Catalog {
