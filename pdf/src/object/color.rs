@@ -19,6 +19,7 @@ pub struct IccInfo {
 
 #[derive(Debug)]
 pub enum ColorSpace {
+    DeviceGray,
     DeviceRGB,
     DeviceCMYK,
     Indexed(Box<ColorSpace>, Vec<u8>),
@@ -36,6 +37,7 @@ impl Object for ColorSpace {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<ColorSpace> {
         if let Ok(name) = p.as_name() {
             let cs = match name {
+                "DeviceGray" => ColorSpace::DeviceGray,
                 "DeviceRGB" => ColorSpace::DeviceRGB,
                 "DeviceCMYK" => ColorSpace::DeviceCMYK,
                 _ => unimplemented!()
