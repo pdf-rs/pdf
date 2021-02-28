@@ -44,14 +44,14 @@ impl CatalogBuilder {
             .map(|p| Ref::new(p.get_inner()))
             .collect();
 
-        let tree = update.create(PageTree {
+        let tree = PagesRc::create(PageTree {
             parent: None,
             count: kids.len() as _,
             kids,
             resources: None,
             media_box: None,
             crop_box: None
-        })?;
+        }, update)?;
 
         for (page, promise) in self.pages.into_iter().zip(kids_promise) {
             let page = Page {
@@ -66,7 +66,7 @@ impl CatalogBuilder {
         }
 
         Ok(Catalog {
-            pages: tree.into(),
+            pages: tree,
             names: None,
             dests: None,
             metadata: None,

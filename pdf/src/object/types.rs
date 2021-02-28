@@ -1,7 +1,6 @@
 //! Models of PDF types
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use crate as pdf;
 use crate::object::*;
@@ -49,6 +48,9 @@ impl PagesNode {
 }
 */
 
+/// A `PagesNode::Leaf` wrapped in a `RcRef`
+/// 
+#[derive(Debug, Clone)]
 pub struct PageRc(RcRef<PagesNode>);
 impl Deref for PageRc {
     type Target = Page;
@@ -59,13 +61,50 @@ impl Deref for PageRc {
         }
     }
 }
+impl PageRc {
+    pub fn create(page: Page, update: &mut impl Updater) -> Result<PageRc> {
+        Ok(PageRc(update.create(PagesNode::Leaf(page))?))
+    }
+}
 
+/// A `PagesNode::Tree` wrapped in a `RcRef`
+/// 
+#[derive(Debug, Clone)]
+pub struct PagesRc(RcRef<PagesNode>);
+impl Deref for PagesRc {
+    type Target = PageTree;
+    fn deref(&self) -> &PageTree {
+        match *self.0 {
+            PagesNode::Tree(ref tree) => tree,
+            _ => unreachable!()
+        }
+    }
+}
+impl PagesRc {
+    pub fn create(tree: PageTree, update: &mut impl Updater) -> Result<PagesRc> {
+        Ok(PagesRc(update.create(PagesNode::Tree(tree))?))
+    }
+}
+impl Object for PagesRc {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PagesRc> {
+        let node = t!(RcRef::from_primitive(p, resolve));
+        match *node {
+            PagesNode::Leaf(_) => Err(PdfError::WrongDictionaryType {expected: "Pages".into(), found: "Page".into()}),
+            PagesNode::Tree(_) => Ok(PagesRc(node))
+        }
+    }
+}
+impl ObjectWrite for PagesRc {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        (**self).to_primitive(update)
+    }
+}
 
 #[derive(Object, ObjectWrite, Debug)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
-    pub pages: MaybeRef<PageTree>,
+    pub pages: PagesRc,
 
 // PageLabels: number_tree,
     #[pdf(key="Names")]
@@ -108,9 +147,11 @@ pub struct Catalog {
 #[pdf(Type = "Pages?")]
 pub struct PageTree {
     #[pdf(key="Parent")]
-    pub parent: Option<RcRef<PageTree>>,
+    pub parent: Option<PagesRc>,
+
     #[pdf(key="Kids")]
     pub kids:   Vec<Ref<PagesNode>>,
+
     #[pdf(key="Count")]
     pub count:  u32,
 
@@ -188,7 +229,7 @@ impl SubType<PagesNode> for PageTree {}
 #[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct Page {
     #[pdf(key="Parent")]
-    pub parent: RcRef<PageTree>,
+    pub parent: PagesRc,
 
     #[pdf(key="Resources")]
     pub resources: Option<MaybeRef<Resources>>,
@@ -219,7 +260,7 @@ fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
 }
 
 impl Page {
-    pub fn new(parent: RcRef<PageTree>) -> Page {
+    pub fn new(parent: PagesRc) -> Page {
         Page {
             parent,
             media_box:  None,
@@ -258,13 +299,13 @@ impl SubType<PagesNode> for Page {}
 #[derive(Object)]
 pub struct PageLabel {
     #[pdf(key="S")]
-    style:  Option<Counter>,
+    pub style:  Option<Counter>,
     
     #[pdf(key="P")]
-    prefix: Option<PdfString>,
+    pub prefix: Option<PdfString>,
     
     #[pdf(key="St")]
-    start:  Option<usize>
+    pub start:  Option<usize>
 }
 
 #[derive(Object, ObjectWrite, Debug)]
