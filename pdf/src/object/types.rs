@@ -357,7 +357,7 @@ pub struct GraphicsStateParameters {
     #[pdf(key="LC")]
     pub line_cap: Option<LineCap>,
     
-    #[pdf(key="LC")]
+    #[pdf(key="LJ")]
     pub line_join: Option<LineJoin>,
     
     #[pdf(key="ML")]
