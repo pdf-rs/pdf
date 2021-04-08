@@ -299,36 +299,30 @@ fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
     Ok(pixels)
 }
 
-fn lzw_decode(mut data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
-    use lzw::{MsbReader, Decoder, DecoderEarlyChange};
+fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+    use weezl::{BitOrder, decode::Decoder};
     let mut out = vec![];
-    if params.early_change != 0 {
-        let mut decoder = DecoderEarlyChange::new(MsbReader::new(), 9);
-        while data.len() > 0 {
-            let (len, bytes) = decoder.decode_bytes(data)?;
-            out.extend_from_slice(bytes);
 
-            data = &data[len ..];
-        }
+    let mut decoder = if params.early_change != 0 {
+        Decoder::with_tiff_size_switch(BitOrder::Msb, 9)
     } else {
-        let mut decoder = Decoder::new(MsbReader::new(), 9);
-        while data.len() > 0 {
-            let (len, bytes) = decoder.decode_bytes(data)?;
-            out.extend_from_slice(bytes);
+        Decoder::new(BitOrder::Msb, 9)
+    };
 
-            data = &data[len ..];
-        }
-    }
-
+    decoder
+        .into_stream(&mut out)
+        .decode_all(data).status?;
     Ok(out)
 }
 fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
-    use lzw::MsbWriter;
+    use weezl::{BitOrder, encode::Encoder};
     if params.early_change != 0 {
         bail!("encoding early_change != 0 is not supported");
     }
     let mut compressed = vec![];
-    lzw::encode(data, MsbWriter::new(&mut compressed), 9).unwrap();
+    Encoder::new(BitOrder::Msb, 9)
+        .into_stream(&mut compressed)
+        .encode_all(data).status?;
     Ok(compressed)
 }
 
