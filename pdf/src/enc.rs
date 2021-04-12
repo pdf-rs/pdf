@@ -45,6 +45,32 @@ pub struct DCTDecodeParams {
     color_transform: Option<i32>,
 }
 
+#[derive(Object, ObjectWrite, Debug, Clone)]
+pub struct CCITTFaxDecodeParams {
+    #[pdf(key="K", default="0")]
+    k: i32,
+
+    #[pdf(key="EndOfLine", default="false")]
+    end_of_line: bool,
+
+    #[pdf(key="EncodedByteAlign", default="false")]
+    encoded_byte_align: bool,
+
+    #[pdf(key="Columns", default="1728")]
+    columns: u32,
+
+    #[pdf(key="Rows", default="0")]
+    rows: u32,
+
+    #[pdf(key="EndOfBlock", default="true")]
+    end_of_block: bool,
+
+    #[pdf(key="BlackIs1", default="false")]
+    black_is_1: bool,
+
+    #[pdf(key="DamagedRowsBeforeError", default="0")]
+    damaged_rows_before_error: u32,
+}
 #[derive(Debug, Clone)]
 pub enum StreamFilter {
     ASCIIHexDecode,
@@ -53,7 +79,7 @@ pub enum StreamFilter {
     FlateDecode (LZWFlateParams),
     JPXDecode, //Jpeg2k
     DCTDecode (DCTDecodeParams),
-    CCITTFaxDecode,
+    CCITTFaxDecode (CCITTFaxDecodeParams),
     Crypt
 }
 impl StreamFilter {
@@ -67,7 +93,7 @@ impl StreamFilter {
            "FlateDecode" => StreamFilter::FlateDecode (LZWFlateParams::from_primitive(params, r)?),
            "JPXDecode" => StreamFilter::JPXDecode,
            "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
-           "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode,
+           "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
            "Crypt" => StreamFilter::Crypt,
            ty => bail!("Unrecognized filter type {:?}", ty),
        } 
@@ -332,6 +358,21 @@ fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     Ok(compressed)
 }
 
+fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
+    use ccitt_t4_t6::g42d::{decode::Decoder, common::Color};
+    if params.k < 0 {
+        let mut decoder = Decoder::new(params.columns as usize);
+        decoder.decode(data).map_err(|e| PdfError::Other { msg: format!("FaxDecode: {:?}", e) })?;
+        let store: Vec<Color> = decoder.into_store();
+        Ok(store.into_iter().map(|c| match c {
+            Color::Black => 0,
+            Color::White => 255
+        }).collect())
+    } else {
+        unimplemented!()
+    }
+}
+
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
@@ -339,6 +380,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
+        StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params),
         _ => unimplemented!(),
     }
 }
