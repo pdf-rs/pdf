@@ -359,15 +359,17 @@ fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
 }
 
 fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
-    use ccitt_t4_t6::g42d::{decode::Decoder, common::Color};
+    use fax::decoder::{Color, pels, decode};
+
     if params.k < 0 {
-        let mut decoder = Decoder::new(params.columns as usize);
-        decoder.decode(data).map_err(|e| PdfError::Other { msg: format!("FaxDecode: {:?}", e) })?;
-        let store: Vec<Color> = decoder.into_store();
-        Ok(store.into_iter().map(|c| match c {
-            Color::Black => 0,
-            Color::White => 255
-        }).collect())
+        let mut buf = Vec::with_capacity(params.columns as usize * params.rows as usize);
+        decode(data.iter().cloned(), params.columns as u16, |line| {
+            buf.extend(pels(line, params.columns as u16).map(|c| match c {
+                Color::Black => 0,
+                Color::White => 255
+            }));
+        });
+        Ok(buf)
     } else {
         unimplemented!()
     }
