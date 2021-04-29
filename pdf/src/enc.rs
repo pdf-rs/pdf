@@ -353,16 +353,19 @@ fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
 }
 
 fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
-    use fax::decoder::{Color, pels, decode};
+    use fax::{Color, decoder::{pels, decode_g4}};
 
     if params.k < 0 {
         let mut buf = Vec::with_capacity(params.columns as usize * params.rows as usize);
-        decode(data.iter().cloned(), params.columns as u16, |line| {
+        decode_g4(data.iter().cloned(), params.columns as u16, |line| {
             buf.extend(pels(line, params.columns as u16).map(|c| match c {
                 Color::Black => 0,
                 Color::White => 255
             }));
         });
+        if buf.len() != params.columns as usize * params.rows as usize {
+            bail!("decoded length does not match (expected {}∙{}, got {})", params.rows, params.columns, buf.len());
+        }
         Ok(buf)
     } else {
         unimplemented!()
