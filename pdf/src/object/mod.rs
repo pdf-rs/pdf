@@ -503,6 +503,14 @@ impl<T: Object> Object for Option<T> {
         }
     }
 }
+impl<T: ObjectWrite> ObjectWrite for Option<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            None => Ok(Primitive::Null),
+            Some(t) => t.to_primitive(update)
+        }
+    }
+}
 
 impl<T: Object> Object for Box<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {

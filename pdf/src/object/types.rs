@@ -108,10 +108,10 @@ pub struct Catalog {
 
 // PageLabels: number_tree,
     #[pdf(key="Names")]
-    pub names: Option<RcRef<NameDictionary>>,
+    pub names: Option<MaybeRef<NameDictionary>>,
     
     #[pdf(key="Dests")]
-    pub dests: Option<Ref<Dictionary>>,
+    pub dests: Option<MaybeRef<Dictionary>>,
 
 // ViewerPreferences: dict
 // PageLayout: name
@@ -622,6 +622,12 @@ impl<T: Object> Object for NameTree<T> {
     }
 }
 
+impl<T: ObjectWrite> ObjectWrite for NameTree<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        todo!("impl ObjectWrite for NameTree")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum DestView {
     // left, top, zoom
@@ -698,9 +704,48 @@ impl Object for Dest {
         })
     }
 }
+impl ObjectWrite for Dest {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let mut arr = vec![self.page.to_primitive(update)?];
+        match self.view {
+            DestView::XYZ { left, top, zoom } => {
+                arr.push(Primitive::Name("XYZ".into()));
+                arr.push(left.to_primitive(update)?);
+                arr.push(top.to_primitive(update)?);
+                arr.push(Primitive::Number(zoom));
+            }
+            DestView::Fit => {
+                arr.push(Primitive::Name("Fit".into()));
+            }
+            DestView::FitH { top } => {
+                arr.push(Primitive::Name("FitH".into()));
+                arr.push(Primitive::Number(top));
+            }
+            DestView::FitV { left } => {
+                arr.push(Primitive::Name("FitV".into()));
+                arr.push(Primitive::Number(left));
+            }
+            DestView::FitR(rect) => {
+                arr.push(Primitive::Name("FitR".into()));
+                arr.push(Primitive::Number(rect.left));
+                arr.push(Primitive::Number(rect.bottom));
+                arr.push(Primitive::Number(rect.right));
+                arr.push(Primitive::Number(rect.top));
+            }
+            DestView::FitB => {
+                arr.push(Primitive::Name("FitB".into()));
+            }
+            DestView::FitBH { top } => {
+                arr.push(Primitive::Name("FitBH".into()));
+                arr.push(Primitive::Number(top));
+            }
+        }
+        Ok(Primitive::Array(arr))
+    }
+}
 
 /// There is one `NameDictionary` associated with each PDF file.
-#[derive(Object, Debug)]
+#[derive(Object, ObjectWrite, Debug)]
 pub struct NameDictionary {
     #[pdf(key="Pages")]
     pub pages: Option<NameTree<Primitive>>,
@@ -740,7 +785,7 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct FileSpec {
     #[pdf(key="EF")]
     ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
@@ -751,8 +796,8 @@ pub struct FileSpec {
 }
 
 /// Used only as elements in `FileSpec`
-#[derive(Object, Debug, Clone)]
-pub struct Files<T: Object> {
+#[derive(Object, ObjectWrite, Debug, Clone)]
+pub struct Files<T: Object + ObjectWrite> {
     #[pdf(key="F")]
     f: Option<T>,
     #[pdf(key="UF")]
