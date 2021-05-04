@@ -264,6 +264,7 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
+    let stride = columns * n_components;
 
     // First flate decode
     let decoded = match inflate_bytes_zlib(data) {
@@ -278,13 +279,13 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
 
     if predictor > 10 {
         let inp = decoded; // input buffer
-        let rows = inp.len() / (columns+1);
+        let rows = inp.len() / (stride+1);
         
         // output buffer
-        let mut out = vec![0; rows * columns];
+        let mut out = vec![0; rows * stride];
     
         // Apply inverse predictor
-        let null_vec = vec![0; columns];
+        let null_vec = vec![0; stride];
         
         let mut in_off = 0; // offset into input buffer
         
@@ -295,19 +296,19 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
             let predictor = PredictorType::from_u8(inp[in_off])?;
             in_off += 1; // +1 because the first byte on each row is predictor
             
-            let row_in = &inp[in_off .. in_off + columns];
+            let row_in = &inp[in_off .. in_off + stride];
             let (prev_row, row_out) = if out_off == 0 {
-                (&null_vec[..], &mut out[out_off .. out_off+columns])
+                (&null_vec[..], &mut out[out_off .. out_off+stride])
             } else {
                 let (prev, curr) = out.split_at_mut(out_off);
-                (&prev[last_out_off ..], &mut curr[.. columns])
+                (&prev[last_out_off ..], &mut curr[.. stride])
             };
             unfilter(predictor, n_components, prev_row, row_in, row_out);
             
             last_out_off = out_off;
             
-            in_off += columns;
-            out_off += columns;
+            in_off += stride;
+            out_off += stride;
         }
         Ok(out)
     } else {
