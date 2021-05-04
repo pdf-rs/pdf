@@ -363,12 +363,53 @@ pub struct GraphicsStateParameters {
     #[pdf(key="ML")]
     pub miter_limit: Option<f32>,
     
-    // D : dash pattern
+    #[pdf(key="D")]
+    pub dash_pattern: Option<Vec<Primitive>>,
+    
     #[pdf(key="RI")]
     pub rendering_intent: Option<String>,
-    
+
+    #[pdf(key="OP")]
+    pub overprint: Option<bool>,
+
+    #[pdf(key="op")]
+    pub overprint_fill: Option<bool>,
+
+    #[pdf(key="OPM")]
+    pub overprint_mode: Option<i32>,
+
     #[pdf(key="Font")]
     pub font: Option<(Ref<Font>, f32)>,
+
+    // BG
+    // BG2
+    // UCR
+    // UCR2
+    // TR
+    // TR2
+    // HT
+    // FL
+    // SM
+    // SA
+
+    #[pdf(key="BM")]
+    pub blend_mode: Option<Primitive>,
+
+    #[pdf(key="SMask")]
+    pub smask: Option<Primitive>,
+
+    
+    #[pdf(key="CA")]
+    pub stroke_alpha: Option<f32>,
+
+    #[pdf(key="ca")]
+    pub fill_alpha: Option<f32>,
+
+    #[pdf(key="AIS")]
+    pub alpha_is_shape: Option<bool>,
+
+    #[pdf(key="TK")]
+    pub text_knockout: Option<bool>,
 
     #[pdf(other)]
     _other: Dictionary
@@ -388,7 +429,7 @@ pub type PostScriptXObject = Stream<PostScriptDict>;
 /// A variant of XObject
 pub type ImageXObject = Stream<ImageDict>;
 /// A variant of XObject
-pub type FormXObject = Stream<FormDict>;
+pub type FormXObject = Content;
 
 #[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="PS")]
