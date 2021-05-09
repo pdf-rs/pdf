@@ -1,5 +1,5 @@
 /// PDF content streams.
-use std::fmt::{Display, Formatter};
+use std::fmt::{self, Display};
 use std::mem::replace;
 use std::cmp::Ordering;
 use std::io;
@@ -88,21 +88,6 @@ fn cmyk(args: &mut impl Iterator<Item=Primitive>) -> Result<Cmyk> {
     let key = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
     Ok(Cmyk { cyan, magenta, yellow, key })
 }
-fn number_list(args: &mut impl Iterator<Item=Primitive>) -> Result<Box<[f32]>> {
-    Ok(args.map(|p| p.as_number()).collect::<Result<Vec<f32>, PdfError>>()?.into())
-}
-fn number_list_and_maybe_name(args: &mut impl Iterator<Item=Primitive>) -> Result<(Box<[f32]>, Option<String>)> {
-    let mut list = Vec::new();
-    for p in args {
-        match p {
-            Primitive::Number(f) => list.push(f),
-            Primitive::Integer(i) => list.push(i as f32),
-            Primitive::Name(name) => return Ok((list.into(), Some(name))),
-            _ => bail!("invalid arguments")
-        }
-    }
-    Ok((list.into(), None))
-}
 fn matrix(args: &mut impl Iterator<Item=Primitive>) -> Result<Matrix> {
     Ok(Matrix {
         a: number(args)?,
@@ -112,6 +97,12 @@ fn matrix(args: &mut impl Iterator<Item=Primitive>) -> Result<Matrix> {
         e: number(args)?,
         f: number(args)?,
     })
+}
+fn array(args: &mut impl Iterator<Item=Primitive>) -> Result<Vec<Primitive>> {
+    match args.next() {
+        Some(Primitive::Array(arr)) => Ok(arr),
+        _ => Err(PdfError::NoOpArg)
+    }
 }
 
 struct OpBuilder {
@@ -218,8 +209,8 @@ impl OpBuilder {
             "ET"  => push(Op::EndText),
             "EX"  => self.compability_section = false,
             "f" |
-            "F"   => push(Op::Fill { close: false, winding: NonZero }),
-            "f*"  => push(Op::Fill { close: false, winding: EvenOdd }),
+            "F"   => push(Op::Fill { winding: NonZero }),
+            "f*"  => push(Op::Fill { winding: EvenOdd }),
             "G"   => push(Op::StrokeColor { color: Color::Gray(number(&mut args)?) }),
             "g"   => push(Op::FillColor { color: Color::Gray(number(&mut args)?) }),
             "gs"  => push(Op::GraphicsState { name: name(&mut args)? }),
@@ -273,32 +264,18 @@ impl OpBuilder {
             "RG"  => push(Op::StrokeColor { color: Color::Rgb(rgb(&mut args)?) }),
             "rg"  => push(Op::FillColor { color: Color::Rgb(rgb(&mut args)?) }),
             "ri"  => {
-                let intent = match args.next().ok_or(PdfError::NoOpArg)?.as_name()? {
-                    "AbsoluteColorimetric" => RenderingIntent::AbsoluteColorimetric,
-                    "RelativeColorimetric" => RenderingIntent::RelativeColorimetric,
-                    "Perceptual" => RenderingIntent::Perceptual,
-                    "Saturation" => RenderingIntent::Saturation,
-                    s => bail!("invalid rendering intent {}", s)
-                };
+                let s = args.next().ok_or(PdfError::NoOpArg)?.as_name()?;
+                let intent = RenderingIntent::from_str(s)
+                    .ok_or_else(|| PdfError::Other { msg: format!("invalid rendering intent {}", s) })?;
                 push(Op::RenderingIntent { intent });
             },
             "s"   => push(Op::Stroke { close: true }),
             "S"   => push(Op::Stroke { close: false }),
-            "SC"  => {
-                let list = number_list(&mut args)?;
-                push(Op::StrokeColor { color: Color::Other(list, None) });
+            "SC" | "SCN" => {
+                push(Op::StrokeColor { color: Color::Other(args.collect()) });
             }
-            "sc"  => {
-                let list = number_list(&mut args)?;
-                push(Op::FillColor { color: Color::Other(list, None) });
-            }
-            "SCN" => {
-                let (list, name) = number_list_and_maybe_name(&mut args)?;
-                push(Op::StrokeColor { color: Color::Other(list, name) });
-            }
-            "scn" => {
-                let (list, name) = number_list_and_maybe_name(&mut args)?;
-                push(Op::FillColor { color: Color::Other(list, name) });
+            "sc" | "scn" => {
+                push(Op::FillColor { color: Color::Other(args.collect()) });
             }
             "sh"  => {
 
@@ -312,8 +289,8 @@ impl OpBuilder {
                 push(Op::TextPosition { translation });
             }
             "Tf"  => push(Op::TextFont { name: name(&mut args)?, size: number(&mut args)? }),
-            "Tj"  => push(Op::TextDraw { data: string(&mut args)? }),
-            "TJ"  => push(Op::TextDrawAdjusted { array: args.collect() }),
+            "Tj"  => push(Op::TextDraw { text: string(&mut args)? }),
+            "TJ"  => push(Op::TextDrawAdjusted { array: array(&mut args)? }),
             "TL"  => push(Op::Leading { leading: number(&mut args)? }),
             "Tm"  => push(Op::TextMatrix { matrix: matrix(&mut args)? }), 
             "Tr"  => {
@@ -351,12 +328,13 @@ impl OpBuilder {
             }
             "'"   => {
                 push(Op::TextNewline);
-                push(Op::TextDraw { data: string(&mut args)? });
+                push(Op::TextDraw { text: string(&mut args)? });
             }
             "\""  => {
                 push(Op::WordSpacing { word_space: number(&mut args)? });
                 push(Op::CharSpacing { char_space: number(&mut args)? });
-                push(Op::TextDraw { data: string(&mut args)? });
+                push(Op::TextNewline);
+                push(Op::TextDraw { text: string(&mut args)? });
             }
             o if !self.compability_section => {
                 bail!("invalid operator {}", o)
@@ -365,9 +343,6 @@ impl OpBuilder {
         }
         Ok(())
     }
-}
-
-impl Content {
 }
 
 impl Object for Content {
@@ -399,53 +374,194 @@ impl Object for Content {
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         use std::io::Write;
+        use Op::*;
 
         let mut data = Vec::new();
         let f = &mut data;
-        
-        for operation in &self.operations {
-            match operation {
-                Op::BeginMarkedContent { tag, properties: Some(ref name) } => writeln!(f, "/{} /{} BDC", tag, name)?,
-                Op::BeginMarkedContent { tag, properties: None } => writeln!(f, "/{} BMC", tag)?,
-                Op::EndMarkedContent => writeln!(f, "EMC")?,
+        let mut ops = &self.operations[..];
+        let mut current_point = None;
+
+        while ops.len() > 0 {
+            let mut advance = 1;
+            match ops[0] {
+                BeginMarkedContent { tag, properties: Some(ref name) } => writeln!(f, "/{} /{} BDC", tag, name)?,
+                BeginMarkedContent { tag, properties: None } => writeln!(f, "/{} BMC", tag)?,
+                EndMarkedContent => writeln!(f, "EMC")?,
+                Close => writeln!(f, "h")?,
+                MoveTo { p } => {
+                    writeln!(f, "{} m", p)?;
+                    current_point = Some(p);
+                }
+                LineTo { p } => {
+                    writeln!(f, "{} l", p)?;
+                    current_point = Some(p);
+                },
+                CurveTo { c1, c2, p } => {
+                    if Some(c1) == current_point {
+                        writeln!(f, "{} {} v", c2, p)?;
+                    } else if c2 == p {
+                        writeln!(f, "{} {} y", c1, p)?;
+                    } else {
+                        writeln!(f, "{} {} {} y", c1, c2, p)?;
+                    }
+                    current_point = Some(p);
+                },
+                Rect { rect } => writeln!(f, "{} re", rect)?,
+                EndPath => writeln!(f, "n")?,
+                Stroke { close: false } => writeln!(f, "S")?,
+                Stroke { close: true } => writeln!(f, "s")?,
+                FillAndStroke { close: true, winding: Winding::NonZero } => writeln!(f, "b")?,
+                FillAndStroke { close: false, winding: Winding::NonZero } => writeln!(f, "B")?,
+                FillAndStroke { close: true, winding: Winding::EvenOdd } => writeln!(f, "b*")?,
+                FillAndStroke { close: false, winding: Winding::EvenOdd } => writeln!(f, "B*")?,
+                Fill { winding: Winding::NonZero } => writeln!(f, "f")?,
+                Fill { winding: Winding::EvenOdd } => writeln!(f, "f*")?,
+                Shade { ref name } => {
+                    serialize_name(name, f)?;
+                    writeln!(" sh")?;
+                },
+                Clip { winding: Winding::NonZero } => writeln!(f, "W")?,
+                Clip { winding: Winding::EvenOdd } => writeln!(f, "W*")?,
+                Save => writeln!(f, "q")?,
+                Restore => writeln!(f, "Q")?,
+                Transform { matrix } => writeln!(f, "{} cm", matrix)?,
+                LineWidth { width } => writeln!(f, "{} w", width)?,
+                Dash { ref pattern, phase } => write!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
+                LineJoin { join } => writeln!(f, "{} j", join as u8)?,
+                LineCap { cap } => writeln!(f, "{} J", cap as u8)?,
+                MiterLimit { limit } => writeln!(f, "{} M", limit)?,
+                Flatness { tolerance } => writeln!(f, "{} i", tolerance)?,
+                GraphicsState { ref name } => {
+                    serialize_name(name, f)?;
+                    writeln!(f, " gs")?;
+                },
+                StrokeColor { color: Color::Gray(g) } => writeln!(f, "{} G", g)?,
+                StrokeColor { color: Color::Rgb(rgb) } => writeln!(f, "{} RG", rgb)?,
+                StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
+                StrokeColor { color: Color::Other(ref args) } =>  {
+                    for p in args {
+                        p.serialize(f, 0)?;
+                        write!(f, " ")?;
+                    }
+                    writeln!(f, "SCN")?;
+                }
+                FillColor { color: Color::Gray(g) } => writeln!(f, "{} g", g)?,
+                FillColor { color: Color::Rgb(rgb) } => writeln!(f, "{} rg", rgb)?,
+                FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
+                FillColor { color: Color::Other(ref args) } => {
+                    for p in args {
+                        p.serialize(f, 0)?;
+                        write!(f, " ")?;
+                    }
+                    writeln!(f, "scn")?;
+                }
+                FillColorSpace { ref name } => {
+                    serialize_name(name, f)?;
+                    writeln!(f, " cs")?;
+                },
+                StrokeColorSpace { ref name } => {
+                    serialize_name(name, f)?;
+                    writeln!(f, " CS")?;
+                },
+
+                RenderingIntent { intent } => writeln!(f, "{} ri", intent.to_str())?,
                 Op::BeginText => writeln!(f, "BT")?,
                 Op::EndText => writeln!(f, "ET")?,
-                _ => unimplemented!()
+                CharSpacing { char_space } => writeln!(f, "{} Tc", char_space)?,
+                WordSpacing { word_space } => {
+                    if let [
+                        Op::CharSpacing { char_space },
+                        Op::TextNewline,
+                        Op::TextDraw { ref text },
+                        ..
+                    ] = ops[1..] {
+                        write!(f, "{} {} ", word_space, char_space)?;
+                        text.serialize(f)?;
+                        writeln!(f, " \"")?;
+                        advance += 3;
+                    } else {
+                        writeln!(f, "{} Tw", word_space)?;
+                    }
+                }
+                TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
+                Leading { leading } => match ops[1..] {
+                    [Op::TextPosition { translation }, ..] if leading == -translation.x => {
+                        writeln!(f, "{} {} TD", translation.x, translation.y)?;
+                        advance += 1;
+                    }
+                    _ => {
+                        writeln!(f, "{} TL", leading)?;
+                    }
+                }
+                TextFont { ref name, ref size } => {
+                    serialize_name(name, f)?;
+                    writeln!(f, " {} Tf", size)?;
+                },
+                TextRenderMode { mode } => writeln!(f, "{} Tr", mode as u8)?,
+                TextRise { rise } => writeln!(f, "{} Ts", rise)?,
+                TextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
+                TextMatrix { matrix: Matrix { a, b, c, d, e, f } } => writeln!(f, "{} {} {} {} {} {} Tm", a, b, c, d, e, f),
+                TextNewline => {
+                    if let [Op::TextDraw { ref text }, ..] = ops[1..] {
+                        text.serialize(f)?;
+                        writeln!(f, " '")?;
+                        advance += 1;
+                    } else {
+                        writeln!(f, "T*")?;
+                    }
+                },
+                TextDraw { ref text } => {
+                    text.serialize(f)?;
+                    writeln!(f, " Tj")?;
+                },
+                TextDrawAdjusted { ref array } => {
+                    writeln!(f, "[{}] TJ", array.iter().format(" "))?;
+                },
+                XObject { ref name } => {
+                    serialize_name(name, f)?;
+                    writeln!(f, " Do")?;
+                },
             }
+            ops = &ops[advance..];
         }
-
         Stream::new((), data).to_primitive(update)
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Winding {
     EvenOdd,
     NonZero
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
     Bevel = 2,
 }
 
-#[derive(Debug, Copy, Clone)]
+
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(C, align(8))]
 pub struct Point {
     pub x: f32,
     pub y: f32
 }
+impl Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.x, self.y)
+    }
+}
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(C, align(8))]
 pub struct Rect {
     pub x: f32,
@@ -453,8 +569,13 @@ pub struct Rect {
     pub width: f32,
     pub height: f32,
 }
+impl Display for Rect {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {} {}", self.x, self.y, self.width, self.height)
+    }
+}
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(C, align(8))]
 pub struct Matrix {
     pub a: f32,
@@ -464,17 +585,21 @@ pub struct Matrix {
     pub e: f32,
     pub f: f32,
 }
+impl Display for Matrix {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {} {} {} {}", self.a, self.b, self.c, self.d, self.e, self.f)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Color {
-    Indexed(i32),
     Gray(f32),
     Rgb(Rgb),
     Cmyk(Cmyk),
-    Other(Box<[f32]>, Option<String>),
+    Other(Vec<Primitive>),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextMode {
     Fill,
     Stroke,
@@ -484,20 +609,31 @@ pub enum TextMode {
     StrokeAndClip
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Rgb {
     pub red: f32,
     pub green: f32,
     pub blue: f32,
 }
+impl Display for Rgb {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {}", self.red, self.green, self.blue)
+    }
+}
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Cmyk {
     pub cyan: f32,
     pub magenta: f32,
     pub yellow: f32,
     pub key: f32,
 }
+impl Display for Cmyk {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {} {}", self.cyan, self.magenta, self.yellow, self.key)
+    }
+}
+
 
 /// Graphics Operator
 /// 
@@ -533,21 +669,17 @@ pub enum Op {
 
     Stroke { close: bool },
 
-    StrokeAndFill { close: bool, winding: Winding },
-
     /// Fill and Stroke operation
     /// 
     /// generated by operators `b`, `B`, `b*`, `B*`
     FillAndStroke { close: bool, winding: Winding },
 
-    Fill { close: bool, winding: Winding },
+    Fill { winding: Winding },
 
     /// Fill using the named shading pattern
     /// 
     /// operator: `sh`
     Shade { name: String },
-
-    Clear,
 
     Clip { winding: Winding },
 
@@ -596,7 +728,7 @@ pub enum Op {
     TextNewline,
 
     /// `Tj`
-    TextDraw { data: PdfString },
+    TextDraw { text: PdfString },
 
     TextDrawAdjusted { array: Vec<Primitive> },
 

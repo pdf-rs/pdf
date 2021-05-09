@@ -81,7 +81,7 @@ fn serialize_list(arr: &[Primitive], out: &mut impl io::Write, level: usize) -> 
     Ok(())
 }
 
-fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
+pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
     write!(out, "/")?;
     for b in s.chars() {
         match b {
