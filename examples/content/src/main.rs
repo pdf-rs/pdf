@@ -6,13 +6,6 @@ use pdf::error::PdfError;
 use pdf::content::*;
 use pdf::build::*;
 
-macro_rules! ops {
-    ($($name:ident $($arg:expr),* ;)*) => (
-        vec![ $(Operation::new(stringify!($name), vec![$($arg.into()),*]) ),* ]
-    );
-}
-
-
 fn main() -> Result<(), PdfError> {
     let path = PathBuf::from(env::args_os().nth(1).expect("no file given"));
     
@@ -22,16 +15,16 @@ fn main() -> Result<(), PdfError> {
     for page in file.pages().take(1) {
         let page = page.unwrap();
         if let Some(ref c) = page.contents {
-            println!("{}", c);
+            println!("{:?}", c);
         }
 
         let content = Content {
-            operations: ops![
-                m 100, 100;
-                l 100, 200;
-                l 200, 100;
-                l 200, 200;
-                S;
+            operations: vec![
+                Op::MoveTo { p: Point { x: 100., y: 100. } },
+                Op::LineTo { p: Point { x: 100., y: 200. } },
+                Op::LineTo { p: Point { x: 200., y: 100. } },
+                Op::LineTo { p: Point { x: 200., y: 200. } },
+                Op::Stroke { close: true }
             ]
         };
         pages.push(PageBuilder::from_content(content));

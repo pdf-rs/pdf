@@ -498,12 +498,31 @@ pub struct ImageDict {
 }
 
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Copy, Clone)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
     Saturation,
     Perceptual,
+}
+impl RenderingIntent {
+    pub fn from_str(s: &str) -> Option<RenderingIntent> {
+        match s {
+            "AbsoluteColorimetric" => Some(RenderingIntent::AbsoluteColorimetric),
+            "RelativeColorimetric" => Some(RenderingIntent::RelativeColorimetric),
+            "Perceptual" => Some(RenderingIntent::Perceptual),
+            "Saturation" => Some(RenderingIntent::Saturation),
+            _ => None
+        }
+    }
+    pub fn to_str(self) -> &'static str {
+        match self {
+            RenderingIntent::AbsoluteColorimetric => "AbsoluteColorimetric",
+            RenderingIntent::RelativeColorimetric => "RelativeColorimetric",
+            RenderingIntent::Perceptual => "Perceptual",
+            RenderingIntent::Saturation => "Saturation",
+        }
+    }
 }
 
 
