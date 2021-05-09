@@ -395,6 +395,9 @@ impl<'a> Substr<'a> {
     pub fn as_slice(&self) -> &'a [u8] {
         self.slice
     }
+    pub fn as_str(&self) -> Result<&str> {
+        std::str::from_utf8(self.slice).map_err(|e| PdfError::Parse { source: e.into() })
+    }
 
     pub fn equals(&self, other: impl AsRef<[u8]>) -> bool {
         self.slice == other.as_ref()

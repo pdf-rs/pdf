@@ -8,6 +8,9 @@ pub enum PdfError {
     #[snafu(display("Unexpected end of file"))]
     EOF,
 
+    #[snafu(display("Not enough Operator arguments"))]
+    NoOpArg,
+
     #[snafu(display("Error parsing from string: {}", source))]
     Parse { source: Box<dyn Error + Send + Sync> },
 
