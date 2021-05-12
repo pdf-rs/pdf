@@ -429,7 +429,7 @@ pub type PostScriptXObject = Stream<PostScriptDict>;
 /// A variant of XObject
 pub type ImageXObject = Stream<ImageDict>;
 /// A variant of XObject
-pub type FormXObject = Content;
+pub type FormXObject = Stream<FormDict>;
 
 #[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="PS")]
@@ -510,7 +510,47 @@ pub enum RenderingIntent {
 #[derive(Object, Debug)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
-    // TODO
+    #[pdf(key="FormType", default="1")]
+    pub form_type: i32,
+
+    #[pdf(key="Name")]
+    pub name: Option<String>,
+
+    #[pdf(key="LastModified")]
+    pub last_modified: Option<String>,
+
+    #[pdf(key="BBox")]
+    pub bbox: Rect,
+
+    #[pdf(key="Matrix")]
+    pub matrix: Option<Primitive>,
+
+    #[pdf(key="Resources")]
+    pub resources: Option<MaybeRef<Resources>>,
+
+    #[pdf(key="Group")]
+    pub group: Option<Dictionary>,
+
+    #[pdf(key="Ref")]
+    pub reference: Option<Dictionary>,
+
+    #[pdf(key="Metadata")]
+    pub metadata: Option<Ref<Stream>>,
+
+    #[pdf(key="PieceInfo")]
+    pub piece_info: Option<Dictionary>,
+
+    #[pdf(key="StructParent")]
+    pub struct_parent: Option<i32>,
+
+    #[pdf(key="StructParents")]
+    pub struct_parents: Option<i32>,
+
+    #[pdf(key="OPI")]
+    pub opi: Option<Dictionary>,
+
+    #[pdf(other)]
+    pub other: Dictionary,
 }
 
 
