@@ -1,8 +1,6 @@
 /// PDF content streams.
 use std::fmt::{self, Display};
-use std::mem::replace;
 use std::cmp::Ordering;
-use std::io;
 use itertools::Itertools;
 
 use crate::error::*;
@@ -10,26 +8,13 @@ use crate::object::*;
 use crate::parser::{Lexer, parse_with_lexer};
 use crate::primitive::*;
 
-/// Operation in a PDF content stream.
-#[derive(Debug, Clone)]
-pub struct Operation {
-    pub operator: String,
-    pub operands: Vec<Primitive>,
-}
-
-impl Operation {
-    pub fn new(operator: impl Into<String>, operands: Vec<Primitive>) -> Operation {
-        Operation{
-            operator: operator.into(),
-            operands,
-        }
-    }
-}
-
-
 /// Represents a PDF content stream - a `Vec` of `Operator`s
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Content {
+    /// The raw content stream parts. usually one, but could be any number.
+    pub parts: Vec<Stream<()>>,
+
+    /// The parsed operations. You probably want to use these.
     pub operations: Vec<Op>,
 }
 
@@ -156,10 +141,16 @@ impl OpBuilder {
         let mut push = move |op| ops.push(op);
 
         match op {
-            "b"   => push(Op::FillAndStroke { close: true, winding: NonZero }),
-            "B"   => push(Op::FillAndStroke { close: false, winding: NonZero }),
-            "b*"  => push(Op::FillAndStroke { close: true, winding: EvenOdd }),
-            "B*"  => push(Op::FillAndStroke { close: false, winding: EvenOdd }),
+            "b"   => {
+                push(Op::Close);
+                push(Op::FillAndStroke { winding: NonZero });
+            },
+            "B"   => push(Op::FillAndStroke { winding: NonZero }),
+            "b*"  => {
+                push(Op::Close);
+                push(Op::FillAndStroke { winding: EvenOdd });
+            }
+            "B*"  => push(Op::FillAndStroke { winding: EvenOdd }),
             "BDC" => push(Op::BeginMarkedContent {
                 tag: name(&mut args)?,
                 properties: Some(args.next().ok_or(PdfError::NoOpArg)?)
@@ -264,13 +255,16 @@ impl OpBuilder {
             "RG"  => push(Op::StrokeColor { color: Color::Rgb(rgb(&mut args)?) }),
             "rg"  => push(Op::FillColor { color: Color::Rgb(rgb(&mut args)?) }),
             "ri"  => {
-                let s = args.next().ok_or(PdfError::NoOpArg)?.as_name()?;
-                let intent = RenderingIntent::from_str(s)
+                let s = name(&mut args)?;
+                let intent = RenderingIntent::from_str(&s)
                     .ok_or_else(|| PdfError::Other { msg: format!("invalid rendering intent {}", s) })?;
                 push(Op::RenderingIntent { intent });
             },
-            "s"   => push(Op::Stroke { close: true }),
-            "S"   => push(Op::Stroke { close: false }),
+            "s"   => {
+                push(Op::Close);
+                push(Op::Stroke);
+            }
+            "S"   => push(Op::Stroke),
             "SC" | "SCN" => {
                 push(Op::StrokeColor { color: Color::Other(args.collect()) });
             }
@@ -350,181 +344,229 @@ impl Object for Content {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
         let mut ops = OpBuilder::new();
-        
+        let mut parts: Vec<ContentStream> = vec![];
+
         match p {
-            Primitive::Array(parts) => {
-                for p in parts {
+            Primitive::Array(arr) => {
+                for p in arr {
                     let part = t!(ContentStream::from_primitive(p, resolve));
                     let data = t!(part.data());
                     ops.parse(&data, resolve)?;
+                    parts.push(part);
                 }
             }
             p => {
-                ops.parse(
-                    t!(t!(ContentStream::from_primitive(p, resolve)).data()),
-                    resolve
-                )?;
+                let part = t!(ContentStream::from_primitive(p, resolve));
+                let data = t!(part.data());
+                ops.parse(&data, resolve)?;
+                parts.push(part);
             }
         }
 
-        Ok(Content { operations: ops.ops })
+        Ok(Content { operations: ops.ops, parts })
+    }
+}
+
+fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
+    use Op::*;
+    use std::io::Write;
+
+    let mut data = Vec::new();
+    let mut current_point = None;
+    let f = &mut data;
+
+    while ops.len() > 0 {
+        let mut advance = 1;
+        match ops[0] {
+            BeginMarkedContent { ref tag, properties: Some(ref name) } => {
+                serialize_name(&tag, f)?;
+                write!(f, " ")?;
+                name.serialize(f, 0)?;
+                writeln!(f, " BDC")?;
+            }
+            BeginMarkedContent { ref tag, properties: None } => {
+                serialize_name(&tag, f)?;
+                writeln!(f, " BMC")?;
+            }
+            MarkedContentPoint { ref tag, properties: Some(ref name) } => {
+                serialize_name(&tag, f)?;
+                write!(f, " ")?;
+                name.serialize(f, 0)?;
+                writeln!(f, " DP")?;
+            }
+            MarkedContentPoint { ref tag, properties: None } => {
+                serialize_name(&tag, f)?;
+                writeln!(f, " MP")?;
+            }
+            EndMarkedContent => writeln!(f, "EMC")?,
+            Close => match ops.get(1) {
+                Some(Stroke) => {
+                    writeln!(f, "s")?;
+                    advance += 1;
+                }
+                Some(FillAndStroke { winding: Winding::NonZero }) => {
+                    writeln!(f, "b")?;
+                    advance += 1;
+                }
+                Some(FillAndStroke { winding: Winding::EvenOdd }) => {
+                    writeln!(f, "b*")?;
+                    advance += 1;
+                }
+                _ => writeln!(f, "h")?,
+            }
+            MoveTo { p } => {
+                writeln!(f, "{} m", p)?;
+                current_point = Some(p);
+            }
+            LineTo { p } => {
+                writeln!(f, "{} l", p)?;
+                current_point = Some(p);
+            },
+            CurveTo { c1, c2, p } => {
+                if Some(c1) == current_point {
+                    writeln!(f, "{} {} v", c2, p)?;
+                } else if c2 == p {
+                    writeln!(f, "{} {} y", c1, p)?;
+                } else {
+                    writeln!(f, "{} {} {} y", c1, c2, p)?;
+                }
+                current_point = Some(p);
+            },
+            Rect { rect } => writeln!(f, "{} re", rect)?,
+            EndPath => writeln!(f, "n")?,
+            Stroke => writeln!(f, "S")?,
+            FillAndStroke { winding: Winding::NonZero } => writeln!(f, "B")?,
+            FillAndStroke { winding: Winding::EvenOdd } => writeln!(f, "B*")?,
+            Fill { winding: Winding::NonZero } => writeln!(f, "f")?,
+            Fill { winding: Winding::EvenOdd } => writeln!(f, "f*")?,
+            Shade { ref name } => {
+                serialize_name(name, f)?;
+                writeln!(f, " sh")?;
+            },
+            Clip { winding: Winding::NonZero } => writeln!(f, "W")?,
+            Clip { winding: Winding::EvenOdd } => writeln!(f, "W*")?,
+            Save => writeln!(f, "q")?,
+            Restore => writeln!(f, "Q")?,
+            Transform { matrix } => writeln!(f, "{} cm", matrix)?,
+            LineWidth { width } => writeln!(f, "{} w", width)?,
+            Dash { ref pattern, phase } => write!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
+            LineJoin { join } => writeln!(f, "{} j", join as u8)?,
+            LineCap { cap } => writeln!(f, "{} J", cap as u8)?,
+            MiterLimit { limit } => writeln!(f, "{} M", limit)?,
+            Flatness { tolerance } => writeln!(f, "{} i", tolerance)?,
+            GraphicsState { ref name } => {
+                serialize_name(name, f)?;
+                writeln!(f, " gs")?;
+            },
+            StrokeColor { color: Color::Gray(g) } => writeln!(f, "{} G", g)?,
+            StrokeColor { color: Color::Rgb(rgb) } => writeln!(f, "{} RG", rgb)?,
+            StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
+            StrokeColor { color: Color::Other(ref args) } =>  {
+                for p in args {
+                    p.serialize(f, 0)?;
+                    write!(f, " ")?;
+                }
+                writeln!(f, "SCN")?;
+            }
+            FillColor { color: Color::Gray(g) } => writeln!(f, "{} g", g)?,
+            FillColor { color: Color::Rgb(rgb) } => writeln!(f, "{} rg", rgb)?,
+            FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
+            FillColor { color: Color::Other(ref args) } => {
+                for p in args {
+                    p.serialize(f, 0)?;
+                    write!(f, " ")?;
+                }
+                writeln!(f, "scn")?;
+            }
+            FillColorSpace { ref name } => {
+                serialize_name(name, f)?;
+                writeln!(f, " cs")?;
+            },
+            StrokeColorSpace { ref name } => {
+                serialize_name(name, f)?;
+                writeln!(f, " CS")?;
+            },
+
+            RenderingIntent { intent } => writeln!(f, "{} ri", intent.to_str())?,
+            Op::BeginText => writeln!(f, "BT")?,
+            Op::EndText => writeln!(f, "ET")?,
+            CharSpacing { char_space } => writeln!(f, "{} Tc", char_space)?,
+            WordSpacing { word_space } => {
+                if let [
+                    Op::CharSpacing { char_space },
+                    Op::TextNewline,
+                    Op::TextDraw { ref text },
+                    ..
+                ] = ops[1..] {
+                    write!(f, "{} {} ", word_space, char_space)?;
+                    text.serialize(f)?;
+                    writeln!(f, " \"")?;
+                    advance += 3;
+                } else {
+                    writeln!(f, "{} Tw", word_space)?;
+                }
+            }
+            TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
+            Leading { leading } => match ops[1..] {
+                [Op::TextPosition { translation }, ..] if leading == -translation.x => {
+                    writeln!(f, "{} {} TD", translation.x, translation.y)?;
+                    advance += 1;
+                }
+                _ => {
+                    writeln!(f, "{} TL", leading)?;
+                }
+            }
+            TextFont { ref name, ref size } => {
+                serialize_name(name, f)?;
+                writeln!(f, " {} Tf", size)?;
+            },
+            TextRenderMode { mode } => writeln!(f, "{} Tr", mode as u8)?,
+            TextRise { rise } => writeln!(f, "{} Ts", rise)?,
+            TextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
+            TextMatrix { matrix } => writeln!(f, "{} Tm", matrix)?,
+            TextNewline => {
+                if let [Op::TextDraw { ref text }, ..] = ops[1..] {
+                    text.serialize(f)?;
+                    writeln!(f, " '")?;
+                    advance += 1;
+                } else {
+                    writeln!(f, "T*")?;
+                }
+            },
+            TextDraw { ref text } => {
+                text.serialize(f)?;
+                writeln!(f, " Tj")?;
+            },
+            TextDrawAdjusted { ref array } => {
+                writeln!(f, "[{}] TJ", array.iter().format(" "))?;
+            },
+            XObject { ref name } => {
+                serialize_name(name, f)?;
+                writeln!(f, " Do")?;
+            },
+        }
+        ops = &ops[advance..];
+    }
+    Ok(data)
+}
+
+impl Content {
+    pub fn from_ops(operations: Vec<Op>) -> Self {
+        let data = serialize_ops(&operations).unwrap();
+        Content {
+            operations,
+            parts: vec![Stream::new((), data)]
+        }
     }
 }
 
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        use std::io::Write;
-        use Op::*;
-
-        let mut data = Vec::new();
-        let f = &mut data;
-        let mut ops = &self.operations[..];
-        let mut current_point = None;
-
-        while ops.len() > 0 {
-            let mut advance = 1;
-            match ops[0] {
-                BeginMarkedContent { tag, properties: Some(ref name) } => writeln!(f, "/{} /{} BDC", tag, name)?,
-                BeginMarkedContent { tag, properties: None } => writeln!(f, "/{} BMC", tag)?,
-                EndMarkedContent => writeln!(f, "EMC")?,
-                Close => writeln!(f, "h")?,
-                MoveTo { p } => {
-                    writeln!(f, "{} m", p)?;
-                    current_point = Some(p);
-                }
-                LineTo { p } => {
-                    writeln!(f, "{} l", p)?;
-                    current_point = Some(p);
-                },
-                CurveTo { c1, c2, p } => {
-                    if Some(c1) == current_point {
-                        writeln!(f, "{} {} v", c2, p)?;
-                    } else if c2 == p {
-                        writeln!(f, "{} {} y", c1, p)?;
-                    } else {
-                        writeln!(f, "{} {} {} y", c1, c2, p)?;
-                    }
-                    current_point = Some(p);
-                },
-                Rect { rect } => writeln!(f, "{} re", rect)?,
-                EndPath => writeln!(f, "n")?,
-                Stroke { close: false } => writeln!(f, "S")?,
-                Stroke { close: true } => writeln!(f, "s")?,
-                FillAndStroke { close: true, winding: Winding::NonZero } => writeln!(f, "b")?,
-                FillAndStroke { close: false, winding: Winding::NonZero } => writeln!(f, "B")?,
-                FillAndStroke { close: true, winding: Winding::EvenOdd } => writeln!(f, "b*")?,
-                FillAndStroke { close: false, winding: Winding::EvenOdd } => writeln!(f, "B*")?,
-                Fill { winding: Winding::NonZero } => writeln!(f, "f")?,
-                Fill { winding: Winding::EvenOdd } => writeln!(f, "f*")?,
-                Shade { ref name } => {
-                    serialize_name(name, f)?;
-                    writeln!(" sh")?;
-                },
-                Clip { winding: Winding::NonZero } => writeln!(f, "W")?,
-                Clip { winding: Winding::EvenOdd } => writeln!(f, "W*")?,
-                Save => writeln!(f, "q")?,
-                Restore => writeln!(f, "Q")?,
-                Transform { matrix } => writeln!(f, "{} cm", matrix)?,
-                LineWidth { width } => writeln!(f, "{} w", width)?,
-                Dash { ref pattern, phase } => write!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
-                LineJoin { join } => writeln!(f, "{} j", join as u8)?,
-                LineCap { cap } => writeln!(f, "{} J", cap as u8)?,
-                MiterLimit { limit } => writeln!(f, "{} M", limit)?,
-                Flatness { tolerance } => writeln!(f, "{} i", tolerance)?,
-                GraphicsState { ref name } => {
-                    serialize_name(name, f)?;
-                    writeln!(f, " gs")?;
-                },
-                StrokeColor { color: Color::Gray(g) } => writeln!(f, "{} G", g)?,
-                StrokeColor { color: Color::Rgb(rgb) } => writeln!(f, "{} RG", rgb)?,
-                StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
-                StrokeColor { color: Color::Other(ref args) } =>  {
-                    for p in args {
-                        p.serialize(f, 0)?;
-                        write!(f, " ")?;
-                    }
-                    writeln!(f, "SCN")?;
-                }
-                FillColor { color: Color::Gray(g) } => writeln!(f, "{} g", g)?,
-                FillColor { color: Color::Rgb(rgb) } => writeln!(f, "{} rg", rgb)?,
-                FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
-                FillColor { color: Color::Other(ref args) } => {
-                    for p in args {
-                        p.serialize(f, 0)?;
-                        write!(f, " ")?;
-                    }
-                    writeln!(f, "scn")?;
-                }
-                FillColorSpace { ref name } => {
-                    serialize_name(name, f)?;
-                    writeln!(f, " cs")?;
-                },
-                StrokeColorSpace { ref name } => {
-                    serialize_name(name, f)?;
-                    writeln!(f, " CS")?;
-                },
-
-                RenderingIntent { intent } => writeln!(f, "{} ri", intent.to_str())?,
-                Op::BeginText => writeln!(f, "BT")?,
-                Op::EndText => writeln!(f, "ET")?,
-                CharSpacing { char_space } => writeln!(f, "{} Tc", char_space)?,
-                WordSpacing { word_space } => {
-                    if let [
-                        Op::CharSpacing { char_space },
-                        Op::TextNewline,
-                        Op::TextDraw { ref text },
-                        ..
-                    ] = ops[1..] {
-                        write!(f, "{} {} ", word_space, char_space)?;
-                        text.serialize(f)?;
-                        writeln!(f, " \"")?;
-                        advance += 3;
-                    } else {
-                        writeln!(f, "{} Tw", word_space)?;
-                    }
-                }
-                TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
-                Leading { leading } => match ops[1..] {
-                    [Op::TextPosition { translation }, ..] if leading == -translation.x => {
-                        writeln!(f, "{} {} TD", translation.x, translation.y)?;
-                        advance += 1;
-                    }
-                    _ => {
-                        writeln!(f, "{} TL", leading)?;
-                    }
-                }
-                TextFont { ref name, ref size } => {
-                    serialize_name(name, f)?;
-                    writeln!(f, " {} Tf", size)?;
-                },
-                TextRenderMode { mode } => writeln!(f, "{} Tr", mode as u8)?,
-                TextRise { rise } => writeln!(f, "{} Ts", rise)?,
-                TextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
-                TextMatrix { matrix: Matrix { a, b, c, d, e, f } } => writeln!(f, "{} {} {} {} {} {} Tm", a, b, c, d, e, f),
-                TextNewline => {
-                    if let [Op::TextDraw { ref text }, ..] = ops[1..] {
-                        text.serialize(f)?;
-                        writeln!(f, " '")?;
-                        advance += 1;
-                    } else {
-                        writeln!(f, "T*")?;
-                    }
-                },
-                TextDraw { ref text } => {
-                    text.serialize(f)?;
-                    writeln!(f, " Tj")?;
-                },
-                TextDrawAdjusted { ref array } => {
-                    writeln!(f, "[{}] TJ", array.iter().format(" "))?;
-                },
-                XObject { ref name } => {
-                    serialize_name(name, f)?;
-                    writeln!(f, " Do")?;
-                },
-            }
-            ops = &ops[advance..];
+        if self.parts.len() == 1 {
+            self.parts[0].to_primitive(update)
+        } else {
+            self.parts.to_primitive(update)
         }
-        Stream::new((), data).to_primitive(update)
     }
 }
 
@@ -667,12 +709,14 @@ pub enum Op {
     Rect { rect: Rect },
     EndPath,
 
-    Stroke { close: bool },
+    Stroke,
 
     /// Fill and Stroke operation
     /// 
     /// generated by operators `b`, `B`, `b*`, `B*`
-    FillAndStroke { close: bool, winding: Winding },
+    /// `close` indicates whether the path should be closed first
+    FillAndStroke { winding: Winding },
+
 
     Fill { winding: Winding },
 

@@ -101,36 +101,37 @@ impl Cache {
     }
 }
 
-fn add_primitive(p: &Primitive, out: &mut String, info: &FontInfo) {
-    // println!("p: {:?}", p);
-    match p {
-        &Primitive::String(ref data) => {
-            if let Some(encoding) = info.font.encoding() {
-                match encoding.base {
-                    BaseEncoding::IdentityH => {
-                        for w in data.as_bytes().windows(2) {
-                            let cp = u16::from_be_bytes(w.try_into().unwrap());
-                            if let Some(s) = info.cmap.get(&cp) {
-                                out.push_str(s);
-                            }
-                        }
+fn add_string(data: &[u8], out: &mut String, info: &FontInfo) {
+    if let Some(encoding) = info.font.encoding() {
+        match encoding.base {
+            BaseEncoding::IdentityH => {
+                for w in data.windows(2) {
+                    let cp = u16::from_be_bytes(w.try_into().unwrap());
+                    if let Some(s) = info.cmap.get(&cp) {
+                        out.push_str(s);
                     }
-                    _ => {
-                        for &b in data.as_bytes() {
-                            if let Some(s) = info.cmap.get(&(b as u16)) {
-                                out.push_str(s);
-                            } else {
-                                out.push(b as char);
-                            }
-                        }
-                    }
-                };
+                }
             }
+            _ => {
+                for &b in data {
+                    if let Some(s) = info.cmap.get(&(b as u16)) {
+                        out.push_str(s);
+                    } else {
+                        out.push(b as char);
+                    }
+                }
+            }
+        };
+    }
+}
+
+fn add_array(arr: &[Primitive], out: &mut String, info: &FontInfo) {
+    // println!("p: {:?}", p);
+    for p in arr.iter() {
+        match p {
+            Primitive::String(s) => add_string(&s.data, out, info),
+            _ => {}
         }
-        &Primitive::Array(ref a) => for p in a.iter() {
-            add_primitive(p, out, info);
-        }
-        _ => ()
     }
 }
 
@@ -157,11 +158,10 @@ fn main() -> Result<(), PdfError> {
         }
         let mut current_font = None;
         let contents = page.contents.as_ref().unwrap();
-        for Operation { ref operator, ref operands } in &contents.operations {
-            // println!("{} {:?}", operator, operands);
-            match operator.as_str() {
-                "gs" => {
-                    let gs = resources.graphics_states.get(operands[0].as_name().unwrap()).unwrap();
+        for op in &contents.operations {
+            match op {
+                Op::GraphicsState { name } => {
+                    let gs = resources.graphics_states.get(name).unwrap();
                     
                     if let Some((font, _)) = gs.font {
                         let font = file.get(font)?;
@@ -169,16 +169,16 @@ fn main() -> Result<(), PdfError> {
                     }
                 }
                 // text font
-                "Tf" => {
-                    let font_name = operands[0].as_name().expect("font name is not a string");
-                    current_font = cache.get_font(font_name);
+                Op::TextFont { name, .. } => {
+                    current_font = cache.get_font(name);
                 }
-                "Tj" | "TJ" | "BT" => {
-                    if let Some(font) = current_font {
-                        operands.iter().for_each(|p| add_primitive(p, &mut out, font));
-                    }
+                Op::TextDraw { text } => if let Some(font) = current_font {
+                    add_string(&text.data, &mut out, font);
                 }
-                "Td" | "TD" | "T*" => {
+                Op::TextDrawAdjusted { array } =>  if let Some(font) = current_font {
+                    add_array(array, &mut out, font);
+                }
+                Op::TextNewline => {
                     out.push('\n');
                 }
                 _ => {}
