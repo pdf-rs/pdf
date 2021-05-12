@@ -8,13 +8,13 @@ use crate::enc::{self, decode};
 use once_cell::unsync::OnceCell;
 
 use std::borrow::Cow;
-use std::io;
 use std::ops::Deref;
 use std::fmt;
 
 
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
+#[derive(Clone)]
 pub struct Stream<I=()> {
     pub info: StreamInfo<I>,
     raw_data: Vec<u8>,

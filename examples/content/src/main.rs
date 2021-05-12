@@ -18,15 +18,14 @@ fn main() -> Result<(), PdfError> {
             println!("{:?}", c);
         }
 
-        let content = Content {
-            operations: vec![
-                Op::MoveTo { p: Point { x: 100., y: 100. } },
-                Op::LineTo { p: Point { x: 100., y: 200. } },
-                Op::LineTo { p: Point { x: 200., y: 100. } },
-                Op::LineTo { p: Point { x: 200., y: 200. } },
-                Op::Stroke { close: true }
-            ]
-        };
+        let content = Content::from_ops(vec![
+            Op::MoveTo { p: Point { x: 100., y: 100. } },
+            Op::LineTo { p: Point { x: 100., y: 200. } },
+            Op::LineTo { p: Point { x: 200., y: 100. } },
+            Op::LineTo { p: Point { x: 200., y: 200. } },
+            Op::Close,
+            Op::Stroke,
+        ]);
         pages.push(PageBuilder::from_content(content));
     }
     let catalog = CatalogBuilder::from_pages(pages)
