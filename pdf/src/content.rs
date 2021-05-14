@@ -90,6 +90,84 @@ fn array(args: &mut impl Iterator<Item=Primitive>) -> Result<Vec<Primitive>> {
     }
 }
 
+fn expand_abbr(name: String, alt: &[(&str, &str)]) -> String {
+    for &(p, r) in alt {
+        if name == p {
+            return r.into();
+        }
+    }
+    name
+}
+fn expand_abbr_list(p: Primitive, alt: &[(&str, &str)]) -> Primitive {
+    match p {
+        Primitive::Name(name) => Primitive::Name(expand_abbr(name, alt)),
+        Primitive::Array(items) => Primitive::Array(items.into_iter().map(|p| expand_abbr_list(p, alt)).collect()),
+        p => p
+    }
+}
+
+fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<ImageDict>> {
+    let mut dict = Dictionary::new();
+    loop {
+        let backup_pos = lexer.get_pos();
+        let obj = parse_with_lexer(&mut lexer, &NoResolve);
+        let key = match obj {
+            Ok(Primitive::Name(key)) => key,
+            Err(e) if e.is_eof() => return Err(e),
+            Err(_) => {
+                lexer.set_pos(backup_pos);
+                break;
+            }
+        };
+        let key = expand_abbr(key, &[
+            ("BPC", "BitsPerComponent"),
+            ("CS", "ColorSpace"),
+            ("D", "Decode"),
+            ("DP", "DecodeParms"),
+            ("F", "Filter"),
+            ("H", "Height"),
+            ("IM", "ImageMask"),
+            ("I", "Interpolate"),
+            ("W", "Width"),
+        ]);
+        let val = parse_with_lexer(&mut lexer, &NoResolve)?;
+        dict.insert(key, val);
+    }
+    lexer.next_expect("ID")?;
+
+    // ugh
+    let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
+    let color_space = expand_abbr(
+        dict.require("InlineImage", "ColorSpace")?.into_name()?,
+        &[
+            ("G", "DeviceGray"),
+            ("RGB", "DeviceRGB"),
+            ("CMYK", "DeviceCMYK"),
+            ("I", "Indexed")
+        ]
+    );
+    let decode = dict.require("InlineImage", "Decode")?;
+    let decode_parms = dict.require("InlineImage", "DecodeParms")?;
+    let filter = expand_abbr_list(
+        dict.require("InlineImage", "Filter")?,
+        &[
+            ("AHx", "ASCIIHexDecode"),
+            ("A85", "ASCII85Decode"),
+            ("LZW", "LZWDecode"),
+            ("Fl", "FlateDecode"),
+            ("RL", "RunLengthDecode"),
+            ("CCF", "CCITTFaxDecode"),
+            ("DCT", "DCTDecode"),
+        ]
+    );
+    let filter = Vec<StreamFilter>::from_primitive(filter)?;
+    let height = dict.require("InlineImage", "Height")?.as_integer()?;
+    let image_mask = dict.get("ImageMask").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
+    let intent = dict.get("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
+    let interpolate = dict.get("Interpolate").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
+    let width = dict.require("InlineImage", "Width")?.as_integer()?;
+
+}
 struct OpBuilder {
     last: Point,
     compability_section: bool,
@@ -123,7 +201,7 @@ impl OpBuilder {
                     lexer.set_pos(backup_pos);
                     let op = t!(lexer.next());
                     let operator = t!(op.as_str());
-                    t!(self.add(operator, buffer.drain(..)));
+                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve));
                 }
             }
             match lexer.get_pos().cmp(&data.len()) {
@@ -134,7 +212,7 @@ impl OpBuilder {
         }
         Ok(())
     }
-    fn add(&mut self, op: &str, mut args: impl Iterator<Item=Primitive>) -> Result<()> {
+    fn add(&mut self, op: &str, mut args: impl Iterator<Item=Primitive>, lexer: &mut Lexer, resolve: &impl Resolve) -> Result<()> {
         use Winding::*;
 
         let ops = &mut self.ops;
@@ -155,7 +233,7 @@ impl OpBuilder {
                 tag: name(&mut args)?,
                 properties: Some(args.next().ok_or(PdfError::NoOpArg)?)
             }),
-            "BI"  => unimplemented!(),
+            "BI"  => push(Op::InlineImage { image: inline_image(lexer, resolve)? }),
             "BMC" => push(Op::BeginMarkedContent {
                 tag: name(&mut args)?,
                 properties: None
@@ -276,17 +354,17 @@ impl OpBuilder {
             }
             "T*"  => push(Op::TextNewline),
             "Tc"  => push(Op::CharSpacing { char_space: number(&mut args)? }),
-            "Td"  => push(Op::TextPosition { translation: point(&mut args)? }),
+            "Td"  => push(Op::MoveTextPosition { translation: point(&mut args)? }),
             "TD"  => {
                 let translation = point(&mut args)?;
                 push(Op::Leading { leading: -translation.x });
-                push(Op::TextPosition { translation });
+                push(Op:MoveTextPosition { translation });
             }
             "Tf"  => push(Op::TextFont { name: name(&mut args)?, size: number(&mut args)? }),
             "Tj"  => push(Op::TextDraw { text: string(&mut args)? }),
             "TJ"  => push(Op::TextDrawAdjusted { array: array(&mut args)? }),
             "TL"  => push(Op::Leading { leading: number(&mut args)? }),
-            "Tm"  => push(Op::TextMatrix { matrix: matrix(&mut args)? }), 
+            "Tm"  => push(Op::SetTextMatrix { matrix: matrix(&mut args)? }), 
             "Tr"  => {
                 use TextMode::*;
 
@@ -508,7 +586,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             }
             TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
             Leading { leading } => match ops[1..] {
-                [Op::TextPosition { translation }, ..] if leading == -translation.x => {
+                [Op::MoveTextPosition { translation }, ..] if leading == -translation.x => {
                     writeln!(f, "{} {} TD", translation.x, translation.y)?;
                     advance += 1;
                 }
@@ -522,8 +600,8 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             },
             TextRenderMode { mode } => writeln!(f, "{} Tr", mode as u8)?,
             TextRise { rise } => writeln!(f, "{} Ts", rise)?,
-            TextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
-            TextMatrix { matrix } => writeln!(f, "{} Tm", matrix)?,
+            MoveTextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
+            SetTextMatrix { matrix } => writeln!(f, "{} Tm", matrix)?,
             TextNewline => {
                 if let [Op::TextDraw { ref text }, ..] = ops[1..] {
                     text.serialize(f)?;
@@ -540,6 +618,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             TextDrawAdjusted { ref array } => {
                 writeln!(f, "[{}] TJ", array.iter().format(" "))?;
             },
+            InlineImage { image: Stream::<ImageDict> },
             XObject { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " Do")?;
@@ -763,10 +842,10 @@ pub enum Op {
     TextRise { rise: f32 },
 
     /// `Td`, `TD`
-    TextPosition { translation: Point },
+    MoveTextPosition { translation: Point },
 
     /// `Tm`
-    TextMatrix { matrix: Matrix },
+    SetTextMatrix { matrix: Matrix },
 
     /// `T*`
     TextNewline,
