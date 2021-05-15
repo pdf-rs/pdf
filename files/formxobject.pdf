@@ -1,0 +1,70 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog
+   /Pages 2 0 R
+>>
+endobj
+2 0 obj
+<< /Kids [3 0 R]
+   /Type /Pages
+   /Count 1
+>>
+endobj
+3 0 obj
+<< /Contents 4 0 R
+   /Type /Page
+   /Resources << /XObject << /Im0 5 0 R >> >>
+   /Parent 2 0 R
+   /MediaBox [0 0 180 240]
+>>
+endobj
+4 0 obj
+<< /Length 93 >>
+stream
+/DeviceRGB cs /DeviceRGB CS
+0 0 0.972549 SC
+21.68 194 136.64 26 re
+10 10 m 20 20 l S
+/Im0 Do
+endstream
+endobj
+5 0 obj
+<< /Subtype /Form
+   /Type /XObject
+   /FormType 1
+   /Resources << /Font << /F0 6 0 R >> >>
+   /BBox [0 0 180 240]
+   /Length 47
+>>
+stream
+BT
+/F0 24 Tf
+25.68 200 Td
+(Hello World!) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Subtype /Type1
+   /Type /Font
+   /BaseFont /Times-Roman
+   /Encoding /WinAnsiEncoding
+>>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000067 00000 n 
+0000000130 00000 n 
+0000000272 00000 n 
+0000000414 00000 n 
+0000000626 00000 n 
+trailer
+<< /Root 1 0 R
+   /Size 7
+>>
+startxref
+734
+%%EOF
