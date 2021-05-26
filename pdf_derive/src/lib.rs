@@ -265,6 +265,7 @@ fn enum_pairs(ast: &DeriveInput, data: &DataEnum) -> (Vec<(String, TokenStream2)
 
     let mut pairs = Vec::with_capacity(data.variants.len());
     let mut other = None;
+
     for var in data.variants.iter() {
         let attrs = FieldAttrs::parse(&var.attrs);
         let var_ident = &var.ident;
@@ -293,42 +294,76 @@ fn enum_pairs(ast: &DeriveInput, data: &DataEnum) -> (Vec<(String, TokenStream2)
     (pairs, other)
 }
 
+
 /// Accepts Name to construct enum
 fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let (pairs, other) = enum_pairs(ast, data);
+    let int_count = data.variants.iter().filter(|var| var.discriminant.is_some()).count();
+    if int_count > 0 {
+        assert_eq!(int_count, data.variants.len(), "either none or all variants can have a descriminant");
 
-    let mut parts: Vec<_> = pairs
-        .iter()
-        .map(|(name, var)| {
-            quote! {
-                #name => Ok(#var)
+        let parts = data.variants.iter().map(|var| {
+            if let Some((_, ref expr)) = var.discriminant {
+                let var_ident = &var.ident;
+                let pat = Pat::Lit(PatLit { expr: Box::new(expr.clone()), attrs: vec![] });
+                quote! {
+                    #pat => Ok(#id::#var_ident)
+                }
+            } else {
+                panic!()
             }
-        })
-        .collect();
-
-    if let Some(other_tokens) = other {
-        parts.push(quote! {
-            s => Ok(#other_tokens(s.to_string()))
         });
-    } else {
-        parts.push(quote! {
-            s => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() })
-        });
-    }
 
-    quote! {
-        impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
-            fn from_primitive(p: pdf::primitive::Primitive, _resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
-                match p {
-                    pdf::primitive::Primitive::Name(name) => {
-                        match name.as_str() {
-                            #( #parts, )*
+        quote! {
+            impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
+                fn from_primitive(p: pdf::primitive::Primitive, _resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
+                    match p {
+                        pdf::primitive::Primitive::Integer(i) => {
+                            match i {
+                                #( #parts, )*
+                                _ => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: i.to_string() })
+                            }
                         }
+                        _ => Err(pdf::error::PdfError::UnexpectedPrimitive { expected: "Integer", found: p.get_debug_name() }),
                     }
-                    _ => Err(pdf::error::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
+                }
+            }
+        }
+    } else {
+        let (pairs, other) = enum_pairs(ast, data);
+
+        let mut parts: Vec<_> = pairs
+            .iter()
+            .map(|(name, var)| {
+                quote! {
+                    #name => Ok(#var)
+                }
+            })
+            .collect();
+
+        if let Some(other_tokens) = other {
+            parts.push(quote! {
+                s => Ok(#other_tokens(s.to_string()))
+            });
+        } else {
+            parts.push(quote! {
+                s => Err(pdf::error::PdfError::UnknownVariant { id: stringify!(#id), name: s.to_string() })
+            });
+        }
+
+        quote! {
+            impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {
+                fn from_primitive(p: pdf::primitive::Primitive, _resolve: &impl pdf::object::Resolve) -> pdf::error::Result<Self> {
+                    match p {
+                        pdf::primitive::Primitive::Name(name) => {
+                            match name.as_str() {
+                                #( #parts, )*
+                            }
+                        }
+                        _ => Err(pdf::error::PdfError::UnexpectedPrimitive { expected: "Name", found: p.get_debug_name() }),
+                    }
                 }
             }
         }
@@ -339,31 +374,57 @@ fn impl_objectwrite_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let (pairs, other) = enum_pairs(ast, data);
+    let int_count = data.variants.iter().filter(|var| var.discriminant.is_some()).count();
+    if int_count > 0 {
+        assert_eq!(int_count, data.variants.len(), "either none or all variants can have a descriminant");
 
-    let mut ser_code: Vec<_> = pairs
-        .iter()
-        .map(|(name, var)| {
-            quote! {
-                #var => #name
+        let parts = data.variants.iter().map(|var| {
+            if let Some((_, ref expr)) = var.discriminant {
+                let var_ident = &var.ident;
+                quote! {
+                    #id::#var_ident => Ok(Primitive::Integer(#expr))
+                }
+            } else {
+                panic!()
             }
-        })
-        .collect();
-
-    if let Some(other_tokens) = other {
-        ser_code.push(quote! {
-            #other_tokens(ref name) => name.as_str()
         });
-    }
 
-    quote! {
-        impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
-            fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<Primitive> {
-                let name = match *self {
-                    #( #ser_code, )*
-                };
-                
-                Ok(Primitive::Name(name.into()))
+        quote! {
+            impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
+                fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<Primitive> {
+                    match *self {
+                        #( #parts, )*
+                    }
+                }
+            }
+        }
+    } else {
+        let (pairs, other) = enum_pairs(ast, data);
+
+        let mut ser_code: Vec<_> = pairs
+            .iter()
+            .map(|(name, var)| {
+                quote! {
+                    #var => #name
+                }
+            })
+            .collect();
+
+        if let Some(other_tokens) = other {
+            ser_code.push(quote! {
+                #other_tokens(ref name) => name.as_str()
+            });
+        }
+
+        quote! {
+            impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
+                fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<Primitive> {
+                    let name = match *self {
+                        #( #ser_code, )*
+                    };
+                    
+                    Ok(Primitive::Name(name.into()))
+                }
             }
         }
     }
