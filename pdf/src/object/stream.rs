@@ -27,6 +27,18 @@ impl<I: Object + fmt::Debug> Stream<I> {
         Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
     }
 
+    pub fn new_with_filters(i: I, data: Vec<u8>, filters: Vec<StreamFilter>) -> Stream<I> {
+        Stream {
+            info: StreamInfo {
+                filters,
+                file: None,
+                file_filters: Vec::new(),
+                info: i
+            },
+            raw_data: data,
+            decoded: OnceCell::new()
+        }
+    }
     pub fn new(i: I, data: Vec<u8>) -> Stream<I> {
         Stream {
             info: StreamInfo {
@@ -185,7 +197,7 @@ pub struct StreamInfo<I> {
     dl: Option<usize>,
     */
     // Specialized dictionary entries
-    info: I,
+    pub info: I,
 }
 
 impl<I> Deref for StreamInfo<I> {
