@@ -437,7 +437,7 @@ pub struct PostScriptDict {
     // TODO
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 #[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
@@ -463,7 +463,7 @@ pub struct ImageDict {
 
     // Mask: stream or array
     #[pdf(key="Mask")]
-    pub mask: Primitive,
+    pub mask: Option<Primitive>,
     //
     /// Describes how to map image samples into the range of values appropriate for the image’s color space.
     /// If `image_mask`: either [0 1] or [1 0]. Else, the length must be twice the number of color
@@ -494,7 +494,7 @@ pub struct ImageDict {
     // OC: dict
     
     #[pdf(other)]
-    other: Dictionary
+    pub(crate) other: Dictionary
 }
 
 

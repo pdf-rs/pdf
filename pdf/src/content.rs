@@ -7,6 +7,7 @@ use crate::error::*;
 use crate::object::*;
 use crate::parser::{Lexer, parse_with_lexer};
 use crate::primitive::*;
+use crate::enc::StreamFilter;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
 #[derive(Debug, Clone)]
@@ -90,7 +91,7 @@ fn array(args: &mut impl Iterator<Item=Primitive>) -> Result<Vec<Primitive>> {
     }
 }
 
-fn expand_abbr(name: String, alt: &[(&str, &str)]) -> String {
+fn expand_abbr_name(name: String, alt: &[(&str, &str)]) -> String {
     for &(p, r) in alt {
         if name == p {
             return r.into();
@@ -98,10 +99,10 @@ fn expand_abbr(name: String, alt: &[(&str, &str)]) -> String {
     }
     name
 }
-fn expand_abbr_list(p: Primitive, alt: &[(&str, &str)]) -> Primitive {
+fn expand_abbr(p: Primitive, alt: &[(&str, &str)]) -> Primitive {
     match p {
-        Primitive::Name(name) => Primitive::Name(expand_abbr(name, alt)),
-        Primitive::Array(items) => Primitive::Array(items.into_iter().map(|p| expand_abbr_list(p, alt)).collect()),
+        Primitive::Name(name) => Primitive::Name(expand_abbr_name(name, alt)),
+        Primitive::Array(items) => Primitive::Array(items.into_iter().map(|p| expand_abbr(p, alt)).collect()),
         p => p
     }
 }
@@ -110,7 +111,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
     let mut dict = Dictionary::new();
     loop {
         let backup_pos = lexer.get_pos();
-        let obj = parse_with_lexer(&mut lexer, &NoResolve);
+        let obj = parse_with_lexer(lexer, &NoResolve);
         let key = match obj {
             Ok(Primitive::Name(key)) => key,
             Err(e) if e.is_eof() => return Err(e),
@@ -118,8 +119,9 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
                 lexer.set_pos(backup_pos);
                 break;
             }
+            Ok(_) => bail!("invalid key type")
         };
-        let key = expand_abbr(key, &[
+        let key = expand_abbr_name(key, &[
             ("BPC", "BitsPerComponent"),
             ("CS", "ColorSpace"),
             ("D", "Decode"),
@@ -130,15 +132,16 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
             ("I", "Interpolate"),
             ("W", "Width"),
         ]);
-        let val = parse_with_lexer(&mut lexer, &NoResolve)?;
+        let val = parse_with_lexer(lexer, &NoResolve)?;
         dict.insert(key, val);
     }
     lexer.next_expect("ID")?;
+    let data_start = lexer.get_pos() + 1;
 
     // ugh
     let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
     let color_space = expand_abbr(
-        dict.require("InlineImage", "ColorSpace")?.into_name()?,
+        dict.require("InlineImage", "ColorSpace")?,
         &[
             ("G", "DeviceGray"),
             ("RGB", "DeviceRGB"),
@@ -146,9 +149,9 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
             ("I", "Indexed")
         ]
     );
-    let decode = dict.require("InlineImage", "Decode")?;
-    let decode_parms = dict.require("InlineImage", "DecodeParms")?;
-    let filter = expand_abbr_list(
+    let decode = Object::from_primitive(dict.require("InlineImage", "Decode")?, resolve)?;
+    let decode_parms = dict.require("InlineImage", "DecodeParms")?.into_dictionary(resolve)?;
+    let filter = expand_abbr(
         dict.require("InlineImage", "Filter")?,
         &[
             ("AHx", "ASCIIHexDecode"),
@@ -160,13 +163,42 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
             ("DCT", "DCTDecode"),
         ]
     );
-    let filter = Vec<StreamFilter>::from_primitive(filter)?;
+    let filters = match filter {
+        Primitive::Array(parts) => parts.into_iter()
+            .map(|p| p.as_name().and_then(|kind| StreamFilter::from_kind_and_params(kind, decode_parms.clone(), resolve)))
+            .collect::<Result<_>>()?,
+        Primitive::Name(kind) => vec![StreamFilter::from_kind_and_params(&kind, decode_parms, resolve)?],
+        _ => bail!("invalid filter")
+    };
+    
     let height = dict.require("InlineImage", "Height")?.as_integer()?;
     let image_mask = dict.get("ImageMask").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
-    let intent = dict.get("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
+    let intent = dict.remove("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
     let interpolate = dict.get("Interpolate").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
     let width = dict.require("InlineImage", "Width")?.as_integer()?;
 
+    let image_dict = ImageDict {
+        width,
+        height,
+        color_space: Some(color_space),
+        bits_per_component,
+        intent,
+        image_mask,
+        mask: None,
+        decode,
+        interpolate,
+        struct_parent: None,
+        id: None,
+        smask: None,
+        other: dict,
+    };
+
+    lexer.seek_substr("\nEI").expect("BUGZ");
+    let data_end = lexer.get_pos() - 3;
+
+    let data = lexer.new_substr(data_start .. data_end).to_vec();
+
+    Ok(Stream::new_with_filters(image_dict, data, filters))
 }
 struct OpBuilder {
     last: Point,
@@ -273,7 +305,7 @@ impl OpBuilder {
                 tag: name(&mut args)?,
                 properties: Some(args.next().ok_or(PdfError::NoOpArg)?)
             }),
-            "EI"  => unimplemented!(),
+            "EI"  => bail!("Parse Error. Unexpected 'EI'"),
             "EMC" => push(Op::EndMarkedContent),
             "ET"  => push(Op::EndText),
             "EX"  => self.compability_section = false,
@@ -285,7 +317,7 @@ impl OpBuilder {
             "gs"  => push(Op::GraphicsState { name: name(&mut args)? }),
             "h"   => push(Op::Close),
             "i"   => push(Op::Flatness { tolerance: number(&mut args)? }),
-            "ID"  => unimplemented!(),
+            "ID"  => bail!("Parse Error. Unexpected 'ID'"),
             "j"   => {
                 let n = args.next().ok_or(PdfError::NoOpArg)?.as_integer()?;
                 let join = match n {
@@ -358,7 +390,7 @@ impl OpBuilder {
             "TD"  => {
                 let translation = point(&mut args)?;
                 push(Op::Leading { leading: -translation.x });
-                push(Op:MoveTextPosition { translation });
+                push(Op::MoveTextPosition { translation });
             }
             "Tf"  => push(Op::TextFont { name: name(&mut args)?, size: number(&mut args)? }),
             "Tj"  => push(Op::TextDraw { text: string(&mut args)? }),
@@ -618,7 +650,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             TextDrawAdjusted { ref array } => {
                 writeln!(f, "[{}] TJ", array.iter().format(" "))?;
             },
-            InlineImage { image: Stream::<ImageDict> },
+            InlineImage { ref image } => unimplemented!(),
             XObject { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " Do")?;
@@ -856,4 +888,6 @@ pub enum Op {
     TextDrawAdjusted { array: Vec<Primitive> },
 
     XObject { name: String },
+
+    InlineImage { image: Stream::<ImageDict> },
 }
