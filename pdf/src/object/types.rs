@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
-use crate::content::Content;
+use crate::content::{Content, FormXObject};
 use crate::font::Font;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
@@ -428,8 +428,6 @@ pub enum XObject {
 pub type PostScriptXObject = Stream<PostScriptDict>;
 /// A variant of XObject
 pub type ImageXObject = Stream<ImageDict>;
-/// A variant of XObject
-pub type FormXObject = Stream<FormDict>;
 
 #[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="PS")]
