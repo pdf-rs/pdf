@@ -477,6 +477,25 @@ impl Object for Content {
     }
 }
 
+#[derive(Debug)]
+pub struct FormXObject {
+    pub operations: Vec<Op>,
+    pub stream: Stream<FormDict>,
+}
+impl Object for FormXObject {
+    /// Convert primitive to Self
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let stream = t!(Stream::<FormDict>::from_primitive(p, resolve));
+        let mut ops = OpBuilder::new();
+        ops.parse(stream.data()?, resolve)?;
+        Ok(FormXObject {
+            stream,
+            operations: ops.ops
+        })
+    }
+}
+
+
 fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
     use Op::*;
     use std::io::Write;
