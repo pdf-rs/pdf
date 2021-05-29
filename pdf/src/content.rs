@@ -389,7 +389,7 @@ impl OpBuilder {
             "Td"  => push(Op::MoveTextPosition { translation: point(&mut args)? }),
             "TD"  => {
                 let translation = point(&mut args)?;
-                push(Op::Leading { leading: -translation.x });
+                push(Op::Leading { leading: -translation.y });
                 push(Op::MoveTextPosition { translation });
             }
             "Tf"  => push(Op::TextFont { name: name(&mut args)?, size: number(&mut args)? }),
