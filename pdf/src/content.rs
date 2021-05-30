@@ -482,6 +482,11 @@ pub struct FormXObject {
     pub operations: Vec<Op>,
     pub stream: Stream<FormDict>,
 }
+impl FormXObject {
+    pub fn dict(&self) -> &FormDict {
+        &self.stream.info.info
+    }
+}
 impl Object for FormXObject {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
