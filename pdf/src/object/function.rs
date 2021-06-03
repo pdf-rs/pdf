@@ -95,16 +95,21 @@ impl Object for Function {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),
-            Primitive::Stream(s) => {
-                match s.info.get("FunctionType") {
-                    Some(Primitive::Integer(4)) => {},
-                    p => bail!("found a function stream with type {:?}", p)
-                }
+            Primitive::Stream(mut s) => {
+                let function_type = s.info.require("Function", "FunctionType")?.as_integer()?;
                 let stream = Stream::<()>::from_stream(s, resolve)?;
                 let data = stream.decode()?;
-                let s = std::str::from_utf8(&*data)?;
-                let func = PsFunc::parse(s)?;
-                Ok(Function::PostScript(func))
+                match function_type {
+                    4 => {
+                        let s = std::str::from_utf8(&*data)?;
+                        let func = PsFunc::parse(s)?;
+                        Ok(Function::PostScript(func))
+                    },
+                    0 => {
+                        Ok(Function::Sampled) // TODO implement this!
+                    }
+                    ref p => bail!("found a function stream with type {:?}", p)
+                }
             },
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
             _ => bail!("double indirection")
