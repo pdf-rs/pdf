@@ -465,6 +465,7 @@ impl Object for Content {
                     parts.push(part);
                 }
             }
+            Primitive::Reference(r) => return Self::from_primitive(t!(resolve.resolve(r)), resolve),
             p => {
                 let part = t!(ContentStream::from_primitive(p, resolve));
                 let data = t!(part.data());
