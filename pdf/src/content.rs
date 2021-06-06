@@ -394,7 +394,22 @@ impl OpBuilder {
             }
             "Tf"  => push(Op::TextFont { name: name(&mut args)?, size: number(&mut args)? }),
             "Tj"  => push(Op::TextDraw { text: string(&mut args)? }),
-            "TJ"  => push(Op::TextDrawAdjusted { array: array(&mut args)? }),
+            "TJ"  => {
+                let mut result = Vec::<TextDrawAdjusted>::new();
+
+                for spacing_or_text in array(&mut args)?.into_iter() {
+                    let spacing_or_text = match spacing_or_text {
+                        Primitive::Integer(i) => TextDrawAdjusted::Spacing(i as f32),
+                        Primitive::Number(f) => TextDrawAdjusted::Spacing(f),
+                        Primitive::String(text) => TextDrawAdjusted::Text(text),
+                        p => bail!("invalid primitive in TJ operator: {:?}", p)
+                    };
+
+                    result.push(spacing_or_text);
+                }
+
+                push(Op::TextDrawAdjusted { array: result })
+            }
             "TL"  => push(Op::Leading { leading: number(&mut args)? }),
             "Tm"  => push(Op::SetTextMatrix { matrix: matrix(&mut args)? }), 
             "Tr"  => {
@@ -812,6 +827,20 @@ impl Display for Cmyk {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum TextDrawAdjusted {
+    Text(PdfString),
+    Spacing(f32),
+}
+
+impl Display for TextDrawAdjusted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(text) => write!(f, "{:?}", text),
+            Self::Spacing(spacing) => spacing.fmt(f),
+        }
+    }
+}
 
 /// Graphics Operator
 /// 
@@ -910,7 +939,7 @@ pub enum Op {
     /// `Tj`
     TextDraw { text: PdfString },
 
-    TextDrawAdjusted { array: Vec<Primitive> },
+    TextDrawAdjusted { array: Vec<TextDrawAdjusted> },
 
     XObject { name: String },
 
