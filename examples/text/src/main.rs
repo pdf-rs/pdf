@@ -125,16 +125,6 @@ fn add_string(data: &[u8], out: &mut String, info: &FontInfo) {
     }
 }
 
-fn add_array(arr: &[Primitive], out: &mut String, info: &FontInfo) {
-    // println!("p: {:?}", p);
-    for p in arr.iter() {
-        match p {
-            Primitive::String(s) => add_string(&s.data, out, info),
-            _ => {}
-        }
-    }
-}
-
 fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
@@ -176,7 +166,11 @@ fn main() -> Result<(), PdfError> {
                     add_string(&text.data, &mut out, font);
                 }
                 Op::TextDrawAdjusted { array } =>  if let Some(font) = current_font {
-                    add_array(array, &mut out, font);
+                    for data in array {
+                        if let TextDrawAdjusted::Text(text) = data {
+                            add_string(&text.data, &mut out, font);
+                        }
+                    }
                 }
                 Op::TextNewline => {
                     out.push('\n');
