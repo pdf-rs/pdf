@@ -727,7 +727,7 @@ pub enum LineJoin {
 }
 
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 #[repr(C, align(8))]
 pub struct Point {
     pub x: f32,
@@ -766,6 +766,18 @@ pub struct Matrix {
 impl Display for Matrix {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {} {} {} {}", self.a, self.b, self.c, self.d, self.e, self.f)
+    }
+}
+impl Default for Matrix {
+    fn default() -> Self {
+        Matrix {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        }
     }
 }
 
