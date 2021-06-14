@@ -39,6 +39,7 @@ block-modes = "0.7.0"
 stringprep = "0.1.2"
 sha2 = "0.9.2"
 fax = "0.1.0"
+euclid = { version = "0.22.6", optional = true }
 
 [lib]
 doctest = false

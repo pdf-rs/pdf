@@ -741,6 +741,8 @@ pub enum LineJoin {
     Bevel = 2,
 }
 
+#[cfg(feature = "euclid")]
+pub struct PdfSpace();
 
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
 #[repr(C, align(8))]
@@ -751,6 +753,38 @@ pub struct Point {
 impl Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.x, self.y)
+    }
+}
+#[cfg(feature = "euclid")]
+impl Into<euclid::Point2D<f32, PdfSpace>> for Point {
+    fn into(self) -> euclid::Point2D<f32, PdfSpace> {
+        let Point { x, y } = self;
+
+        euclid::Point2D::new(x, y)
+    }
+}
+#[cfg(feature = "euclid")]
+impl From<euclid::Point2D<f32, PdfSpace>> for Point {
+    fn from(from: euclid::Point2D<f32, PdfSpace>) -> Self {
+        let euclid::Point2D { x, y, .. } = from;
+
+        Point { x, y }
+    }
+}
+#[cfg(feature = "euclid")]
+impl Into<euclid::Vector2D<f32, PdfSpace>> for Point {
+    fn into(self) -> euclid::Vector2D<f32, PdfSpace> {
+        let Point { x, y } = self;
+
+        euclid::Vector2D::new(x, y)
+    }
+}
+#[cfg(feature = "euclid")]
+impl From<euclid::Vector2D<f32, PdfSpace>> for Point {
+    fn from(from: euclid::Vector2D<f32, PdfSpace>) -> Self {
+        let euclid::Vector2D { x, y, .. } = from;
+
+        Point { x, y }
     }
 }
 
@@ -765,6 +799,30 @@ pub struct Rect {
 impl Display for Rect {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {} {}", self.x, self.y, self.width, self.height)
+    }
+}
+#[cfg(feature = "euclid")]
+impl Into<euclid::Box2D<f32, PdfSpace>> for Rect {
+    fn into(self) -> euclid::Box2D<f32, PdfSpace> {
+        let Rect { x, y, width, height } = self;
+
+        assert!(width > 0.0);
+        assert!(height > 0.0);
+
+        euclid::Box2D::new(euclid::Point2D::new(x, y), euclid::Point2D::new(x + width, y + height))
+    }
+}
+#[cfg(feature = "euclid")]
+impl From<euclid::Box2D<f32, PdfSpace>> for Rect {
+    fn from(from: euclid::Box2D<f32, PdfSpace>) -> Self {
+        let euclid::Box2D { min: euclid::Point2D { x, y, .. }, max: euclid::Point2D { x: x2, y: y2, .. }, .. } = from;
+
+        assert!(x < x2);
+        assert!(y < y2);
+
+        Rect {
+            x, y, width: x2 - x, height: y2 - y
+        }
     }
 }
 
@@ -792,6 +850,24 @@ impl Default for Matrix {
             d: 1.0,
             e: 0.0,
             f: 0.0,
+        }
+    }
+}
+#[cfg(feature = "euclid")]
+impl Into<euclid::Transform2D<f32, PdfSpace, PdfSpace>> for Matrix {
+    fn into(self) -> euclid::Transform2D<f32, PdfSpace, PdfSpace> {
+        let Matrix { a, b, c, d, e, f} = self;
+
+        euclid::Transform2D::new(a, b, c, d, e, f)
+    }
+}
+#[cfg(feature = "euclid")]
+impl From<euclid::Transform2D<f32, PdfSpace, PdfSpace>> for Matrix {
+    fn from(from: euclid::Transform2D<f32, PdfSpace, PdfSpace>) -> Self {
+        let euclid::Transform2D { m11: a, m12: b, m21: c, m22: d, m31: e, m32: f, .. } = from;
+
+        Matrix {
+            a, b, c, d, e, f
         }
     }
 }
