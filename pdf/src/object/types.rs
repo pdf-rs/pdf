@@ -176,7 +176,7 @@ impl PageTree {
                     }
                     pos += tree.count;
                 }
-                PagesNode::Leaf(ref page) => {
+                PagesNode::Leaf(ref _page) => {
                     if pos == page_nr {
                         return Ok(PageRc(node));
                     }
@@ -680,7 +680,7 @@ impl<T: Object> Object for NameTree<T> {
 }
 
 impl<T: ObjectWrite> ObjectWrite for NameTree<T> {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         todo!("impl ObjectWrite for NameTree")
     }
 }

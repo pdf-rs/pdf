@@ -6,8 +6,6 @@ use crate::object::*;
 use crate::parser::{parse_with_lexer};
 use crate::parser::parse_object::{parse_indirect_stream};
 
-use num_traits::PrimInt;
-
 // Just the part of Parser which reads xref sections from xref stream.
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
 fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XRefSection> {

@@ -3,11 +3,9 @@ extern crate pdf;
 use std::env::args;
 use std::fmt;
 use std::collections::HashMap;
-use std::borrow::Cow;
 use pdf::file::File;
 use pdf::object::{*};
-use pdf::primitive::{PdfString, Primitive};
-use std::hash::{Hash, Hasher};
+use pdf::primitive::PdfString;
 
 struct Indent(usize);
 impl fmt::Display for Indent {
@@ -74,7 +72,7 @@ fn main() {
                 PagesNode::Tree(ref tree) => {
                     add_tree(r, pages, tree, current_page);
                 }
-                PagesNode::Leaf(ref page) => {
+                PagesNode::Leaf(ref _page) => {
                     pages.insert(node_ref.get_inner(), *current_page);
                     *current_page += 1;
                 }

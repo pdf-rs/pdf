@@ -3,8 +3,6 @@ extern crate pdf;
 use std::env::args;
 use std::time::SystemTime;
 use std::fs;
-use std::io::Write;
-use std::rc::Rc;
 use std::collections::HashMap;
 
 use pdf::file::File;
@@ -41,7 +39,7 @@ fn main() -> Result<(), PdfError> {
             let font = file.get(font)?;
             fonts.insert(font.name.clone(), font.clone());
         }
-        images.extend(resources.xobjects.iter().map(|(name, &r)| file.get(r).unwrap())
+        images.extend(resources.xobjects.iter().map(|(_name, &r)| file.get(r).unwrap())
             .filter(|o| matches!(**o, XObject::Image(_)))
         );
     }

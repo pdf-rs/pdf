@@ -129,11 +129,11 @@ impl<I: ObjectWrite> Stream<I> {
             let mut filters = self.info.filters.iter().map(|filter| match filter {
                 StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
                 StreamFilter::ASCII85Decode => "ASCII85Decode",
-                StreamFilter::LZWDecode(ref p) => "LZWDecode",
-                StreamFilter::FlateDecode(ref p) => "FlateDecode",
+                StreamFilter::LZWDecode(ref _p) => "LZWDecode",
+                StreamFilter::FlateDecode(ref _p) => "FlateDecode",
                 StreamFilter::JPXDecode => "JPXDecode",
-                StreamFilter::DCTDecode(ref p) => "DCTDecode",
-                StreamFilter::CCITTFaxDecode(ref p) => "CCITTFaxDecode",
+                StreamFilter::DCTDecode(ref _p) => "DCTDecode",
+                StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
                 StreamFilter::Crypt => "Crypt",
             })
             .map(|s| Primitive::Name(s.into()));

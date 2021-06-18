@@ -390,7 +390,7 @@ pub fn encode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCIIHexDecode => Ok(encode_hex(data)),
         StreamFilter::ASCII85Decode => Ok(encode_85(data)),
         StreamFilter::LZWDecode(ref params) => lzw_encode(data, params),
-        StreamFilter::FlateDecode (ref params) => Ok(flate_encode(data)),
+        StreamFilter::FlateDecode (ref _params) => Ok(flate_encode(data)),
         _ => unimplemented!(),
     }
 }

@@ -3,8 +3,6 @@ use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
-use std::io;
-use std::rc::Rc;
 
 #[allow(non_upper_case_globals, dead_code)] 
 mod flags {

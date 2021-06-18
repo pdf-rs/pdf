@@ -166,7 +166,7 @@ impl Dictionary {
     }
 }
 impl ObjectWrite for Dictionary {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         Ok(Primitive::Dictionary(self.clone()))
     }
 }
@@ -288,7 +288,7 @@ impl Object for PdfString {
     }
 }
 impl ObjectWrite for PdfString {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         Ok(Primitive::String(self.clone()))
     }
 }

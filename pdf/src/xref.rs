@@ -1,5 +1,4 @@
 use std::fmt::{Debug, Formatter};
-use std::io::Write;
 use crate::error::*;
 use crate::object::*;
 use crate as pdf;

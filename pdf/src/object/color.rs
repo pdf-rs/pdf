@@ -82,7 +82,7 @@ impl Object for ColorSpace {
     }
 }
 impl ObjectWrite for ColorSpace {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         match *self {
             ColorSpace::DeviceCMYK => Ok(Primitive::name("DeviceCMYK")),
             ColorSpace::DeviceRGB => Ok(Primitive::name("DeviceRGB")),

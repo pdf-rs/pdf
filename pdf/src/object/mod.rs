@@ -19,7 +19,7 @@ use crate::enc::*;
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::ops::Deref;
 use std::hash::{Hash, Hasher};
@@ -37,7 +37,7 @@ impl Resolve for NoResolve {
     fn resolve(&self, _: PlainRef) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
         Err(PdfError::Reference)
     }
 }
@@ -57,10 +57,10 @@ pub trait Updater {
 
 pub struct NoUpdate;
 impl Updater for NoUpdate {
-    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> { panic!() }
-    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> { panic!() }
+    fn create<T: ObjectWrite>(&mut self, _obj: T) -> Result<RcRef<T>> { panic!() }
+    fn update<T: ObjectWrite>(&mut self, _old: PlainRef, _obj: T) -> Result<RcRef<T>> { panic!() }
     fn promise<T: Object>(&mut self) -> PromisedRef<T> { panic!() }
-    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> { panic!() }
+    fn fulfill<T: ObjectWrite>(&mut self, _promise: PromisedRef<T>, _obj: T) -> Result<RcRef<T>> { panic!() }
 }
 
 pub trait ObjectWrite {

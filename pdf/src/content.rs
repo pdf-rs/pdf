@@ -690,7 +690,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             TextDrawAdjusted { ref array } => {
                 writeln!(f, "[{}] TJ", array.iter().format(" "))?;
             },
-            InlineImage { ref image } => unimplemented!(),
+            InlineImage { image: _ } => unimplemented!(),
             XObject { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " Do")?;

@@ -38,7 +38,7 @@ impl CatalogBuilder {
     }
     pub fn build(self, update: &mut impl Updater) -> Result<Catalog> {
         let kids_promise: Vec<_> = self.pages.iter()
-            .map(|page| update.promise::<PagesNode>())
+            .map(|_page| update.promise::<PagesNode>())
             .collect();
         let kids: Vec<_> = kids_promise.iter()
             .map(|p| Ref::new(p.get_inner()))

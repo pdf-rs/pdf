@@ -1,4 +1,3 @@
-use std::io;
 use std::collections::HashMap;
 use crate as pdf;
 use crate::object::{Object, Resolve};

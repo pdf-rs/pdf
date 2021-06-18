@@ -618,7 +618,7 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
             quote!()
         } else {
             let key = attrs.key();
-            if let Some(ref ty) = opt {
+            if opt.is_some() {
                 quote! {
                     if let Some(ref val) = self.#field {
                         dict.insert(#key, pdf::object::ObjectWrite::to_primitive(val, updater)?);
