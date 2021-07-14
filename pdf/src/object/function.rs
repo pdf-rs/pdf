@@ -31,25 +31,28 @@ struct Function2 {
 
 #[derive(Debug)]
 pub enum Function {
-    Sampled,
+    Sampled(SampledFunction),
     Interpolated(Vec<InterpolatedFunctionDim>),
     Stiching,
     Calculator,
     PostScript(PsFunc),
 }
 impl Function {
-    pub fn apply(&self, x: f32, out: &mut [f32]) -> Result<()> {
+    pub fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
         match *self {
+            Function::Sampled(ref func) => {
+                func.apply(x, out)
+            }
             Function::Interpolated(ref parts) => {
                 if parts.len() != out.len() {
                     bail!("incorrect output length: expected {}, found {}.", parts.len(), out.len())
                 }
                 for (f, y) in parts.iter().zip(out) {
-                    *y = f.apply(x);
+                    *y = f.apply(x[0]);
                 }
                 Ok(())
             }
-            Function::PostScript(ref func) => func.exec(x, out),
+            Function::PostScript(ref func) => func.exec(x[0], out),
             _ => bail!("unimplemted function {:?}", self)
         }
     }
@@ -106,13 +109,63 @@ impl Object for Function {
                         Ok(Function::PostScript(func))
                     },
                     0 => {
-                        Ok(Function::Sampled) // TODO implement this!
+                        Ok(Function::Sampled(SampledFunction {
+                            input: vec![],
+                            data: vec![],
+                            order: Interpolation::Linear
+                        }))
                     }
                     ref p => bail!("found a function stream with type {:?}", p)
                 }
             },
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
             _ => bail!("double indirection")
+        }
+    }
+}
+
+
+#[derive(Debug)]
+struct SampledFunctionInput {
+    domain: (f32, f32),
+    encode_offset: f32,
+    encode_scale: f32,
+    size: u32,
+}
+impl SampledFunctionInput {
+    fn map(&self, x: f32) -> f32 {
+        let x = x.clamp(self.domain.0, self.domain.1);
+        x.mul_add(self.encode_scale, self.encode_offset)
+    }
+}
+
+#[derive(Debug)]
+struct SampledFunctionOutput {
+    output_offset: f32,
+    output_scale: f32
+
+}
+
+#[derive(Debug)]
+enum Interpolation {
+    Linear,
+    Cubic,
+}
+
+#[derive(Debug)]
+pub struct SampledFunction {
+    input: Vec<SampledFunctionInput>,
+    data: Vec<u8>,
+    order: Interpolation,
+}
+impl SampledFunction {
+    fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
+        let idx: Vec<f32> = x.iter().zip(self.input.iter()).map(|(&x, dim)| dim.map(x)).collect();
+        match self.order {
+            Interpolation::Linear => {
+                unimplemented!()
+            }
+            _ => unimplemented!()
         }
     }
 }
