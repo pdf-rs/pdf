@@ -87,6 +87,7 @@ fn matrix(args: &mut impl Iterator<Item=Primitive>) -> Result<Matrix> {
 fn array(args: &mut impl Iterator<Item=Primitive>) -> Result<Vec<Primitive>> {
     match args.next() {
         Some(Primitive::Array(arr)) => Ok(arr),
+        None => Ok(vec![]),
         _ => Err(PdfError::NoOpArg)
     }
 }
@@ -233,7 +234,7 @@ impl OpBuilder {
                     lexer.set_pos(backup_pos);
                     let op = t!(lexer.next());
                     let operator = t!(op.as_str());
-                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve));
+                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), op.as_str());
                 }
             }
             match lexer.get_pos().cmp(&data.len()) {
