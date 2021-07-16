@@ -295,68 +295,68 @@ pub struct CIDFont {
 #[derive(Object, Debug)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
-    font_name: String,
+    pub font_name: String,
     
     #[pdf(key="FontFamily")]
-    font_family: Option<PdfString>,
+    pub font_family: Option<PdfString>,
     
     #[pdf(key="FontStretch")]
-    font_stretch: Option<FontStretch>,
+    pub font_stretch: Option<FontStretch>,
 
     #[pdf(key="FontWeight")]
-    font_weight: Option<f32>,
+    pub font_weight: Option<f32>,
     
     #[pdf(key="Flags")]
-    flags: u32,
+    pub flags: u32,
     
     #[pdf(key="FontBBox")]
-    font_bbox: Rect,
+    pub font_bbox: Rect,
     
     #[pdf(key="ItalicAngle")]
-    italic_angle: f32,
+    pub italic_angle: f32,
     
     // required as per spec, but still missing in some cases
     #[pdf(key="Ascent")]
-    ascent: Option<f32>,
+    pub ascent: Option<f32>,
     
     #[pdf(key="Descent")]
-    descent: Option<f32>,
+    pub descent: Option<f32>,
     
     #[pdf(key="Leading", default="0.")]
-    leading: f32,
+    pub leading: f32,
     
     #[pdf(key="CapHeight")]
-    cap_height: Option<f32>,
+    pub cap_height: Option<f32>,
     
     #[pdf(key="XHeight", default="0.")]
-    xheight: f32,
+    pub xheight: f32,
     
     #[pdf(key="StemV", default="0.")]
-    stem_v: f32,
+    pub stem_v: f32,
     
     #[pdf(key="StemH", default="0.")]
-    stem_h: f32,
+    pub stem_h: f32,
     
     #[pdf(key="AvgWidth", default="0.")]
-    avg_width: f32,
+    pub avg_width: f32,
     
     #[pdf(key="MaxWidth", default="0.")]
-    max_width: f32,
+    pub max_width: f32,
     
     #[pdf(key="MissingWidth", default="0.")]
-    missing_width: f32,
+    pub missing_width: f32,
     
     #[pdf(key="FontFile")]
-    font_file: Option<Stream>,
+    pub font_file: Option<Stream>,
     
     #[pdf(key="FontFile2")]
-    font_file2: Option<Stream>,
+    pub font_file2: Option<Stream>,
     
     #[pdf(key="FontFile3")]
-    font_file3: Option<Stream<FontStream3>>,
+    pub font_file3: Option<Stream<FontStream3>>,
     
     #[pdf(key="CharSet")]
-    char_set: Option<PdfString>
+    pub char_set: Option<PdfString>
 }
 impl FontDescriptor {
     pub fn data(&self) -> Option<Result<&[u8]>> {
