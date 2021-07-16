@@ -374,15 +374,15 @@ impl FontDescriptor {
 
 #[derive(Object, Debug, Clone)]
 #[pdf(key="Subtype")]
-enum FontTypeExt {
+pub enum FontTypeExt {
     Type1C,
     CIDFontType0C,
     OpenType
 }
 #[derive(Object, Debug, Clone)]
-struct FontStream3 {
+pub struct FontStream3 {
     #[pdf(key="Subtype")]
-    subtype: FontTypeExt
+    pub subtype: FontTypeExt
 }
 
 #[derive(Object, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
