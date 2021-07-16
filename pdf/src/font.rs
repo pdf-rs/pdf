@@ -190,9 +190,9 @@ impl Font {
             _ => None
         }
     }
-    pub fn widths(&self) -> Result<Option<Widths>> {
+    pub fn widths(&self, resolve: &impl Resolve) -> Result<Option<Widths>> {
         match self.data {
-            Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(),
+            Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(resolve),
             Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => {
                 match info {
                     &TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
@@ -215,6 +215,17 @@ impl Font {
                                 widths.set(c1 + i, w.as_number()?);
                             }
                         },
+                        Some(&Primitive::Reference(r)) => {
+                            match resolve.resolve(r)? {
+                                Primitive::Array(array) => {
+                                    widths.ensure_cid(c1 + array.len() - 1);
+                                    for (i, w) in array.iter().enumerate() {
+                                        widths.set(c1 + i, w.as_number()?);
+                                    }
+                                }
+                                p => return Err(PdfError::Other { msg: format!("unexpected primitive in W array: {:?}", p) })
+                            }
+                        }
                         Some(&Primitive::Integer(c2)) => {
                             let w = try_opt!(iter.next()).as_number()?;
                             for c in (c1 as usize) ..= (c2 as usize) {
@@ -250,7 +261,7 @@ pub struct TFont {
     pub widths: Vec<f32>,
     
     #[pdf(key="FontDescriptor")]
-    font_descriptor: FontDescriptor
+    pub font_descriptor: FontDescriptor
 }
 
 #[derive(Object, Debug)]
