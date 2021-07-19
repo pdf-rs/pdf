@@ -1,10 +1,8 @@
 [package]
 name = "text"
 version = "0.1.0"
-authors = ["Erlend Langseth <3rlendhl@gmail.com>", "Sebastian Köln <sebk@rynx.org>"]
+authors = ["Erlend Langseth <3rlendhl@gmail.com>", "Sebastian Köln <s3bkprotonmail.com>"]
 edition = "2018"
 
 [dependencies]
 pdf = { path = "../../pdf" }
-utf16-ext = "0.1.0"
-byteorder = "1.2"

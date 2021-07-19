@@ -14,71 +14,9 @@ use pdf::object::{Resolve, NoResolve, RcRef};
 use pdf::encoding::BaseEncoding;
 use pdf::error::PdfError;
 
-use byteorder::BE;
-use utf16_ext::Utf16ReadExt;
-
-fn utf16be_to_string(mut data: &[u8]) -> String {
-    (&mut data).utf16_chars::<BE>().map(|c| c.unwrap()).collect()
-}
-
-// totally not a steaming pile of hacks
-fn parse_cmap(data: &[u8]) -> HashMap<u16, String> {
-    println!("{}", std::str::from_utf8(data).unwrap());
-    let mut lexer = Lexer::new(data);
-    let mut map = HashMap::new();
-    while let Ok(substr) = lexer.next() {
-        match substr.as_slice() {
-            b"beginbfchar" => loop {
-                let a = parse_with_lexer(&mut lexer, &NoResolve);
-                let b = parse_with_lexer(&mut lexer, &NoResolve);
-                match (a, b) {
-                    (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
-                        let cid = u16::from_be_bytes(cid_data.as_bytes().try_into().unwrap());
-                        let unicode = utf16be_to_string(unicode_data.as_bytes());
-                        map.insert(cid, unicode);
-                    }
-                    _ => break
-                }
-            }
-            b"beginbfrange" => loop {
-                let a = parse_with_lexer(&mut lexer, &NoResolve);
-                let b = parse_with_lexer(&mut lexer, &NoResolve);
-                let c = parse_with_lexer(&mut lexer, &NoResolve);
-                match (a, b, c) {
-                    (Ok(Primitive::String(cid_start_data)), Ok(Primitive::String(cid_end_data)), Ok(Primitive::String(unicode_data))) => {
-                        let cid_start = u16::from_be_bytes(cid_start_data.as_bytes().try_into().unwrap());
-                        let cid_end = u16::from_be_bytes(cid_end_data.as_bytes().try_into().unwrap());
-                        let mut unicode_data = unicode_data.into_bytes();
-
-                        for cid in cid_start ..= cid_end  {
-                            let unicode = utf16be_to_string(&unicode_data);
-                            map.insert(cid, unicode);
-                            *unicode_data.last_mut().unwrap() += 1;
-                        }
-                    }
-                    (Ok(Primitive::String(cid_start_data)), Ok(Primitive::String(cid_end_data)), Ok(Primitive::Array(unicode_data_arr))) => {
-                        let cid_start = u16::from_be_bytes(cid_start_data.as_bytes().try_into().unwrap());
-                        let cid_end = u16::from_be_bytes(cid_end_data.as_bytes().try_into().unwrap());
-
-                        for (cid, unicode_data) in (cid_start ..= cid_end).zip(unicode_data_arr) {
-                            let unicode = utf16be_to_string(&unicode_data.as_string().unwrap().as_bytes());
-                            map.insert(cid, unicode);
-                        }
-                    }
-                    _ => break
-                }
-            }
-            b"endcmap" => break,
-            _ => {}
-        }
-    }
-
-    map
-}
-
 struct FontInfo {
     font: RcRef<Font>,
-    cmap: HashMap<u16, String>
+    cmap: ToUnicodeMap,
 }
 struct Cache {
     fonts: HashMap<String, FontInfo>
@@ -92,8 +30,7 @@ impl Cache {
     fn add_font(&mut self, name: impl Into<String>, font: RcRef<Font>) {
         println!("add_font({:?})", font);
         if let Some(to_unicode) = font.to_unicode() {
-            let cmap = parse_cmap(to_unicode.data().unwrap());
-            self.fonts.insert(name.into(), FontInfo { font, cmap });
+            self.fonts.insert(name.into(), FontInfo { font, cmap: to_unicode.unwrap() });
         }
     }
     fn get_font(&self, name: &str) -> Option<&FontInfo> {
@@ -107,14 +44,14 @@ fn add_string(data: &[u8], out: &mut String, info: &FontInfo) {
             BaseEncoding::IdentityH => {
                 for w in data.windows(2) {
                     let cp = u16::from_be_bytes(w.try_into().unwrap());
-                    if let Some(s) = info.cmap.get(&cp) {
+                    if let Some(s) = info.cmap.get(cp) {
                         out.push_str(s);
                     }
                 }
             }
             _ => {
                 for &b in data {
-                    if let Some(s) = info.cmap.get(&(b as u16)) {
+                    if let Some(s) = info.cmap.get(b as u16) {
                         out.push_str(s);
                     } else {
                         out.push(b as char);
