@@ -3,6 +3,11 @@ use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
+use std::collections::HashMap;
+use crate::parser::{Lexer, parse_with_lexer};
+use utf16_ext::Utf16ReadExt;
+use byteorder::BE;
+use std::convert::TryInto;
 
 #[allow(non_upper_case_globals, dead_code)] 
 mod flags {
@@ -240,8 +245,8 @@ impl Font {
             _ => Ok(None)
         }
     }
-    pub fn to_unicode(&self) -> Option<&Stream> {
-        self.to_unicode.as_ref()
+    pub fn to_unicode(&self) -> Option<Result<ToUnicodeMap>> {
+        self.to_unicode.as_ref().map(|s| s.data().map(parse_cmap))
     }
 }
 #[derive(Object, Debug)]
@@ -396,4 +401,93 @@ pub enum FontStretch {
     Expanded,
     ExtraExpanded,
     UltraExpanded
+}
+
+pub struct ToUnicodeMap {
+    // todo: reduce allocations
+    inner: HashMap<u16, String>
+}
+impl ToUnicodeMap {
+    pub fn get(&self, gid: u16) -> Option<&str> {
+        self.inner.get(&gid).map(|s| s.as_str())
+    }
+}
+
+fn utf16be_to_string(mut data: &[u8]) -> String {
+    (&mut data)
+        .utf16_chars::<BE>()
+        .map(|c| c.unwrap())
+        .collect()
+}
+fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
+    let mut lexer = Lexer::new(data);
+    let mut map = HashMap::new();
+    while let Ok(substr) = lexer.next() {
+        match substr.as_slice() {
+            b"beginbfchar" => loop {
+                let a = parse_with_lexer(&mut lexer, &NoResolve);
+                let b = parse_with_lexer(&mut lexer, &NoResolve);
+                match (a, b) {
+                    (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
+                        let data = cid_data.as_bytes();
+                        let cid = match data.len() {
+                            1 => data[0] as u16,
+                            2 => u16::from_be_bytes(data.try_into().unwrap()),
+                            _ => {
+                                continue;
+                            }
+                        };
+                        let unicode = utf16be_to_string(unicode_data.as_bytes());
+                        map.insert(cid, unicode);
+                    }
+                    _ => break,
+                }
+            },
+            b"beginbfrange" => loop {
+                let a = parse_with_lexer(&mut lexer, &NoResolve);
+                let b = parse_with_lexer(&mut lexer, &NoResolve);
+                let c = parse_with_lexer(&mut lexer, &NoResolve);
+                match (a, b, c) {
+                    (
+                        Ok(Primitive::String(cid_start_data)),
+                        Ok(Primitive::String(cid_end_data)),
+                        Ok(Primitive::String(unicode_data)),
+                    ) => {
+                        let cid_start =
+                            u16::from_be_bytes(cid_start_data.as_bytes().try_into().unwrap());
+                        let cid_end =
+                            u16::from_be_bytes(cid_end_data.as_bytes().try_into().unwrap());
+                        let mut unicode_data = unicode_data.into_bytes();
+
+                        for cid in cid_start..=cid_end {
+                            let unicode = utf16be_to_string(&unicode_data);
+                            map.insert(cid, unicode);
+                            *unicode_data.last_mut().unwrap() += 1;
+                        }
+                    }
+                    (
+                        Ok(Primitive::String(cid_start_data)),
+                        Ok(Primitive::String(cid_end_data)),
+                        Ok(Primitive::Array(unicode_data_arr)),
+                    ) => {
+                        let cid_start =
+                            u16::from_be_bytes(cid_start_data.as_bytes().try_into().unwrap());
+                        let cid_end =
+                            u16::from_be_bytes(cid_end_data.as_bytes().try_into().unwrap());
+
+                        for (cid, unicode_data) in (cid_start..=cid_end).zip(unicode_data_arr) {
+                            let unicode =
+                                utf16be_to_string(&unicode_data.as_string().unwrap().as_bytes());
+                            map.insert(cid, unicode);
+                        }
+                    }
+                    _ => break,
+                }
+            },
+            b"endcmap" => break,
+            _ => {}
+        }
+    }
+
+    ToUnicodeMap { inner: map }
 }
