@@ -403,6 +403,7 @@ pub enum FontStretch {
     UltraExpanded
 }
 
+#[derive(Clone, Debug)]
 pub struct ToUnicodeMap {
     // todo: reduce allocations
     inner: HashMap<u16, String>
