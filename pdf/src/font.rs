@@ -409,6 +409,12 @@ pub struct ToUnicodeMap {
     inner: HashMap<u16, String>
 }
 impl ToUnicodeMap {
+    /// Create a new ToUnicodeMap from key/value pairs.
+    /// 
+    /// subject to change
+    pub fn create(iter: impl Iterator<Item=(u16, String)>) -> Self {
+        ToUnicodeMap { inner: iter.collect() }
+    }
     pub fn get(&self, gid: u16) -> Option<&str> {
         self.inner.get(&gid).map(|s| s.as_str())
     }
