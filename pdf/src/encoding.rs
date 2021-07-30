@@ -19,7 +19,10 @@ pub enum BaseEncoding {
     MacExpertEncoding,
     #[pdf(name="Identity-H")]
     IdentityH,
-    None
+    None,
+
+    #[pdf(other)]
+    Other(String),
 }
 impl Object for Encoding {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {

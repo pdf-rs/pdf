@@ -171,7 +171,7 @@ impl Font {
         match self.data.as_ref().ok()? {
             FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data()),
             FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(),
-            FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.data(),
+            FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.as_ref().and_then(|d| d.data()),
             _ => None
         }
     }
@@ -266,7 +266,7 @@ pub struct TFont {
     pub widths: Vec<f32>,
     
     #[pdf(key="FontDescriptor")]
-    pub font_descriptor: FontDescriptor
+    pub font_descriptor: Option<FontDescriptor>
 }
 
 #[derive(Object, Debug)]
