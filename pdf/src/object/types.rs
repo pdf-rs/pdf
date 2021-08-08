@@ -96,7 +96,7 @@ impl Object for PagesRc {
 }
 impl ObjectWrite for PagesRc {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        (**self).to_primitive(update)
+        self.0.to_primitive(update)
     }
 }
 
@@ -227,6 +227,7 @@ impl PageTree {
 impl SubType<PagesNode> for PageTree {}
 
 #[derive(Object, ObjectWrite, Debug, Clone)]
+#[pdf(Type="Page?")]
 pub struct Page {
     #[pdf(key="Parent")]
     pub parent: PagesRc,

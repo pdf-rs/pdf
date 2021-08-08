@@ -76,6 +76,10 @@ pub trait ToDict: ObjectWrite {
 
 pub trait SubType<T> {}
 
+pub trait Trace {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {}
+}
+
 ///////
 // Refs
 ///////
@@ -143,6 +147,11 @@ impl<T> ObjectWrite for Ref<T> {
         self.inner.to_primitive(update)
     }
 }
+impl<T> Trace for Ref<T> {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        cb(self.inner);
+    }
+}
 impl<T> fmt::Debug for Ref<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Ref({})", self.inner.id)
@@ -199,6 +208,11 @@ impl<T> Clone for RcRef<T> {
             inner: self.inner,
             data: self.data.clone(),
         }
+    }
+}
+impl<T> Trace for RcRef<T> {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        cb(self.inner);
     }
 }
 impl<'a, T> From<&'a RcRef<T>> for Ref<T> {
@@ -261,6 +275,14 @@ impl<T> Clone for MaybeRef<T> {
         match *self {
             MaybeRef::Direct(ref rc) => MaybeRef::Direct(rc.clone()),
             MaybeRef::Indirect(ref r) => MaybeRef::Indirect(r.clone())
+        }
+    }
+}
+impl<T> Trace for MaybeRef<T> {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        match *self {
+            MaybeRef::Indirect(ref rc) => rc.trace(cb),
+            MaybeRef::Direct(_) => ()
         }
     }
 }
@@ -417,7 +439,13 @@ impl<T: ObjectWrite> ObjectWrite for Vec<T> {
         Primitive::array::<T, _, _, _>(self.iter(), update)
     }
 }
-
+impl<T: Trace> Trace for Vec<T> {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        for i in self.iter() {
+            i.trace(cb);
+        }
+    }
+}
 /*
 pub struct Data(pub Vec<u8>);
 impl Object for Data {

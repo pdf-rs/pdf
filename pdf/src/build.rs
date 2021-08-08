@@ -4,11 +4,11 @@ use crate::error::Result;
 
 #[derive(Default)]
 pub struct PageBuilder {
-    content: Option<Content>,
-    media_box: Option<Rect>,
-    crop_box: Option<Rect>,
-    trim_box: Option<Rect>,
-    resources: Option<Resources>,
+    pub content: Option<Content>,
+    pub media_box: Option<Rect>,
+    pub crop_box: Option<Rect>,
+    pub trim_box: Option<Rect>,
+    pub resources: Option<MaybeRef<Resources>>,
 }
 impl PageBuilder {
     pub fn from_content(content: Content) -> PageBuilder {
@@ -17,6 +17,15 @@ impl PageBuilder {
             .. PageBuilder::default()
         }
     }
+    pub fn from_page(page: &Page) -> Result<PageBuilder> {
+        Ok(PageBuilder {
+            content: page.contents.clone(),
+            media_box: Some(page.media_box()?),
+            crop_box: Some(page.crop_box()?),
+            trim_box: page.trim_box,
+            resources: Some(page.resources()?.clone())
+        })
+    }
     pub fn size(&mut self, width: f32, height: f32) {
         self.media_box = Some(Rect {
             top: 0.,
@@ -24,6 +33,9 @@ impl PageBuilder {
             bottom: height,
             right: width,
         });
+    }
+    pub fn resources(&mut self, resources: MaybeRef<Resources>) {
+        self.resources = Some(resources);
     }
 }
 
@@ -60,7 +72,7 @@ impl CatalogBuilder {
                 media_box: page.media_box,
                 crop_box: page.crop_box,
                 trim_box: page.trim_box,
-                resources: None,
+                resources: page.resources,
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }
