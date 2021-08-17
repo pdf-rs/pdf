@@ -480,6 +480,16 @@ impl ObjectWrite for Primitive {
         Ok(self.clone())
     }
 }
+impl Trace for Primitive {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        match *self {
+            Primitive::Reference(r) => cb(r),
+            Primitive::Array(ref parts) => parts.iter().for_each(|p| p.trace(cb)),
+            Primitive::Dictionary(ref dict) => dict.values().for_each(|p| p.trace(cb)),
+            _ => ()
+        }
+    }
+}
 
 impl ObjectWrite for String {
     fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
@@ -539,6 +549,13 @@ impl<T: ObjectWrite> ObjectWrite for Option<T> {
         }
     }
 }
+impl<T: Trace> Trace for Option<T> {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        if let Some(ref t) = *self {
+            t.trace(cb)
+        }
+    }
+}
 
 impl<T: Object> Object for Box<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -550,7 +567,11 @@ impl<T: ObjectWrite> ObjectWrite for Box<T> {
         (**self).to_primitive(update)
     }
 }
-
+impl<T: Trace> Trace for Box<T> {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        (**self).trace(cb)
+    }
+}
 
 impl Object for () {
     fn from_primitive(_p: Primitive, _resolve: &impl Resolve) -> Result<Self> {
@@ -562,6 +583,7 @@ impl ObjectWrite for () {
         Ok(Primitive::Null)
     }
 }
+impl Trace for () {}
 
 impl<T, U> Object for (T, U) where T: Object, U: Object {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -578,5 +600,12 @@ impl<T, U> Object for (T, U) where T: Object, U: Object {
 impl<T, U> ObjectWrite for (T, U) where T: ObjectWrite, U: ObjectWrite {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         Ok(Primitive::Array(vec![self.0.to_primitive(update)?, self.1.to_primitive(update)?]))
+    }
+}
+
+impl<T: Trace, U: Trace> Trace for (T, U) {
+    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
+        self.0.trace(cb);
+        self.1.trace(cb);
     }
 }

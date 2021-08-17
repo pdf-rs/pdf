@@ -105,18 +105,19 @@ impl XRefTable {
     }
 
     pub fn add_entries_from(&mut self, section: XRefSection) {
-        for (i, entry) in section.entries() {
+        for (i, &entry) in section.entries() {
             // Early return if the entry we have has larger or equal generation number
-            let should_be_updated = match self.entries[i] {
+            let should_be_updated = match entry {
                 XRef::Raw { gen_nr: gen, .. } | XRef::Free { gen_nr: gen, .. }
                     => entry.get_gen_nr() > gen,
                 XRef::Stream { .. } | XRef::Invalid
                     => true,
                 x => panic!("found {:?}", x)
             };
-            let dst = &mut self.entries[i];
-            if should_be_updated {
-                *dst = *entry;
+            if let Some(dst) = self.entries.get_mut(i) {
+                if should_be_updated {
+                    *dst = entry;
+                }
             }
         }
     }
