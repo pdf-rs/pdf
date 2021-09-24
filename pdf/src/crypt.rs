@@ -1,7 +1,7 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 
 use crate as pdf;
-use aes::cipher::block::generic_array::{sequence::Split, GenericArray};
+use aes::cipher::generic_array::{sequence::Split, GenericArray};
 use aes::{Aes128, Aes256, NewBlockCipher};
 use block_modes::block_padding::{NoPadding, Pkcs7};
 use block_modes::{BlockMode, Cbc};
@@ -583,7 +583,7 @@ impl Decoder {
                 }
                 let (iv, ciphertext) = data.split_at_mut(16);
                 let cipher =
-                    t!(Aes128Cbc::new_var(key, iv).map_err(|_| PdfError::DecryptionFailure));
+                    t!(Aes128Cbc::new_from_slices(key, iv).map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
                     .decrypt(ciphertext)
                     .map_err(|_| PdfError::DecryptionFailure)))
@@ -595,7 +595,7 @@ impl Decoder {
                 }
                 let (iv, ciphertext) = data.split_at_mut(16);
                 let cipher =
-                    t!(Aes256Cbc::new_var(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
+                    t!(Aes256Cbc::new_from_slices(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
                     .decrypt(ciphertext)
                     .map_err(|_| PdfError::DecryptionFailure)))
