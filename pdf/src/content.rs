@@ -122,7 +122,74 @@ fn expand_abbr(p: Primitive, alt: &[(&str, &str)]) -> Primitive {
     }
 }
 
-fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<ImageDict>> {
+#[derive(Debug, Clone)]
+pub struct InlineImage {
+    data: Vec<u8>,
+    dict: Dictionary,
+}
+impl InlineImage {
+    pub fn image_dict(self, resolve: &impl Resolve) -> Result<Stream<ImageDict>> {
+        let InlineImage { data, mut dict } = self;
+
+        // ugh
+        let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
+        let color_space = dict.get("InlineImage").map(|p| expand_abbr(p.clone(), 
+            &[
+                ("G", "DeviceGray"),
+                ("RGB", "DeviceRGB"),
+                ("CMYK", "DeviceCMYK"),
+                ("I", "Indexed")
+            ]
+        ));
+        let decode = Object::from_primitive(dict.require("InlineImage", "Decode")?, resolve)?;
+        let decode_parms = dict.get("DecodeParms").map(|p| p.clone().into_dictionary(resolve)).transpose()?.unwrap_or_default();
+        let filter = expand_abbr(
+            dict.require("InlineImage", "Filter")?,
+            &[
+                ("AHx", "ASCIIHexDecode"),
+                ("A85", "ASCII85Decode"),
+                ("LZW", "LZWDecode"),
+                ("Fl", "FlateDecode"),
+                ("RL", "RunLengthDecode"),
+                ("CCF", "CCITTFaxDecode"),
+                ("DCT", "DCTDecode"),
+            ]
+        );
+        let filters = match filter {
+            Primitive::Array(parts) => parts.into_iter()
+                .map(|p| p.as_name().and_then(|kind| StreamFilter::from_kind_and_params(kind, decode_parms.clone(), resolve)))
+                .collect::<Result<_>>()?,
+            Primitive::Name(kind) => vec![StreamFilter::from_kind_and_params(&kind, decode_parms, resolve)?],
+            _ => bail!("invalid filter")
+        };
+        
+        let height = dict.require("InlineImage", "Height")?.as_integer()?;
+        let image_mask = dict.get("ImageMask").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
+        let intent = dict.remove("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
+        let interpolate = dict.get("Interpolate").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
+        let width = dict.require("InlineImage", "Width")?.as_integer()?;
+
+        let image_dict = ImageDict {
+            width,
+            height,
+            color_space,
+            bits_per_component,
+            intent,
+            image_mask,
+            mask: None,
+            decode,
+            interpolate,
+            struct_parent: None,
+            id: None,
+            smask: None,
+            other: dict,
+        };
+
+        Ok(Stream::new_with_filters(image_dict, data, filters))
+    }
+}
+
+fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<InlineImage> {
     let mut dict = Dictionary::new();
     loop {
         let backup_pos = lexer.get_pos();
@@ -153,66 +220,12 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
     lexer.next_expect("ID")?;
     let data_start = lexer.get_pos() + 1;
 
-    // ugh
-    let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
-    let color_space = dict.get("InlineImage").map(|p| expand_abbr(p.clone(), 
-        &[
-            ("G", "DeviceGray"),
-            ("RGB", "DeviceRGB"),
-            ("CMYK", "DeviceCMYK"),
-            ("I", "Indexed")
-        ]
-    ));
-    let decode = Object::from_primitive(dict.require("InlineImage", "Decode")?, resolve)?;
-    let decode_parms = dict.get("DecodeParms").map(|p| p.clone().into_dictionary(resolve)).transpose()?.unwrap_or_default();
-    let filter = expand_abbr(
-        dict.require("InlineImage", "Filter")?,
-        &[
-            ("AHx", "ASCIIHexDecode"),
-            ("A85", "ASCII85Decode"),
-            ("LZW", "LZWDecode"),
-            ("Fl", "FlateDecode"),
-            ("RL", "RunLengthDecode"),
-            ("CCF", "CCITTFaxDecode"),
-            ("DCT", "DCTDecode"),
-        ]
-    );
-    let filters = match filter {
-        Primitive::Array(parts) => parts.into_iter()
-            .map(|p| p.as_name().and_then(|kind| StreamFilter::from_kind_and_params(kind, decode_parms.clone(), resolve)))
-            .collect::<Result<_>>()?,
-        Primitive::Name(kind) => vec![StreamFilter::from_kind_and_params(&kind, decode_parms, resolve)?],
-        _ => bail!("invalid filter")
-    };
-    
-    let height = dict.require("InlineImage", "Height")?.as_integer()?;
-    let image_mask = dict.get("ImageMask").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
-    let intent = dict.remove("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
-    let interpolate = dict.get("Interpolate").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
-    let width = dict.require("InlineImage", "Width")?.as_integer()?;
-
-    let image_dict = ImageDict {
-        width,
-        height,
-        color_space,
-        bits_per_component,
-        intent,
-        image_mask,
-        mask: None,
-        decode,
-        interpolate,
-        struct_parent: None,
-        id: None,
-        smask: None,
-        other: dict,
-    };
-
     lexer.seek_substr("\nEI").expect("BUGZ");
     let data_end = lexer.get_pos() - 3;
 
     let data = lexer.new_substr(data_start .. data_end).to_vec();
 
-    Ok(Stream::new_with_filters(image_dict, data, filters))
+    Ok(InlineImage { data, dict })
 }
 struct OpBuilder {
     last: Point,
@@ -1040,5 +1053,5 @@ pub enum Op {
 
     XObject { name: String },
 
-    InlineImage { image: Stream::<ImageDict> },
+    InlineImage { image: InlineImage },
 }
