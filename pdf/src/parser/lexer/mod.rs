@@ -177,12 +177,13 @@ impl<'a> Lexer<'a> {
                 }
                 return Ok((self.new_substr(start_pos..pos), pos));
             }
-            // TODO +- 1
-            if self.buf[pos] == b'<' && self.buf[pos+1] == b'<'
-                || self.buf[pos] == b'>' && self.buf[pos+1] == b'>' {
-                pos = self.advance_pos(pos)?;
 
+            if let Some(slice) = self.buf.get(pos..=pos+1) {
+                if slice == b"<<" || slice == b">>" {
+                    pos = self.advance_pos(pos)?;
+                }
             }
+
             pos = self.advance_pos(pos)?;
             return Ok((self.new_substr(start_pos..pos), pos));
         }
