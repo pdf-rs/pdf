@@ -85,7 +85,7 @@ fn main() -> Result<(), PdfError> {
         }
         let mut current_font = None;
         let contents = page.contents.as_ref().unwrap();
-        for op in &contents.operations {
+        for op in contents.operations(&file)?.iter() {
             match op {
                 Op::GraphicsState { name } => {
                     let gs = resources.graphics_states.get(name).unwrap();

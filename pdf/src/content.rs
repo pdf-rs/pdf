@@ -2,6 +2,7 @@
 use std::fmt::{self, Display};
 use std::cmp::Ordering;
 use itertools::Itertools;
+use once_cell::unsync::OnceCell;
 
 use crate::error::*;
 use crate::object::*;
@@ -16,7 +17,20 @@ pub struct Content {
     pub parts: Vec<Stream<()>>,
 
     /// The parsed operations. You probably want to use these.
-    pub operations: Vec<Op>,
+    operations: OnceCell<Vec<Op>>,
+}
+
+impl Content {
+    pub fn operations(&self, resolve: &impl Resolve) -> Result<&[Op]> {
+        self.operations.get_or_try_init(|| -> Result<Vec<Op>> {
+            let mut ops = OpBuilder::new();
+            for part in self.parts.iter() {
+                let data = t!(part.data());
+                ops.parse(&data, resolve)?;
+            }
+            Ok(ops.ops)
+        }).map(|v| v.as_slice())
+    }
 }
 
 macro_rules! names {
@@ -150,7 +164,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
         ]
     ));
     let decode = Object::from_primitive(dict.require("InlineImage", "Decode")?, resolve)?;
-    let decode_parms = dict.require("InlineImage", "DecodeParms")?.into_dictionary(resolve)?;
+    let decode_parms = dict.get("DecodeParms").map(|p| p.clone().into_dictionary(resolve)).transpose()?.unwrap_or_default();
     let filter = expand_abbr(
         dict.require("InlineImage", "Filter")?,
         &[
@@ -468,28 +482,23 @@ impl Object for Content {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
-        let mut ops = OpBuilder::new();
         let mut parts: Vec<ContentStream> = vec![];
 
         match p {
             Primitive::Array(arr) => {
                 for p in arr {
                     let part = t!(ContentStream::from_primitive(p, resolve));
-                    let data = t!(part.data());
-                    ops.parse(&data, resolve)?;
                     parts.push(part);
                 }
             }
             Primitive::Reference(r) => return Self::from_primitive(t!(resolve.resolve(r)), resolve),
             p => {
                 let part = t!(ContentStream::from_primitive(p, resolve));
-                let data = t!(part.data());
-                ops.parse(&data, resolve)?;
                 parts.push(part);
             }
         }
 
-        Ok(Content { operations: ops.ops, parts })
+        Ok(Content { operations: OnceCell::new(), parts })
     }
 }
 
@@ -705,7 +714,7 @@ impl Content {
     pub fn from_ops(operations: Vec<Op>) -> Self {
         let data = serialize_ops(&operations).unwrap();
         Content {
-            operations,
+            operations: OnceCell::from(operations),
             parts: vec![Stream::new((), data)]
         }
     }
