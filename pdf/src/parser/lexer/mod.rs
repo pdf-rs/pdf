@@ -155,8 +155,9 @@ impl<'a> Lexer<'a> {
         }
         let mut pos = self.skip_whitespace(self.pos)?;
         while self.buf.get(pos) == Some(&b'%') {
-            if let Some(off) = self.buf[pos+1..].iter().position(|&b| b == b'\n') {
-                pos += off+2;
+            pos += 1;
+            if let Some(off) = self.buf[pos..].iter().position(|&b| b == b'\n') {
+                pos += off+1;
             }
             
             // Move away from eventual whitespace
