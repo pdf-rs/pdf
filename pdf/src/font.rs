@@ -246,7 +246,7 @@ impl Font {
         }
     }
     pub fn to_unicode(&self) -> Option<Result<ToUnicodeMap>> {
-        self.to_unicode.as_ref().map(|s| s.data().map(parse_cmap))
+        self.to_unicode.as_ref().map(|s| s.data().and_then(parse_cmap))
     }
 }
 #[derive(Object, Debug)]
@@ -426,7 +426,15 @@ fn utf16be_to_string(mut data: &[u8]) -> String {
         .map(|c| c.unwrap())
         .collect()
 }
-fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
+fn parse_cid(s: &PdfString) -> Result<u16> {
+    let b = s.as_bytes();
+    match b.len() {
+        2 => Ok(u16::from_be_bytes(b.try_into().unwrap())),
+        1 => Ok(b[0] as u16),
+        _ => Err(PdfError::CidDecode),
+    }
+}
+fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
     let mut lexer = Lexer::new(data);
     let mut map = HashMap::new();
     while let Ok(substr) = lexer.next() {
@@ -436,14 +444,7 @@ fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
                 let b = parse_with_lexer(&mut lexer, &NoResolve);
                 match (a, b) {
                     (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
-                        let data = cid_data.as_bytes();
-                        let cid = match data.len() {
-                            1 => data[0] as u16,
-                            2 => u16::from_be_bytes(data.try_into().unwrap()),
-                            _ => {
-                                continue;
-                            }
-                        };
+                        let cid = parse_cid(&cid_data)?;
                         let unicode = utf16be_to_string(unicode_data.as_bytes());
                         map.insert(cid, unicode);
                     }
@@ -460,10 +461,8 @@ fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
                         Ok(Primitive::String(cid_end_data)),
                         Ok(Primitive::String(unicode_data)),
                     ) => {
-                        let cid_start =
-                            u16::from_be_bytes(cid_start_data.as_bytes().try_into().unwrap());
-                        let cid_end =
-                            u16::from_be_bytes(cid_end_data.as_bytes().try_into().unwrap());
+                        let cid_start = parse_cid(&cid_start_data)?;
+                        let cid_end = parse_cid(&cid_end_data)?;
                         let mut unicode_data = unicode_data.into_bytes();
 
                         for cid in cid_start..=cid_end {
@@ -477,14 +476,12 @@ fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
                         Ok(Primitive::String(cid_end_data)),
                         Ok(Primitive::Array(unicode_data_arr)),
                     ) => {
-                        let cid_start =
-                            u16::from_be_bytes(cid_start_data.as_bytes().try_into().unwrap());
-                        let cid_end =
-                            u16::from_be_bytes(cid_end_data.as_bytes().try_into().unwrap());
+                        let cid_start = parse_cid(&cid_start_data)?;
+                        let cid_end = parse_cid(&cid_end_data)?;
 
                         for (cid, unicode_data) in (cid_start..=cid_end).zip(unicode_data_arr) {
                             let unicode =
-                                utf16be_to_string(&unicode_data.as_string().unwrap().as_bytes());
+                                utf16be_to_string(&unicode_data.as_string()?.as_bytes());
                             map.insert(cid, unicode);
                         }
                     }
@@ -496,5 +493,5 @@ fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
         }
     }
 
-    ToUnicodeMap { inner: map }
+    Ok(ToUnicodeMap { inner: map })
 }

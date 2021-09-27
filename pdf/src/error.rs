@@ -134,6 +134,9 @@ pub enum PdfError {
 
     #[snafu(display("PostScriptExecError"))]
     PostScriptExec,
+
+    #[snafu(display("CID decode error"))]
+    CidDecode,
 }
 impl PdfError {
     pub fn trace(&self) {
