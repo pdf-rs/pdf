@@ -267,7 +267,7 @@ impl Decoder {
             revision: u32,
             key_size: usize,
             pass: &[u8],
-        ) -> Vec<u8> {
+        ) -> Result<Vec<u8>> {
             let mut hash = md5::Context::new();
             if pass.len() < 32 {
                 hash.consume(pass);
@@ -284,7 +284,7 @@ impl Decoder {
             }
 
             let digest = &hash.compute()[..key_size];
-            digest.to_vec()
+            Ok(digest.to_vec())
         }
 
         let (key_bits, method) = match dict.v {
@@ -293,8 +293,9 @@ impl Decoder {
             4 | 5 | 6 => {
                 let default = dict
                     .crypt_filters
-                    .get(dict.default_crypt_filter.as_ref().unwrap().as_str())
-                    .unwrap();
+                    .get(try_opt!(dict.default_crypt_filter.as_ref()).as_str())
+                    .ok_or_else(|| other!("missing crypt filter entry {:?}", dict.default_crypt_filter.as_ref()))?;
+                
                 match default.method {
                     CryptMethod::V2 | CryptMethod::AESV2 => (
                         default.length.map(|n| 8 * n).unwrap_or(dict.bits),
@@ -304,14 +305,14 @@ impl Decoder {
                         default.length.map(|n| 8 * n).unwrap_or(dict.bits),
                         default.method,
                     ),
-                    m => err!(format!("unimplemented crypt method {:?}", m).into()),
+                    m => err!(other!("unimplemented crypt method {:?}", m)),
                 }
             }
-            v => err!(format!("unsupported V value {}", v).into()),
+            v => err!(other!("unsupported V value {}", v)),
         };
         let level = dict.r;
         if level < 2 || level > 6 {
-            err!(format!("unsupported standard security handler revision {}", level).into())
+            err!(other!("unsupported standard security handler revision {}", level))
         };
         if level <= 4 {
             let key_size = key_bits as usize / 8;
@@ -321,7 +322,7 @@ impl Decoder {
                 let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
                 Ok(decoder)
             } else {
-                let password_wrap_key = key_derivation_owner_password_rc4(level, key_size, pass);
+                let password_wrap_key = key_derivation_owner_password_rc4(level, key_size, pass)?;
                 let mut data = dict.o.as_bytes().to_vec();
                 let rounds = if level == 2 { 1u8 } else { 20u8 };
                 for round in 0..rounds {

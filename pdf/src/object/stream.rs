@@ -239,23 +239,23 @@ impl<T: Object> Object for StreamInfo<T> {
             resolve)?;
 
         let filters = Vec::<String>::from_primitive(
-            dict.remove("Filter").or(Some(Primitive::Null)).unwrap(),
+            dict.remove("Filter").unwrap_or(Primitive::Null),
             resolve)?;
 
         let decode_params = Vec::<Dictionary>::from_primitive(
-            dict.remove("DecodeParms").or(Some(Primitive::Null)).unwrap(),
+            dict.remove("DecodeParms").unwrap_or(Primitive::Null),
             resolve)?;
 
         let file = Option::<FileSpec>::from_primitive(
-            dict.remove("F").or(Some(Primitive::Null)).unwrap(),
+            dict.remove("F").unwrap_or(Primitive::Null),
             resolve)?;
 
         let file_filters = Vec::<String>::from_primitive(
-            dict.remove("FFilter").or(Some(Primitive::Null)).unwrap(),
+            dict.remove("FFilter").unwrap_or(Primitive::Null),
             resolve)?;
 
         let file_decode_params = Vec::<Dictionary>::from_primitive(
-            dict.remove("FDecodeParms").or(Some(Primitive::Null)).unwrap(),
+            dict.remove("FDecodeParms").unwrap_or(Primitive::Null),
             resolve)?;
 
 

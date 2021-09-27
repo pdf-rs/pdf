@@ -135,6 +135,9 @@ pub enum PdfError {
     #[snafu(display("PostScriptExecError"))]
     PostScriptExec,
 
+    #[snafu(display("UTF16 decode error"))]
+    Utf16Decode,
+
     #[snafu(display("CID decode error"))]
     CidDecode,
 }
@@ -231,6 +234,10 @@ macro_rules! err_from {
 err_from!(std::str::Utf8Error, std::string::FromUtf8Error, std::string::FromUtf16Error => Encoding);
 err_from!(std::num::ParseIntError, std::string::ParseError => Parse);
 err_from!(jpeg_decoder::Error => Jpeg);
+
+macro_rules! other {
+    ($($t:tt)*) => ($crate::PdfError::Other { msg: format!($($t)*) })
+}
 
 macro_rules! err {
     ($e: expr) => ({

@@ -320,7 +320,7 @@ impl<'a> Lexer<'a> {
                 self.pos = start + substr.len();
                 Ok(self.new_substr(self.pos .. end))
             }
-            None => Err(PdfError::NotFound {word: String::from(std::str::from_utf8(substr).unwrap())})
+            None => Err(PdfError::NotFound {word: String::from_utf8_lossy(substr).into() })
         }
     }
 

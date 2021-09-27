@@ -420,10 +420,10 @@ impl ToUnicodeMap {
     }
 }
 
-fn utf16be_to_string(mut data: &[u8]) -> String {
+fn utf16be_to_string(mut data: &[u8]) -> Result<String> {
     (&mut data)
         .utf16_chars::<BE>()
-        .map(|c| c.unwrap())
+        .map(|r| r.map_err(|_| PdfError::Utf16Decode))
         .collect()
 }
 fn parse_cid(s: &PdfString) -> Result<u16> {
@@ -445,7 +445,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                 match (a, b) {
                     (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
                         let cid = parse_cid(&cid_data)?;
-                        let unicode = utf16be_to_string(unicode_data.as_bytes());
+                        let unicode = utf16be_to_string(unicode_data.as_bytes())?;
                         map.insert(cid, unicode);
                     }
                     _ => break,
@@ -460,13 +460,13 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         Ok(Primitive::String(cid_start_data)),
                         Ok(Primitive::String(cid_end_data)),
                         Ok(Primitive::String(unicode_data)),
-                    ) => {
+                    ) if unicode_data.data.len() > 0 => {
                         let cid_start = parse_cid(&cid_start_data)?;
                         let cid_end = parse_cid(&cid_end_data)?;
                         let mut unicode_data = unicode_data.into_bytes();
 
                         for cid in cid_start..=cid_end {
-                            let unicode = utf16be_to_string(&unicode_data);
+                            let unicode = utf16be_to_string(&unicode_data)?;
                             map.insert(cid, unicode);
                             *unicode_data.last_mut().unwrap() += 1;
                         }
@@ -481,7 +481,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
 
                         for (cid, unicode_data) in (cid_start..=cid_end).zip(unicode_data_arr) {
                             let unicode =
-                                utf16be_to_string(&unicode_data.as_string()?.as_bytes());
+                                utf16be_to_string(&unicode_data.as_string()?.as_bytes())?;
                             map.insert(cid, unicode);
                         }
                     }

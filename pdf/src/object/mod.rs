@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::ops::Deref;
 use std::hash::{Hash, Hasher};
+use std::convert::TryInto;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -591,8 +592,7 @@ impl<T, U> Object for (T, U) where T: Object, U: Object {
         if arr.len() != 2 {
             bail!("expected array of length 2 (found {})", arr.len());
         }
-        let b = arr.pop().unwrap();
-        let a = arr.pop().unwrap();
+        let [a, b]: [Primitive; 2] = arr.try_into().unwrap();
         Ok((T::from_primitive(a, resolve)?, U::from_primitive(b, resolve)?))
     }
 }
