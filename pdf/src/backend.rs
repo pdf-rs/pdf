@@ -13,6 +13,7 @@ use std::ops::{
     Range,
 };
 
+pub const MAX_ID: u32 = 1_000_000;
 
 pub trait Backend: Sized {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]>;
@@ -64,8 +65,11 @@ pub trait Backend: Sized {
         
         let highest_id = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
-            .as_integer());
+            .as_u32());
 
+        if highest_id > MAX_ID {
+            bail!("too many objects");
+        }
         let mut refs = XRefTable::new(highest_id as ObjNr);
         for section in xref_sections {
             refs.add_entries_from(section);
