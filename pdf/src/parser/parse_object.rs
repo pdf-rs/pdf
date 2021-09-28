@@ -1,7 +1,7 @@
 // Considering whether to impl Object and IndirectObject here.
 //
 
-use crate::parser::lexer::*;
+use crate::parser::{lexer::*, MAX_DEPTH};
 use crate::error::*;
 use crate::primitive::{Primitive, PdfStream};
 use crate::parser::{parse_with_lexer_ctx, parse_stream_with_lexer, Context};
@@ -22,7 +22,7 @@ pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Optio
         obj_nr,
         gen_nr
     };
-    let obj = t!(parse_with_lexer_ctx(lexer, r, Some(&ctx)));
+    let obj = t!(parse_with_lexer_ctx(lexer, r, Some(&ctx), MAX_DEPTH));
 
     t!(lexer.next_expect("endobj"));
 

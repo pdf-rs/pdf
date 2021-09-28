@@ -82,18 +82,18 @@ impl<'a> Lexer<'a> {
             // bail!("next token isn't 'stream'");
         }
         
-        let b0 = self.buf[pos + 6];
+        let &b0 = self.buf.get(pos + 6).ok_or(PdfError::EOF)?;
         if b0 == b'\n' {
             self.pos = pos + 7;
         } else if b0 == b'\r' {
-            let b1 = self.buf[pos + 7];
+            let &b1 = self.buf.get(pos + 7).ok_or(PdfError::EOF)?;
             if b1 != b'\n' {
-                panic!("invalid whitespace following 'stream'");
+                bail!("invalid whitespace following 'stream'");
                 // bail!("invalid whitespace following 'stream'");
             }
             self.pos = pos + 8;
         } else {
-            panic!("invalid whitespace");
+            bail!("invalid whitespace");
         }
         Ok(())
     }

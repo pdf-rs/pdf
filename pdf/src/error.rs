@@ -140,6 +140,9 @@ pub enum PdfError {
 
     #[snafu(display("CID decode error"))]
     CidDecode,
+
+    #[snafu(display("Max nesting depth reached"))]
+    MaxDepth,
 }
 impl PdfError {
     pub fn trace(&self) {

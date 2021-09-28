@@ -54,6 +54,9 @@ pub trait Backend: Sized {
         if xref_offset < start_offset {
             bail!("Invalid PDF. xref before header.");
         }
+        if xref_offset >= self.len() {
+            bail!("XRef offset outside file bounds");
+        }
 
         let mut lexer = Lexer::new(t!(self.read(start_offset + xref_offset..)));
         

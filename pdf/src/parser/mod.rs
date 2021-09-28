@@ -14,6 +14,9 @@ use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use self::lexer::{HexStringLexer, StringLexer};
 use crate::crypt::Decoder;
 
+const MAX_DEPTH: usize = 20;
+
+
 pub struct Context<'a> {
     pub decoder: Option<&'a Decoder>,
     pub obj_nr: u64,
@@ -38,17 +41,17 @@ pub fn parse(data: &[u8], r: &impl Resolve) -> Result<Primitive> {
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
 pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive> {
-    parse_with_lexer_ctx(lexer, r, None)
+    parse_with_lexer_ctx(lexer, r, None, MAX_DEPTH)
 }
 
-fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>) -> Result<Dictionary> {
+fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, max_depth: usize) -> Result<Dictionary> {
     let mut dict = Dictionary::default();
     loop {
         // Expect a Name (and Object) or the '>>' delimiter
         let token = t!(lexer.next());
         if token.starts_with(b"/") {
             let key = token.reslice(1..).to_string();
-            let obj = t!(parse_with_lexer_ctx(lexer, r, ctx));
+            let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, max_depth));
             dict.insert(key, obj);
         } else if token.equals(b">>") {
             break;
@@ -88,11 +91,14 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
 
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
-pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>) -> Result<Primitive> {
+pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, max_depth: usize) -> Result<Primitive> {
     let first_lexeme = t!(lexer.next());
 
     let obj = if first_lexeme.equals(b"<<") {
-        let dict = t!(parse_dictionary_object(lexer, r, ctx));
+        if max_depth == 0 {
+            return Err(PdfError::MaxDepth);
+        }
+        let dict = t!(parse_dictionary_object(lexer, r, ctx,max_depth-1));
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
             Primitive::Stream(t!(parse_stream_object(dict, lexer, r, ctx)))
@@ -132,6 +138,9 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         let s = first_lexeme.reslice(1..).to_string();
         Primitive::Name(s)
     } else if first_lexeme.equals(b"[") {
+        if max_depth == 0 {
+            return Err(PdfError::MaxDepth);
+        }
         let mut array = Vec::new();
         // Array
         loop {
@@ -140,7 +149,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
                 break;
             }
 
-            let element = t!(parse_with_lexer_ctx(lexer, r, ctx));
+            let element = t!(parse_with_lexer_ctx(lexer, r, ctx, max_depth-1));
             array.push(element);
         }
         t!(lexer.next()); // Move beyond closing delimiter
@@ -207,7 +216,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, _ctx: Option<&Co
     let first_lexeme = t!(lexer.next());
 
     let obj = if first_lexeme.equals(b"<<") {
-        let dict = parse_dictionary_object(lexer, r, None)?;
+        let dict = parse_dictionary_object(lexer, r, None, MAX_DEPTH)?;
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
             t!(parse_stream_object(dict, lexer, r, None))
