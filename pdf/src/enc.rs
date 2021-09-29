@@ -381,7 +381,8 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
         StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params),
-        _ => unimplemented!(),
+        StreamFilter::JPXDecode => bail!("unimplemented StreamFilter::JPXDecode"),
+        StreamFilter::Crypt => bail!("unimplemented StreamFilter::Crypt"),
     }
 }
 
