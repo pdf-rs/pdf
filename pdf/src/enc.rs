@@ -373,6 +373,20 @@ fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
     }
 }
 
+#[cfg(feature="jpeg2k")]
+fn decode_jpx(data: &[u8]) -> Result<Vec<u8>> {
+    let codec = jp2k::Codec::jp2();
+    let stream = jp2k::Stream::from_bytes(data).unwrap();
+
+    let jp2k::ImageBuffer { buffer, width, height, num_bands } = jp2k::ImageBuffer::build(
+        codec,
+        stream,
+        jp2k::DecodeParams::default(),
+    ).map_err(|e| other!("Jpeg2K decode: {:?}", e))?;
+
+    Ok(buffer)
+}
+
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
@@ -381,7 +395,12 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
         StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params),
-        StreamFilter::JPXDecode => bail!("unimplemented StreamFilter::JPXDecode"),
+        
+        #[cfg(feature="jpeg2k")]
+        StreamFilter::JPXDecode => decode_jpx(data),
+        #[cfg(not(feature="jpeg2k"))]
+        StreamFilter::JPXDecode => bail!("disabled StreamFilter::JPXDecode. please enable `jpeg2k` feature."),
+
         StreamFilter::Crypt => bail!("unimplemented StreamFilter::Crypt"),
     }
 }
