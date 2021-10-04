@@ -266,7 +266,6 @@ impl PsFunc {
         Ok(())
     }
     pub fn parse(s: &str) -> Result<Self, PdfError> {
-        dbg!(s);
         let start = s.find("{").ok_or(PdfError::PostScriptParse)?;
         let end = s.rfind("}").ok_or(PdfError::PostScriptParse)?;
 
