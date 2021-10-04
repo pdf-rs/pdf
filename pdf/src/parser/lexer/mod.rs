@@ -388,7 +388,17 @@ impl<'a> Substr<'a> {
         std::str::from_utf8(self.slice)?.parse::<T>().map_err(|e| PdfError::Parse { source: e.into() })
     }
     pub fn is_integer(&self) -> bool {
-        self.to::<i32>().is_ok()
+        if self.slice.len() == 0 {
+            return false;
+        }
+        let mut slice = self.slice;
+        if slice[0] == b'-' {
+            if slice.len() < 2 {
+                return false;
+            }
+            slice = &slice[1..];
+        }
+        slice.iter().all(|&b| b'0' <= b && b <= b'9')
     }
     pub fn is_real_number(&self) -> bool {
         self.to::<f32>().is_ok()   

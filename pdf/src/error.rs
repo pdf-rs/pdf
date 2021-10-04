@@ -143,6 +143,9 @@ pub enum PdfError {
 
     #[snafu(display("Max nesting depth reached"))]
     MaxDepth,
+
+    #[snafu(display("Invalid"))]
+    Invalid,
 }
 impl PdfError {
     pub fn trace(&self) {

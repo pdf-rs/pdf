@@ -59,7 +59,8 @@ pub trait Backend: Sized {
             bail!("XRef offset outside file bounds");
         }
 
-        let mut lexer = Lexer::new(t!(self.read(start_offset + xref_offset..)));
+        let pos = t!(start_offset.checked_add(xref_offset).ok_or(PdfError::Invalid));
+        let mut lexer = Lexer::new(t!(self.read(pos ..)));
         
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
         
@@ -83,7 +84,8 @@ pub trait Backend: Sized {
         };
         trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
-            let mut lexer = Lexer::new(t!(self.read(start_offset + prev_xref_offset as usize..)));
+            let pos = t!(start_offset.checked_add(prev_xref_offset as usize).ok_or(PdfError::Invalid));
+            let mut lexer = Lexer::new(t!(self.read(pos..)));
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
             
             for section in xref_sections {
@@ -92,7 +94,13 @@ pub trait Backend: Sized {
             
             prev_trailer = {
                 match trailer.get("Prev") {
-                    Some(p) => Some(t!(p.as_integer())),
+                    Some(p) => {
+                        let prev = t!(p.as_integer());
+                        if prev >= prev_xref_offset {
+                            bail!("previous xref offset not before current one");
+                        }
+                        Some(prev)
+                    }
                     None => None
                 }
             };
