@@ -17,11 +17,12 @@ pub struct IccInfo {
     pub metadata: Option<Stream<()>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ColorSpace {
     DeviceGray,
     DeviceRGB,
     DeviceCMYK,
+    DeviceN { names: Vec<String>, alt: Box<ColorSpace>, tint: Function, attr: Option<Dictionary> },
     Indexed(Box<ColorSpace>, Vec<u8>),
     Separation(String, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
@@ -76,6 +77,14 @@ impl Object for ColorSpace {
             "ICCBased" => {
                 let s = t!(RcRef::from_primitive(t!(get_index(&arr, 1)).clone(), resolve));
                 Ok(ColorSpace::Icc(s))
+            }
+            "DeviceN" => {
+                let names = t!(Object::from_primitive(t!(get_index(&arr, 1)).clone(), resolve));
+                let alt = t!(Object::from_primitive(t!(get_index(&arr, 2)).clone(), resolve));
+                let tint = t!(Function::from_primitive(t!(get_index(&arr, 3)).clone(), resolve));
+                let attr = arr.get(4).map(|p| Dictionary::from_primitive(p.clone(), resolve)).transpose()?;
+
+                Ok(ColorSpace::DeviceN { names, alt, tint, attr})
             }
             _ => Ok(ColorSpace::Other(arr))
         }

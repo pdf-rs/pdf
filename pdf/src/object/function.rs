@@ -2,7 +2,7 @@ use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 struct RawFunction {
     #[pdf(key="FunctionType")]
     function_type: u32,
@@ -17,7 +17,7 @@ struct RawFunction {
     other: Dictionary
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, Clone)]
 struct Function2 {
     #[pdf(key="C0")]
     c0: Option<Vec<f32>>,
@@ -29,13 +29,13 @@ struct Function2 {
     exponent: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Function {
     Sampled(SampledFunction),
     Interpolated(Vec<InterpolatedFunctionDim>),
     Stiching,
     Calculator,
-    PostScript(PsFunc),
+    PostScript { func: PsFunc, domain: Vec<f32>, range: Vec<f32> },
 }
 impl Function {
     pub fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
@@ -52,8 +52,20 @@ impl Function {
                 }
                 Ok(())
             }
-            Function::PostScript(ref func) => func.exec(x[0], out),
+            Function::PostScript { ref func, .. } => func.exec(x, out),
             _ => bail!("unimplemted function {:?}", self)
+        }
+    }
+    pub fn input_dim(&self) -> usize {
+        match *self {
+            Function::PostScript { ref domain, .. } => domain.len() / 2,
+            _ => panic!()
+        }
+    }
+    pub fn output_dim(&self) -> usize {
+        match *self {
+            Function::PostScript { ref range, .. } => range.len() / 2,
+            _ => panic!()
         }
     }
 }
@@ -99,14 +111,14 @@ impl Object for Function {
         match p {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),
             Primitive::Stream(mut s) => {
-                let function_type = s.info.require("Function", "FunctionType")?.as_integer()?;
-                let stream = Stream::<()>::from_stream(s, resolve)?;
+                let stream = Stream::<RawFunction>::from_stream(s, resolve)?;
                 let data = stream.decode()?;
-                match function_type {
+                match stream.info.function_type {
                     4 => {
                         let s = std::str::from_utf8(&*data)?;
                         let func = PsFunc::parse(s)?;
-                        Ok(Function::PostScript(func))
+                        let info = stream.info.info;
+                        Ok(Function::PostScript { func, domain: info.domain, range: info.range.unwrap() })
                     },
                     0 => {
                         Ok(Function::Sampled(SampledFunction {
@@ -125,7 +137,7 @@ impl Object for Function {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SampledFunctionInput {
     domain: (f32, f32),
     encode_offset: f32,
@@ -139,20 +151,20 @@ impl SampledFunctionInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SampledFunctionOutput {
     output_offset: f32,
     output_scale: f32
 
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Interpolation {
     Linear,
     Cubic,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SampledFunction {
     input: Vec<SampledFunctionInput>,
     data: Vec<u8>,
@@ -170,7 +182,7 @@ impl SampledFunction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InterpolatedFunctionDim {
     pub input_range: (f32, f32),
     pub output_range: (f32, f32),
@@ -191,7 +203,7 @@ pub enum PostScriptError {
     StackUnderflow,
     IncorrectStackSize
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PsFunc {
     pub ops: Vec<PsOp>
 }
@@ -207,19 +219,42 @@ impl PsFunc {
     fn exec_inner(&self, stack: &mut Vec<f32>) -> Result<(), PostScriptError> {
         for &op in &self.ops {
             match op {
+                PsOp::Int(i) => stack.push(i as f32),
                 PsOp::Value(v) => stack.push(v),
                 PsOp::Dup => op!(stack; v => v, v),
                 PsOp::Exch => op!(stack; a, b => a, b),
                 PsOp::Add => op!(stack; a, b => a + b),
+                PsOp::Sub => op!(stack; a, b => a - b),
                 PsOp::Mul => op!(stack; a, b => a * b),
                 PsOp::Abs => op!(stack; a => a.abs()),
+                PsOp::Roll => {
+                    let j = stack.pop().ok_or(PostScriptError::StackUnderflow)? as isize;
+                    let n = stack.pop().ok_or(PostScriptError::StackUnderflow)? as usize;
+                    let start = stack.len() - n;
+                    let slice = &mut stack[start..];
+                    if j > 0 {
+                        slice.rotate_right(j as usize);
+                    } else {
+                        slice.rotate_left(-j as usize);
+                    }
+                }
+                PsOp::Index => {
+                    let n = stack.pop().ok_or(PostScriptError::StackUnderflow)? as usize;
+                    if n >= stack.len() { return Err(PostScriptError::StackUnderflow); }
+                    let val = stack[stack.len() - n - 1];
+                    stack.push(val);
+                }
+                PsOp::Cvr => {}
+                PsOp::Pop => {
+                    stack.pop().ok_or(PostScriptError::StackUnderflow)?;
+                }
             }
         }
         Ok(())
     }
-    pub fn exec(&self, input: f32, output: &mut [f32]) -> Result<()> {
+    pub fn exec(&self, input: &[f32], output: &mut [f32]) -> Result<()> {
         let mut stack = Vec::with_capacity(10);
-        stack.push(input);
+        stack.extend_from_slice(input);
         match self.exec_inner(&mut stack) {
             Ok(()) => {},
             Err(_) => return Err(PdfError::PostScriptExec)
@@ -231,35 +266,51 @@ impl PsFunc {
         Ok(())
     }
     pub fn parse(s: &str) -> Result<Self, PdfError> {
+        dbg!(s);
         let start = s.find("{").ok_or(PdfError::PostScriptParse)?;
         let end = s.rfind("}").ok_or(PdfError::PostScriptParse)?;
 
-        let ops: Result<Vec<_>, _> = s[start + 1 .. end].split_ascii_whitespace().map(|p| PsOp::parse(p).ok_or(PdfError::PostScriptParse)).collect();
+        let ops: Result<Vec<_>, _> = s[start + 1 .. end].split_ascii_whitespace().map(|p| PsOp::parse(p)).collect();
         Ok(PsFunc { ops: ops? })
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum PsOp {
+    Int(i32),
     Value(f32),
     Add,
+    Sub,
     Abs,
     Mul,
     Dup,
     Exch,
+    Roll,
+    Index,
+    Cvr,
+    Pop,
 }
 impl PsOp {
-    pub fn parse(s: &str) -> Option<Self> {
-        if let Ok(f) = s.parse() {
-            Some(PsOp::Value(f))
+    pub fn parse(s: &str) -> Result<Self> {
+        if let Ok(i) = s.parse::<i32>() {
+            Ok(PsOp::Int(i))
+        } else if let Ok(f) = s.parse::<f32>() {
+            Ok(PsOp::Value(f))
         } else {
-            Some(match s {
+            Ok(match s {
                 "add" => PsOp::Add,
+                "sub" => PsOp::Sub,
                 "abs" => PsOp::Abs,
                 "mul" => PsOp::Mul,
                 "dup" => PsOp::Dup,
                 "exch" => PsOp::Exch,
-                _ => return None
+                "roll" => PsOp::Roll,
+                "index" => PsOp::Index,
+                "cvr" => PsOp::Cvr,
+                "pop" => PsOp::Pop,
+                _ => {
+                    bail!("unimplemented op {}", s);
+                }
             })
         }
     }

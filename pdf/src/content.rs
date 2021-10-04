@@ -155,14 +155,14 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
 
     // ugh
     let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
-    let color_space = dict.get("InlineImage").map(|p| expand_abbr(p.clone(), 
+    let color_space = dict.get("InlineImage").map(|p| ColorSpace::from_primitive(expand_abbr(p.clone(), 
         &[
             ("G", "DeviceGray"),
             ("RGB", "DeviceRGB"),
             ("CMYK", "DeviceCMYK"),
             ("I", "Indexed")
         ]
-    ));
+    ), resolve)).transpose()?;
     let decode = dict.get("Decode").map(|p| Object::from_primitive(p.clone(), resolve)).transpose()?;
     let decode_parms = dict.get("DecodeParms").map(|p| p.clone().into_dictionary(resolve)).transpose()?.unwrap_or_default();
     let filter = expand_abbr(

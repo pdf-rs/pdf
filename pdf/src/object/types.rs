@@ -446,7 +446,7 @@ pub struct ImageDict {
     pub height: i32,
 
     #[pdf(key="ColorSpace")]
-    pub color_space: Option<Primitive>,
+    pub color_space: Option<ColorSpace>,
 
     #[pdf(key="BitsPerComponent")]
     pub bits_per_component: i32,
