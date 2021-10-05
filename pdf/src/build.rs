@@ -83,7 +83,8 @@ impl CatalogBuilder {
             dests: None,
             metadata: None,
             outlines: None,
-            struct_tree_root: None
+            struct_tree_root: None,
+            forms: None,
         })
     }
 }

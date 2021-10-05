@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use pdf::file::File;
 use pdf::object::*;
+use pdf::primitive::{Primitive, PdfString};
 use pdf::error::PdfError;
 
 
@@ -67,6 +68,24 @@ fn main() -> Result<(), PdfError> {
     }
     println!("Found {} font(s).", fonts.len());
     
+    if let Some(ref forms) = file.get_root().forms {
+        println!("Forms:");
+        for field in forms.fields.iter() {
+            print!("  {:?} = ", field.name);
+            match field.value {
+                Primitive::String(ref s) => {
+                    match s.as_str() {
+                        Ok(s) => println!("{:?}", s),
+                        Err(_) => println!("{:?}", s),
+                    }
+                }
+                Primitive::Integer(i) => println!("{}", i),
+                Primitive::Name(ref s) => println!("{}", s),
+                ref p => println!("{:?}", p),
+            }
+        }
+    }
+
     if let Ok(elapsed) = now.elapsed() {
         println!("Time: {}s", elapsed.as_secs() as f64
                  + elapsed.subsec_nanos() as f64 * 1e-9);

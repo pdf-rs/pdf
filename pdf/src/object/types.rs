@@ -124,6 +124,9 @@ pub struct Catalog {
 // AA: dict
 // URI: dict
 // AcroForm: dict
+    #[pdf(key="AcroForm")]
+    pub forms: Option<IntreactiveFormDictionary>,
+
 // Metadata: stream
     #[pdf(key="Metadata")]
     pub metadata: Option<Ref<Stream>>,
@@ -569,6 +572,82 @@ pub struct FormDict {
 
     #[pdf(other)]
     pub other: Dictionary,
+}
+
+#[derive(Object, ObjectWrite, Debug, Clone)]
+pub struct IntreactiveFormDictionary {
+    #[pdf(key="Fields")]
+    pub fields: Vec<RcRef<FieldDictionary>>,
+    
+    #[pdf(key="NeedAppearances", default="false")]
+    pub need_appearences: bool,
+    
+    #[pdf(key="SigFlags", default="0")]
+    pub sig_flags: u32,
+    
+    #[pdf(key="CO")]
+    pub co: Option<Vec<RcRef<FieldDictionary>>>,
+    
+    #[pdf(key="DR")]
+    pub dr: Option<MaybeRef<Resources>>,
+    
+    #[pdf(key="DA")]
+    pub da: Option<PdfString>,
+    
+    #[pdf(key="Q")]
+    pub q: Option<i32>,
+
+    #[pdf(key="XFA")]
+    pub xfa: Option<Primitive>,
+}
+
+#[derive(Object, ObjectWrite, Debug, Copy, Clone, PartialEq)]
+pub enum FieldType {
+    #[pdf(name="Btn")]
+    Button,
+    #[pdf(name="Tx")]
+    Text,
+    #[pdf(name="Ch")]
+    Choice,
+    #[pdf(name="Sig")]
+    Signature,
+}
+#[test]
+fn test_field_type() {
+    assert_eq!(FieldType::from_primitive(Primitive::Name("Tx".into()), &NoResolve).unwrap(), FieldType::Text);
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+pub struct FieldDictionary {
+    #[pdf(key="FT")]
+    pub typ: FieldType,
+    
+    #[pdf(key="Parent")]
+    pub parent: Option<MaybeRef<FieldDictionary>>,
+    
+    #[pdf(key="Kids")]
+    pub kids: Vec<Ref<FieldDictionary>>,
+    
+    #[pdf(key="T")]
+    pub name: Option<PdfString>,
+    
+    #[pdf(key="TU")]
+    pub alt_name: Option<PdfString>,
+    
+    #[pdf(key="TM")]
+    pub mapping_name: Option<PdfString>,
+    
+    #[pdf(key="Ff", default="0")]
+    pub flags: u32,
+
+    #[pdf(key="V")]
+    pub value: Primitive,
+    
+    #[pdf(key="DV")]
+    pub default_value: Primitive,
+    
+    #[pdf(key="AA")]
+    pub actions: Option<Dictionary>,
 }
 
 
