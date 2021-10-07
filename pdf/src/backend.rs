@@ -52,14 +52,11 @@ pub trait Backend: Sized {
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self, start_offset: usize) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
-        if xref_offset < start_offset {
-            bail!("Invalid PDF. xref before header.");
-        }
-        if xref_offset >= self.len() {
+        let pos = t!(start_offset.checked_add(xref_offset).ok_or(PdfError::Invalid));
+        if pos >= self.len() {
             bail!("XRef offset outside file bounds");
         }
 
-        let pos = t!(start_offset.checked_add(xref_offset).ok_or(PdfError::Invalid));
         let mut lexer = Lexer::new(t!(self.read(pos ..)));
         
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
