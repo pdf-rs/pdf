@@ -46,3 +46,18 @@ jp2k = { git = "https://github.com/s3bk/jp2k", optional = true }
 
 [lib]
 doctest = false
+
+[[example]]
+name = "content"
+
+[[example]]
+name = "metadata"
+
+[[example]]
+name = "names"
+
+[[example]]
+name = "read"
+
+[[example]]
+name = "text"
