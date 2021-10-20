@@ -12,7 +12,11 @@ This repository uses a Cargo Workspace and default members. This means by defaul
 To build additional parts, pass `--package=read` to build the subcrate you are interested in (here the `read` example).
 
 # Examples
-Currently we only have two very minimal examples `read` and `text`. However the library has grown a lot since they have been written.
+Examples are located in `pdf/examples/` and can be executed using:
+
+```
+cargo run --example {content,metadata,names,read,text} -- <files/{choose a pdf}>
+```
 
 # Renderer and Viewer
 A library for rendering PDFs via [Pathfinder](https://github.com/servo/pathfinder) and minimal viewer can be found [here](https://github.com/pdf-rs/pdf_render).
