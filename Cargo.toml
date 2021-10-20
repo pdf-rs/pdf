@@ -2,9 +2,4 @@
 members = [
     "pdf",
     "pdf_derive",
-    "examples/read",
-    "examples/text",
-    "examples/names",
-    "examples/metadata",
-    "examples/content",
 ]
