@@ -23,6 +23,9 @@ pub enum ColorSpace {
     DeviceRGB,
     DeviceCMYK,
     DeviceN { names: Vec<String>, alt: Box<ColorSpace>, tint: Function, attr: Option<Dictionary> },
+    CalGray(Dictionary),
+    CalRGB(Dictionary),
+    CalCMYK(Dictionary),
     Indexed(Box<ColorSpace>, Vec<u8>),
     Separation(String, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
@@ -85,6 +88,18 @@ impl Object for ColorSpace {
                 let attr = arr.get(4).map(|p| Dictionary::from_primitive(p.clone(), resolve)).transpose()?;
 
                 Ok(ColorSpace::DeviceN { names, alt, tint, attr})
+            }
+            "CalGray" => {
+                let dict = Dictionary::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
+                Ok(ColorSpace::CalGray(dict))
+            }
+            "CalRGB" => {
+                let dict = Dictionary::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
+                Ok(ColorSpace::CalRGB(dict))
+            }
+            "CalCMYK" => {
+                let dict = Dictionary::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
+                Ok(ColorSpace::CalCMYK(dict))
             }
             _ => Ok(ColorSpace::Other(arr))
         }
