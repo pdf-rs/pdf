@@ -36,9 +36,13 @@ fn main() -> Result<(), PdfError> {
     for page in file.pages() {
         let page = page.unwrap();
         let resources = page.resources().unwrap();
-        for &font in resources.fonts.values() {
+        for (i, &font) in resources.fonts.values().enumerate() {
             let font = file.get(font)?;
-            fonts.insert(font.name.clone(), font.clone());
+            let name = match &font.name {
+                Some(name) => name.clone(),
+                None => i.to_string(),
+            };
+            fonts.insert(name, font.clone());
         }
         images.extend(resources.xobjects.iter().map(|(_name, &r)| file.get(r).unwrap())
             .filter(|o| matches!(**o, XObject::Image(_)))

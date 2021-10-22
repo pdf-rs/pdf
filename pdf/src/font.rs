@@ -36,7 +36,7 @@ pub enum FontType {
 #[derive(Debug)]
 pub struct Font {
     pub subtype: FontType,
-    pub name: String,
+    pub name: Option<String>,
     pub data: Result<FontData>,
     
     encoding: Option<Encoding>,
@@ -60,9 +60,20 @@ pub enum FontData {
 impl Object for Font {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = p.into_dictionary(resolve)?;
-        dict.expect("Font", "Type", "Font", true)?;
-        let base_font = dict.require("Font", "BaseFont")?.into_name()?;
+
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
+
+        // BaseFont is required for all FontTypes except Type3
+        dict.expect("Font", "Type", "Font", true)?;
+        let base_font_primitive = dict.remove("BaseFont");
+        let base_font = match (base_font_primitive, subtype) {
+            (Some(name), _) => Some(name.into_name()?),
+            (None, FontType::Type3) => None,
+            (_, _) => return Err(PdfError::MissingEntry {
+                typ: "Font",
+                field: "BaseFont".to_string()
+            })
+        };
         
         let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
 
