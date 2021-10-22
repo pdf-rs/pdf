@@ -1,4 +1,4 @@
-# pdf-rs [![Build Status](https://travis-ci.com/pdf-rs/pdf.svg?branch=master)](https://travis-ci.com/pdf-rs/pdf)
+# pdf-rs [![test](https://github.com/pdf-rs/pdf/actions/workflows/test.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/test.yml) [![clippy&fmt](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml)
 Read, alter and write PDF files.
 
 **At the moment, you can only read PDF files.**
