@@ -80,7 +80,9 @@ fn main() -> Result<(), PdfError> {
         for gs in resources.graphics_states.values() {
             if let Some((font, _)) = gs.font {
                 let font = file.get(font)?;
-                cache.add_font(font.name.clone(), font);
+                if let Some(font_name) = &font.name {
+                    cache.add_font(font_name.clone(), font);
+                }
             }
         }
         let mut current_font = None;
@@ -92,7 +94,9 @@ fn main() -> Result<(), PdfError> {
                     
                     if let Some((font, _)) = gs.font {
                         let font = file.get(font)?;
-                        current_font = cache.get_font(&font.name);
+                        if let Some(font_name) = &font.name{
+                            current_font = cache.get_font(font_name.as_str());
+                        }
                     }
                 }
                 // text font
