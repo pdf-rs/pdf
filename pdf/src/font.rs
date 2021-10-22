@@ -43,7 +43,8 @@ pub struct Font {
     
     to_unicode: Option<Stream>,
     
-    _other: Dictionary
+    /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
+    pub _other: Dictionary
 }
 
 #[derive(Debug)]
@@ -65,9 +66,9 @@ impl Object for Font {
 
         // BaseFont is required for all FontTypes except Type3
         dict.expect("Font", "Type", "Font", true)?;
-        let base_font_primitive = dict.remove("BaseFont");
+        let base_font_primitive = dict.get("BaseFont");
         let base_font = match (base_font_primitive, subtype) {
-            (Some(name), _) => Some(name.into_name()?),
+            (Some(name), _) => Some(name.clone().into_name()?),
             (None, FontType::Type3) => None,
             (_, _) => return Err(PdfError::MissingEntry {
                 typ: "Font",
@@ -262,7 +263,7 @@ impl Font {
 }
 #[derive(Object, Debug)]
 pub struct TFont {
-    #[pdf(key="Name")]
+    #[pdf(key="BaseFont")]
     pub name: Option<String>,
     
     /// per spec required, but some files lack it.
