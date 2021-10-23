@@ -3,6 +3,7 @@ use once_cell::unsync::OnceCell;
 use std::cmp::Ordering;
 /// PDF content streams.
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use crate::enc::StreamFilter;
 use crate::error::*;
@@ -27,7 +28,7 @@ impl Content {
                 let mut ops = OpBuilder::new();
                 for part in self.parts.iter() {
                     let data = t!(part.data());
-                    ops.parse(&data, resolve)?;
+                    ops.parse(data, resolve)?;
                 }
                 Ok(ops.ops)
             })
@@ -376,7 +377,7 @@ impl OpBuilder {
                 properties: Some(args.next().ok_or(PdfError::NoOpArg)?),
             }),
             "BI" => push(Op::InlineImage {
-                image: inline_image(lexer, resolve)?,
+                image: Box::new(inline_image(lexer, resolve)?),
             }),
             "BMC" => push(Op::BeginMarkedContent {
                 tag:        name(&mut args)?,
@@ -502,7 +503,7 @@ impl OpBuilder {
             }),
             "ri" => {
                 let s = name(&mut args)?;
-                let intent = RenderingIntent::from_str(&s).ok_or_else(|| PdfError::Other {
+                let intent = RenderingIntent::from_str(&s).map_err(|_| PdfError::Other {
                     msg: format!("invalid rendering intent {}", s),
                 })?;
                 push(Op::RenderingIntent { intent });
@@ -698,14 +699,14 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
     let mut current_point = None;
     let f = &mut data;
 
-    while ops.len() > 0 {
+    while !ops.is_empty() {
         let mut advance = 1;
         match ops[0] {
             BeginMarkedContent {
                 ref tag,
                 properties: Some(ref name),
             } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 write!(f, " ")?;
                 name.serialize(f, 0)?;
                 writeln!(f, " BDC")?;
@@ -714,14 +715,14 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                 ref tag,
                 properties: None,
             } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 writeln!(f, " BMC")?;
             }
             MarkedContentPoint {
                 ref tag,
                 properties: Some(ref name),
             } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 write!(f, " ")?;
                 name.serialize(f, 0)?;
                 writeln!(f, " DP")?;
@@ -730,7 +731,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                 ref tag,
                 properties: None,
             } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 writeln!(f, " MP")?;
             }
             EndMarkedContent => writeln!(f, "EMC")?,
@@ -874,7 +875,9 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             }
             TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
             Leading { leading } => match ops[1..] {
-                [Op::MoveTextPosition { translation }, ..] if leading == -translation.x => {
+                [Op::MoveTextPosition { translation }, ..]
+                    if (leading - translation.x).abs() < f32::EPSILON =>
+                {
                     writeln!(f, "{} {} TD", translation.x, translation.y)?;
                     advance += 1;
                 }
@@ -974,9 +977,9 @@ impl Display for Point {
     }
 }
 #[cfg(feature = "euclid")]
-impl Into<euclid::Point2D<f32, PdfSpace>> for Point {
-    fn into(self) -> euclid::Point2D<f32, PdfSpace> {
-        let Point { x, y } = self;
+impl From<Point> for euclid::Point2D<f32, PdfSpace> {
+    fn from(from: Point) -> euclid::Point2D<f32, PdfSpace> {
+        let Point { x, y } = from;
 
         euclid::Point2D::new(x, y)
     }
@@ -990,9 +993,9 @@ impl From<euclid::Point2D<f32, PdfSpace>> for Point {
     }
 }
 #[cfg(feature = "euclid")]
-impl Into<euclid::Vector2D<f32, PdfSpace>> for Point {
-    fn into(self) -> euclid::Vector2D<f32, PdfSpace> {
-        let Point { x, y } = self;
+impl From<Point> for euclid::Vector2D<f32, PdfSpace> {
+    fn from(from: Point) -> euclid::Vector2D<f32, PdfSpace> {
+        let Point { x, y } = from;
 
         euclid::Vector2D::new(x, y)
     }
@@ -1020,14 +1023,14 @@ impl Display for Rect {
     }
 }
 #[cfg(feature = "euclid")]
-impl Into<euclid::Box2D<f32, PdfSpace>> for Rect {
-    fn into(self) -> euclid::Box2D<f32, PdfSpace> {
+impl From<Rect> for euclid::Box2D<f32, PdfSpace> {
+    fn from(from: Rect) -> euclid::Box2D<f32, PdfSpace> {
         let Rect {
             x,
             y,
             width,
             height,
-        } = self;
+        } = from;
 
         assert!(width > 0.0);
         assert!(height > 0.0);
@@ -1091,9 +1094,9 @@ impl Default for Matrix {
     }
 }
 #[cfg(feature = "euclid")]
-impl Into<euclid::Transform2D<f32, PdfSpace, PdfSpace>> for Matrix {
-    fn into(self) -> euclid::Transform2D<f32, PdfSpace, PdfSpace> {
-        let Matrix { a, b, c, d, e, f } = self;
+impl From<Matrix> for euclid::Transform2D<f32, PdfSpace, PdfSpace> {
+    fn from(from: Matrix) -> euclid::Transform2D<f32, PdfSpace, PdfSpace> {
+        let Matrix { a, b, c, d, e, f } = from;
 
         euclid::Transform2D::new(a, b, c, d, e, f)
     }
@@ -1353,6 +1356,6 @@ pub enum Op {
     },
 
     InlineImage {
-        image: Stream<ImageDict>,
+        image: Box<Stream<ImageDict>>,
     },
 }

@@ -216,7 +216,7 @@ impl Decoder {
         }
 
         fn check_password_rev_3_4(document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
-            compute_u_rev_3_4(id, key) == &document_u[..16]
+            compute_u_rev_3_4(id, key) == document_u[..16]
         }
 
         fn check_password_rc4(revision: u32, document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
@@ -328,7 +328,7 @@ impl Decoder {
             v => err!(other!("unsupported V value {}", v)),
         };
         let level = dict.r;
-        if level < 2 || level > 6 {
+        if !(2..=6).contains(&level) {
             err!(other!(
                 "unsupported standard security handler revision {}",
                 level
@@ -440,27 +440,29 @@ impl Decoder {
             } else {
                 // level == 5
 
-                let mut user_check_hash = Sha256::new();
-                user_check_hash.update(password_encoded);
-                user_check_hash.update(user_validation_salt);
-                let user_hash_computed = user_check_hash.finalize();
+                let user_hash_computed = Sha256::new()
+                    .chain(password_encoded)
+                    .chain(user_validation_salt)
+                    .finalize();
                 if user_hash_computed.as_slice() == user_hash {
-                    let mut intermediate_kdf_hash = Sha256::new();
-                    intermediate_kdf_hash.update(password_encoded);
-                    intermediate_kdf_hash.update(user_key_salt);
-                    (intermediate_kdf_hash.finalize(), ue)
+                    let intermediate_kdf_hash = Sha256::new()
+                        .chain(password_encoded)
+                        .chain(user_key_salt)
+                        .finalize();
+                    (intermediate_kdf_hash, ue)
                 } else {
-                    let mut owner_check_hash = Sha256::new();
-                    owner_check_hash.update(password_encoded);
-                    owner_check_hash.update(owner_validation_salt);
-                    owner_check_hash.update(u);
-                    let owner_hash_computed = owner_check_hash.finalize();
-                    if owner_hash_computed.as_slice() == owner_hash {
-                        let mut intermediate_kdf_hash = Sha256::new();
-                        intermediate_kdf_hash.update(password_encoded);
-                        intermediate_kdf_hash.update(owner_key_salt);
-                        intermediate_kdf_hash.update(u);
-                        (intermediate_kdf_hash.finalize(), oe)
+                    let owner_check_hash = Sha256::new()
+                        .chain(password_encoded)
+                        .chain(owner_validation_salt)
+                        .chain(u)
+                        .finalize();
+                    if owner_check_hash.as_slice() == owner_hash {
+                        let intermediate_kdf_hash = Sha256::new()
+                            .chain(password_encoded)
+                            .chain(owner_key_salt)
+                            .chain(u)
+                            .finalize();
+                        (intermediate_kdf_hash, oe)
                     } else {
                         err!(PdfError::InvalidPassword);
                     }
@@ -496,7 +498,7 @@ impl Decoder {
         input_sha256.update(salt);
         input_sha256.update(u);
         let input = input_sha256.finalize();
-        let (mut key, mut iv) = input.clone().split();
+        let (mut key, mut iv) = input.split();
 
         let mut block = [0u8; 64];
         let mut block_size = 32;

@@ -317,7 +317,7 @@ pub fn dump_data(data: &[u8]) {
             .unwrap()
             .keep()
             .unwrap();
-        file.write_all(&data).unwrap();
+        file.write_all(data).unwrap();
         info!("data written to {:?}", path);
     } else {
         info!("set PDF_OUT to an existing directory to dump stream data");

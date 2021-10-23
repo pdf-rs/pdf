@@ -19,7 +19,7 @@ fn main() -> Result<(), PdfError> {
             println!("{:?}", c);
         }
 
-        let content = Content::from_ops(vec![
+        let _content = Content::from_ops(vec![
             Op::MoveTo {
                 p: Point { x: 100., y: 100. },
             },
@@ -42,7 +42,10 @@ fn main() -> Result<(), PdfError> {
             .iter_mut()
             .flat_map(|c| c.parts.iter_mut())
         {
-            *s = Stream::new(s.info.info, s.decode()?.into());
+            *s = {
+                s.info.info;
+                Stream::new((), s.decode()?.into())
+            };
         }
         pages.push(new_page);
     }

@@ -240,7 +240,7 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     }
 
     let r = chunks.remainder();
-    if r.len() > 0 {
+    if !r.is_empty() {
         let mut c = [0; 4];
         c[..r.len()].copy_from_slice(r);
         let out = base85_chunk(c);
@@ -489,23 +489,17 @@ fn filter_paeth(a: u8, b: u8, c: u8) -> u8 {
 }
 
 pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out: &mut [u8]) {
-    use self::PredictorType::*;
+    use PredictorType::*;
     let len = inp.len();
     assert_eq!(len, out.len());
     assert_eq!(len, prev.len());
 
     match filter {
         NoFilter => {
-            #[allow(clippy::manual_memcpy)]
-            // TODO consider: `out[..len].clone_from_slice(&inp[..len])`
-            for i in 0..len {
-                out[i] = inp[i];
-            }
+            out[..len].clone_from_slice(&inp[..len]);
         }
         Sub => {
-            for i in 0..bpp {
-                out[i] = inp[i];
-            }
+            out[..bpp].clone_from_slice(&inp[..bpp]);
 
             for i in bpp..len {
                 out[i] = inp[i].wrapping_add(out[i - bpp]);
@@ -537,9 +531,8 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
     }
 }
 
-#[allow(unused)]
 pub fn filter(method: PredictorType, bpp: usize, previous: &[u8], current: &mut [u8]) {
-    use self::PredictorType::*;
+    use PredictorType::*;
     let len = current.len();
 
     match method {

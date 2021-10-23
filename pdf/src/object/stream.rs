@@ -116,7 +116,7 @@ impl<I: ObjectWrite> Stream<I> {
             p => bail!("stream info has to be a dictionary (found {:?})", p),
         };
         let mut params = None;
-        if self.info.filters.len() > 0 {
+        if !self.info.filters.is_empty() {
             for f in self.info.filters.iter() {
                 if let Some(para) = match f {
                     StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
@@ -124,9 +124,7 @@ impl<I: ObjectWrite> Stream<I> {
                     StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
                     _ => None,
                 } {
-                    if params.is_some() {
-                        panic!();
-                    }
+                    assert!(!params.is_some(), "explicit panic");
                     params = Some(para);
                 }
             }

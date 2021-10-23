@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::io::SeekFrom;
 use std::ops::{Deref, Range};
 use std::slice::SliceIndex;
@@ -378,9 +379,6 @@ impl<'a> Substr<'a> {
     // as: &S -> &U. Cheap borrow conversion
     // into: S -> U. Cheap ownership transfer conversion.
 
-    pub fn to_string(&self) -> String {
-        String::from_utf8_lossy(self.as_slice()).into()
-    }
     pub fn to_vec(&self) -> Vec<u8> {
         self.slice.to_vec()
     }
@@ -394,7 +392,7 @@ impl<'a> Substr<'a> {
             .map_err(|e| PdfError::Parse { source: e.into() })
     }
     pub fn is_integer(&self) -> bool {
-        if self.slice.len() == 0 {
+        if self.slice.is_empty() {
             return false;
         }
         let mut slice = self.slice;
@@ -404,7 +402,7 @@ impl<'a> Substr<'a> {
             }
             slice = &slice[1..];
         }
-        slice.iter().all(|&b| b'0' <= b && b <= b'9')
+        slice.iter().all(|&b| (b'0'..=b'9').contains(&b))
     }
     pub fn is_real_number(&self) -> bool {
         self.to::<f32>().is_ok()
@@ -425,6 +423,12 @@ impl<'a> Substr<'a> {
         Substr {
             slice: &self.slice[range],
         }
+    }
+}
+
+impl<'a> Display for Substr<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(self.as_slice()))
     }
 }
 

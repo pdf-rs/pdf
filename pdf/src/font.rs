@@ -160,7 +160,7 @@ impl Widths {
     }
     fn set(&mut self, cid: usize, width: f32) {
         self._set(cid, width);
-        debug_assert_eq!(self.get(cid), width);
+        debug_assert!((self.get(cid) - width).abs() < f32::EPSILON);
     }
     fn _set(&mut self, cid: usize, width: f32) {
         use std::iter::repeat;
@@ -237,8 +237,8 @@ impl Font {
     pub fn widths(&self, resolve: &impl Resolve) -> Result<Option<Widths>> {
         match self.data {
             Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(resolve),
-            Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => match info {
-                &TFont {
+            Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => match *info {
+                TFont {
                     first_char: Some(first),
                     ref widths,
                     ..
@@ -252,7 +252,7 @@ impl Font {
             Ok(FontData::CIDFontType0(ref cid)) | Ok(FontData::CIDFontType2(ref cid, _)) => {
                 let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
-                while let Some(ref p) = iter.next() {
+                while let Some(p) = iter.next() {
                     let c1 = p.as_integer()? as usize;
                     match iter.next() {
                         Some(&Primitive::Array(ref array)) => {
@@ -413,15 +413,11 @@ pub struct FontDescriptor {
 }
 impl FontDescriptor {
     pub fn data(&self) -> Option<Result<&[u8]>> {
-        if let Some(ref s) = self.font_file {
-            Some(s.data())
-        } else if let Some(ref s) = self.font_file2 {
-            Some(s.data())
-        } else if let Some(ref s) = self.font_file3 {
-            Some(s.data())
-        } else {
-            None
-        }
+        self.font_file
+            .as_ref()
+            .or_else(|| self.font_file2.as_ref())
+            .map(|s| s.data())
+            .or_else(|| self.font_file3.as_ref().map(|s| s.data()))
     }
 }
 
@@ -510,7 +506,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         Ok(Primitive::String(cid_start_data)),
                         Ok(Primitive::String(cid_end_data)),
                         Ok(Primitive::String(unicode_data)),
-                    ) if unicode_data.data.len() > 0 => {
+                    ) if !unicode_data.data.is_empty() => {
                         let cid_start = parse_cid(&cid_start_data)?;
                         let cid_end = parse_cid(&cid_end_data)?;
                         let mut unicode_data = unicode_data.into_bytes();
@@ -530,7 +526,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         let cid_end = parse_cid(&cid_end_data)?;
 
                         for (cid, unicode_data) in (cid_start..=cid_end).zip(unicode_data_arr) {
-                            let unicode = utf16be_to_string(&unicode_data.as_string()?.as_bytes())?;
+                            let unicode = utf16be_to_string(unicode_data.as_string()?.as_bytes())?;
                             map.insert(cid, unicode);
                         }
                     }

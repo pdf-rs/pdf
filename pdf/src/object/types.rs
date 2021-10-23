@@ -515,21 +515,26 @@ pub enum RenderingIntent {
     Perceptual,
 }
 impl RenderingIntent {
-    pub fn from_str(s: &str) -> Option<RenderingIntent> {
-        match s {
-            "AbsoluteColorimetric" => Some(RenderingIntent::AbsoluteColorimetric),
-            "RelativeColorimetric" => Some(RenderingIntent::RelativeColorimetric),
-            "Perceptual" => Some(RenderingIntent::Perceptual),
-            "Saturation" => Some(RenderingIntent::Saturation),
-            _ => None,
-        }
-    }
     pub fn to_str(self) -> &'static str {
         match self {
             RenderingIntent::AbsoluteColorimetric => "AbsoluteColorimetric",
             RenderingIntent::RelativeColorimetric => "RelativeColorimetric",
             RenderingIntent::Perceptual => "Perceptual",
             RenderingIntent::Saturation => "Saturation",
+        }
+    }
+}
+
+impl std::str::FromStr for RenderingIntent {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "AbsoluteColorimetric" => Ok(RenderingIntent::AbsoluteColorimetric),
+            "RelativeColorimetric" => Ok(RenderingIntent::RelativeColorimetric),
+            "Perceptual" => Ok(RenderingIntent::Perceptual),
+            "Saturation" => Ok(RenderingIntent::Saturation),
+            _ => Err(()),
         }
     }
 }
@@ -824,7 +829,7 @@ impl Object for Dest {
                     &Primitive::Null => None,
                     &Primitive::Integer(n) => Some(n as f32),
                     &Primitive::Number(f) => Some(f),
-                    ref p => {
+                    p => {
                         return Err(PdfError::UnexpectedPrimitive {
                             expected: "Number | Integer | Null",
                             found:    p.get_debug_name(),
@@ -835,7 +840,7 @@ impl Object for Dest {
                     &Primitive::Null => None,
                     &Primitive::Integer(n) => Some(n as f32),
                     &Primitive::Number(f) => Some(f),
-                    ref p => {
+                    p => {
                         return Err(PdfError::UnexpectedPrimitive {
                             expected: "Number | Integer | Null",
                             found:    p.get_debug_name(),
@@ -846,7 +851,7 @@ impl Object for Dest {
                     &Primitive::Null => 0.0,
                     &Primitive::Integer(n) => n as f32,
                     &Primitive::Number(f) => f,
-                    ref p => {
+                    p => {
                         return Err(PdfError::UnexpectedPrimitive {
                             expected: "Number | Integer | Null",
                             found:    p.get_debug_name(),
