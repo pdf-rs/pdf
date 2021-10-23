@@ -401,8 +401,8 @@ fn decode_jpx(data: &[u8]) -> Result<Vec<u8>> {
 
     let jp2k::ImageBuffer {
         buffer,
-        _width,
-        _height,
+        width: _width,
+        height: _height,
         num_bands,
     } = jp2k::ImageBuffer::build(codec, stream, jp2k::DecodeParams::default())
         .map_err(|e| other!("Jpeg2K decode: {:?}", e))?;
