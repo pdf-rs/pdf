@@ -87,7 +87,7 @@
 //!
 //! In this case, `StreamFilter::from_primitive(primitive)` will return Ok(_) only if the primitive
 //! is `Primitive::Name` and matches one of the enum variants
-#![recursion_limit="128"]
+#![recursion_limit = "128"]
 
 extern crate proc_macro;
 extern crate syn;
@@ -104,11 +104,6 @@ type SynStream = TokenStream2;
 use std::fs::{OpenOptions};
 use std::io::Write;
 */
-
-
-
-
-
 
 #[proc_macro_derive(Object, attributes(pdf))]
 pub fn object(input: TokenStream) -> TokenStream {
@@ -128,27 +123,29 @@ pub fn objectwrite(input: TokenStream) -> TokenStream {
 
 #[derive(Default)]
 struct FieldAttrs {
-    key: Option<LitStr>,
+    key:     Option<LitStr>,
     default: Option<LitStr>,
-    name: Option<LitStr>,
-    skip: bool,
-    other: bool
+    name:    Option<LitStr>,
+    skip:    bool,
+    other:   bool,
 }
 impl FieldAttrs {
     fn new() -> FieldAttrs {
         FieldAttrs {
-            key: None,
+            key:     None,
             default: None,
-            name: None,
-            skip: false,
-            other: false
+            name:    None,
+            skip:    false,
+            other:   false,
         }
     }
     fn key(&self) -> &LitStr {
         self.key.as_ref().expect("no 'key' in field attributes")
     }
     fn default(&self) -> Option<Expr> {
-        self.default.as_ref().map(|s| parse_str(&s.value()).expect("can't parse `default` as EXPR"))
+        self.default
+            .as_ref()
+            .map(|s| parse_str(&s.value()).expect("can't parse `default` as EXPR"))
     }
     fn parse(list: &[Attribute]) -> FieldAttrs {
         let mut attrs = FieldAttrs::new();
@@ -156,11 +153,15 @@ impl FieldAttrs {
             let list = match attr.parse_meta() {
                 Ok(Meta::List(list)) => list,
                 Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
-                Err(e) => panic!("can't parse meta attributes: {}", e)
+                Err(e) => panic!("can't parse meta attributes: {}", e),
             };
             for meta in list.nested.iter() {
                 match *meta {
-                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref path, lit: Lit::Str(ref value), ..})) => {
+                    NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                        ref path,
+                        lit: Lit::Str(ref value),
+                        ..
+                    })) => {
                         if path.is_ident("key") {
                             attrs.key = Some(value.clone());
                         } else if path.is_ident("default") {
@@ -168,12 +169,25 @@ impl FieldAttrs {
                         } else if path.is_ident("name") {
                             attrs.name = Some(value.clone());
                         } else {
-                            panic!("unsupported key {}", path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<String>>().join("::"))
+                            panic!(
+                                "unsupported key {}",
+                                path.segments
+                                    .iter()
+                                    .map(|s| s.ident.to_string())
+                                    .collect::<Vec<String>>()
+                                    .join("::")
+                            )
                         }
-                    },
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("skip") => attrs.skip = true,
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("other") => attrs.other = true,
-                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
+                    }
+                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("skip") => {
+                        attrs.skip = true
+                    }
+                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("other") => {
+                        attrs.other = true
+                    }
+                    _ => panic!(
+                        r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##
+                    ),
                 }
             }
         }
@@ -181,17 +195,14 @@ impl FieldAttrs {
     }
 }
 
-
-
-
 /// Just the attributes for the whole struct
 #[derive(Default)]
 struct GlobalAttrs {
     /// List of checks to do in the dictionary (LHS is the key, RHS is the expected value)
-    checks: Vec<(String, String)>,
-    type_name: Option<String>,
+    checks:        Vec<(String, String)>,
+    type_name:     Option<String>,
     type_required: bool,
-    is_stream: bool
+    is_stream:     bool,
 }
 impl GlobalAttrs {
     /// The PDF type may be explicitly specified as an attribute with type "Type". Else, it is the name
@@ -203,13 +214,15 @@ impl GlobalAttrs {
             let list = match attr.parse_meta() {
                 Ok(Meta::List(list)) => list,
                 Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
-                Err(e) => panic!("can't parse meta attributes: {}", e)
+                Err(e) => panic!("can't parse meta attributes: {}", e),
             };
 
             // Loop through list of attributes
             for meta in list.nested.iter() {
                 match *meta {
-                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref path, ref lit, ..})) => {
+                    NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                        ref path, ref lit, ..
+                    })) => {
                         if path.is_ident("Type") {
                             match lit {
                                 Lit::Str(ref value) => {
@@ -221,17 +234,26 @@ impl GlobalAttrs {
                                         true
                                     };
                                     attrs.type_name = Some(value);
-                                },
+                                }
                                 _ => panic!("Value of 'Type' attribute must be a String."),
                             }
                         } else {
                             match lit {
-                                Lit::Str(ref value) => attrs.checks.push((path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<String>>().join("::"), value.value())),
+                                Lit::Str(ref value) => attrs.checks.push((
+                                    path.segments
+                                        .iter()
+                                        .map(|s| s.ident.to_string())
+                                        .collect::<Vec<String>>()
+                                        .join("::"),
+                                    value.value(),
+                                )),
                                 _ => panic!("Other checks must have RHS String."),
                             }
                         }
-                    },
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("is_stream") => attrs.is_stream = true,
+                    }
+                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("is_stream") => {
+                        attrs.is_stream = true
+                    }
                     _ => {}
                 }
             }
@@ -242,13 +264,13 @@ impl GlobalAttrs {
 }
 
 fn impl_object(ast: &DeriveInput) -> TokenStream {
-    let attrs = GlobalAttrs::from_ast(&ast);
+    let attrs = GlobalAttrs::from_ast(ast);
     match (attrs.is_stream, &ast.data) {
         (true, Data::Struct(ref data)) => impl_object_for_stream(ast, &data.fields).into(),
         (false, Data::Struct(ref data)) => impl_object_for_struct(ast, &data.fields).into(),
         (true, Data::Enum(ref variants)) => impl_enum_from_stream(ast, variants, &attrs).into(),
         (false, Data::Enum(ref variants)) => impl_object_for_enum(ast, variants).into(),
-        (_, _) => unimplemented!()
+        (_, _) => unimplemented!(),
     }
 }
 fn impl_objectwrite(ast: &DeriveInput) -> TokenStream {
@@ -256,11 +278,14 @@ fn impl_objectwrite(ast: &DeriveInput) -> TokenStream {
     match (attrs.is_stream, &ast.data) {
         (false, Data::Struct(ref data)) => impl_objectwrite_for_struct(ast, &data.fields).into(),
         (false, Data::Enum(ref variants)) => impl_objectwrite_for_enum(ast, variants).into(),
-        (_, _) => unimplemented!()
+        (_, _) => unimplemented!(),
     }
 }
 
-fn enum_pairs(ast: &DeriveInput, data: &DataEnum) -> (Vec<(String, TokenStream2)>, Option<TokenStream2>) {
+fn enum_pairs(
+    ast: &DeriveInput,
+    data: &DataEnum,
+) -> (Vec<(String, TokenStream2)>, Option<TokenStream2>) {
     let id = &ast.ident;
 
     let mut pairs = Vec::with_capacity(data.variants.len());
@@ -294,20 +319,30 @@ fn enum_pairs(ast: &DeriveInput, data: &DataEnum) -> (Vec<(String, TokenStream2)
     (pairs, other)
 }
 
-
 /// Accepts Name to construct enum
 fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let int_count = data.variants.iter().filter(|var| var.discriminant.is_some()).count();
+    let int_count = data
+        .variants
+        .iter()
+        .filter(|var| var.discriminant.is_some())
+        .count();
     if int_count > 0 {
-        assert_eq!(int_count, data.variants.len(), "either none or all variants can have a descriminant");
+        assert_eq!(
+            int_count,
+            data.variants.len(),
+            "either none or all variants can have a descriminant"
+        );
 
         let parts = data.variants.iter().map(|var| {
             if let Some((_, ref expr)) = var.discriminant {
                 let var_ident = &var.ident;
-                let pat = Pat::Lit(PatLit { expr: Box::new(expr.clone()), attrs: vec![] });
+                let pat = Pat::Lit(PatLit {
+                    expr:  Box::new(expr.clone()),
+                    attrs: vec![],
+                });
                 quote! {
                     #pat => Ok(#id::#var_ident)
                 }
@@ -374,9 +409,17 @@ fn impl_objectwrite_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let int_count = data.variants.iter().filter(|var| var.discriminant.is_some()).count();
+    let int_count = data
+        .variants
+        .iter()
+        .filter(|var| var.discriminant.is_some())
+        .count();
     if int_count > 0 {
-        assert_eq!(int_count, data.variants.len(), "either none or all variants can have a descriminant");
+        assert_eq!(
+            int_count,
+            data.variants.len(),
+            "either none or all variants can have a descriminant"
+        );
 
         let parts = data.variants.iter().map(|var| {
             if let Some((_, ref expr)) = var.discriminant {
@@ -422,7 +465,7 @@ fn impl_objectwrite_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
                     let name = match *self {
                         #( #ser_code, )*
                     };
-                    
+
                     Ok(Primitive::Name(name.into()))
                 }
             }
@@ -438,7 +481,7 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
         (Some(ref ty), required) => quote! {
             stream.info.expect(stringify!(#id), "Type", #ty, #required)?;
         },
-        (None, _) => quote!{}
+        (None, _) => quote! {},
     };
 
     let variants_code: Vec<_> = data.variants.iter().map(|var| {
@@ -481,16 +524,17 @@ fn is_option(f: &Field) -> Option<Type> {
         Type::Path(ref p) => {
             let first = p.path.segments.first().unwrap();
             match first {
-                PathSegment { ident, arguments: PathArguments::AngleBracketed(args) } if ident == "Option" => {
-                    match args.args.first().unwrap() {
-                        GenericArgument::Type(t) => Some(t.clone()),
-                        _ => panic!()
-                    }
-                }
-                _ => None
+                PathSegment {
+                    ident,
+                    arguments: PathArguments::AngleBracketed(args),
+                } if ident == "Option" => match args.args.first().unwrap() {
+                    GenericArgument::Type(t) => Some(t.clone()),
+                    _ => panic!(),
+                },
+                _ => None,
             }
         }
-        _ => None
+        _ => None,
     }
 }
 
@@ -503,7 +547,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     ///////////////////////
     let typ = id.to_string();
     let let_parts = fields.iter().map(|field| {
-        
+
         let name = &field.ident;
         let attrs = FieldAttrs::parse(&field.attrs);
         if attrs.skip {
@@ -569,17 +613,21 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         quote! { #name: #name, }
     });
 
-    let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
-        quote! {
-            dict.expect(#typ, #key, #val, true)?;
-        }
-    ).collect();
+    let checks: Vec<_> = attrs
+        .checks
+        .iter()
+        .map(|&(ref key, ref val)| {
+            quote! {
+                dict.expect(#typ, #key, #val, true)?;
+            }
+        })
+        .collect();
 
     let ty_check = match (&attrs.type_name, attrs.type_required) {
         (Some(ref ty), required) => quote! {
             dict.expect(#typ, "Type", #ty, #required)?;
         },
-        (None, _) => quote!{}
+        (None, _) => quote! {},
     };
 
     quote! {
@@ -607,10 +655,16 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(&ast);
 
-    let parts: Vec<_> = fields.iter()
-    .map(|field| {
-        (field.ident.clone(), FieldAttrs::parse(&field.attrs), is_option(&field))
-    }).collect();
+    let parts: Vec<_> = fields
+        .iter()
+        .map(|field| {
+            (
+                field.ident.clone(),
+                FieldAttrs::parse(&field.attrs),
+                is_option(&field),
+            )
+        })
+        .collect();
 
     let fields_ser = parts.iter()
     .map( |&(ref field, ref attrs, ref opt)|
@@ -631,16 +685,16 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
             }
         }
     );
-    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)| {
         quote! {
             dict.insert(#key, pdf::primitive::Primitive::Name(#val.into()));
         }
-    );
+    });
     let pdf_type = match attrs.type_name {
         Some(ref name) => quote! {
             dict.insert("Type", pdf::primitive::Primitive::Name(#name.into()));
         },
-        None => quote! {}
+        None => quote! {},
     };
 
     quote! {
@@ -666,18 +720,21 @@ fn impl_object_for_stream(ast: &DeriveInput, fields: &Fields) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let info_ty = fields.iter()
-    .filter_map(|field| {
-        if let Some(ident) = field.ident.as_ref() {
-            if ident == "info" {
-                Some(field.ty.clone())
+    let info_ty = fields
+        .iter()
+        .filter_map(|field| {
+            if let Some(ident) = field.ident.as_ref() {
+                if ident == "info" {
+                    Some(field.ty.clone())
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    }).next().unwrap();
+        })
+        .next()
+        .unwrap();
 
     quote! {
         impl #impl_generics pdf::object::Object for #id #ty_generics #where_clause {

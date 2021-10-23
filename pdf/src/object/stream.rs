@@ -1,54 +1,56 @@
 use crate as pdf;
-use crate::object::*;
-use crate::primitive::*;
-use crate::error::*;
-use crate::parser::Lexer;
 use crate::enc::{self, decode};
+use crate::error::*;
+use crate::object::*;
+use crate::parser::Lexer;
+use crate::primitive::*;
 
 use once_cell::unsync::OnceCell;
 
 use std::borrow::Cow;
-use std::ops::Deref;
 use std::fmt;
-
-
+use std::ops::Deref;
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
 #[derive(Clone)]
-pub struct Stream<I=()> {
+pub struct Stream<I = ()> {
     pub info: StreamInfo<I>,
     raw_data: Vec<u8>,
-    decoded: OnceCell<Vec<u8>>
+    decoded:  OnceCell<Vec<u8>>,
 }
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, data} = s;
-        let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
+        let PdfStream { info, data } = s;
+        let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary(info), resolve)?;
+        Ok(Stream {
+            info,
+            raw_data: data,
+            decoded: OnceCell::new(),
+        })
     }
 
     pub fn new_with_filters(i: I, data: Vec<u8>, filters: Vec<StreamFilter>) -> Stream<I> {
         Stream {
-            info: StreamInfo {
+            info:     StreamInfo {
                 filters,
                 file: None,
                 file_filters: Vec::new(),
-                info: i
+                info: i,
             },
             raw_data: data,
-            decoded: OnceCell::new()
+            decoded:  OnceCell::new(),
         }
     }
     pub fn new(i: I, data: Vec<u8>) -> Stream<I> {
         Stream {
-            info: StreamInfo {
-                filters: Vec::new(),
-                file: None,
+            info:     StreamInfo {
+                filters:      Vec::new(),
+                file:         None,
                 file_filters: Vec::new(),
-                info: i
+                info:         i,
             },
             raw_data: data,
-            decoded: OnceCell::new()
+            decoded:  OnceCell::new(),
         }
     }
 
@@ -70,17 +72,19 @@ impl<I: Object + fmt::Debug> Stream<I> {
         Ok(data)
     }
     pub fn data(&self) -> Result<&[u8]> {
-        self.decoded.get_or_try_init(|| {
-            let data = self.decode()?;
-            Ok(data.into_owned())
-        }).map(|v| v.as_slice())
+        self.decoded
+            .get_or_try_init(|| {
+                let data = self.decode()?;
+                Ok(data.into_owned())
+            })
+            .map(|v| v.as_slice())
     }
 
     /// If this is contains DCT encoded data, return the compressed data as is
     pub fn as_jpeg(&self) -> Option<&[u8]> {
         match *self.info.filters.as_slice() {
             [StreamFilter::DCTDecode(_)] => Some(self.raw_data.as_slice()),
-            _ => None
+            _ => None,
         }
     }
 
@@ -109,7 +113,7 @@ impl<I: ObjectWrite> Stream<I> {
         let mut info = match self.info.info.to_primitive(update)? {
             Primitive::Dictionary(dict) => dict,
             Primitive::Null => Dictionary::new(),
-            p => bail!("stream info has to be a dictionary (found {:?})", p)
+            p => bail!("stream info has to be a dictionary (found {:?})", p),
         };
         let mut params = None;
         if self.info.filters.len() > 0 {
@@ -118,7 +122,7 @@ impl<I: ObjectWrite> Stream<I> {
                     StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
                     StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
                     StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
-                    _ => None
+                    _ => None,
                 } {
                     if params.is_some() {
                         panic!();
@@ -126,24 +130,31 @@ impl<I: ObjectWrite> Stream<I> {
                     params = Some(para);
                 }
             }
-            let mut filters = self.info.filters.iter().map(|filter| match filter {
-                StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
-                StreamFilter::ASCII85Decode => "ASCII85Decode",
-                StreamFilter::LZWDecode(ref _p) => "LZWDecode",
-                StreamFilter::FlateDecode(ref _p) => "FlateDecode",
-                StreamFilter::JPXDecode => "JPXDecode",
-                StreamFilter::DCTDecode(ref _p) => "DCTDecode",
-                StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
-                StreamFilter::Crypt => "Crypt",
-            })
-            .map(|s| Primitive::Name(s.into()));
+            let mut filters = self
+                .info
+                .filters
+                .iter()
+                .map(|filter| match filter {
+                    StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
+                    StreamFilter::ASCII85Decode => "ASCII85Decode",
+                    StreamFilter::LZWDecode(ref _p) => "LZWDecode",
+                    StreamFilter::FlateDecode(ref _p) => "FlateDecode",
+                    StreamFilter::JPXDecode => "JPXDecode",
+                    StreamFilter::DCTDecode(ref _p) => "DCTDecode",
+                    StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
+                    StreamFilter::Crypt => "Crypt",
+                })
+                .map(|s| Primitive::Name(s.into()));
             match self.info.filters.len() {
-                0 => {},
+                0 => {}
                 1 => {
                     info.insert("Filter", filters.next().unwrap().to_primitive(update)?);
                 }
                 _ => {
-                    info.insert("Filter", Primitive::array::<Primitive, _, _, _>(filters, update)?);
+                    info.insert(
+                        "Filter",
+                        Primitive::array::<Primitive, _, _, _>(filters, update)?,
+                    );
                 }
             }
         }
@@ -154,7 +165,7 @@ impl<I: ObjectWrite> Stream<I> {
 
         Ok(PdfStream {
             info,
-            data: self.raw_data.clone()
+            data: self.raw_data.clone(),
         })
     }
 }
@@ -171,7 +182,6 @@ impl<I: Object> Deref for Stream<I> {
     }
 }
 
-
 /// General stream type. `I` is the additional information to be read from the stream dict.
 #[derive(Debug, Clone)]
 pub struct StreamInfo<I> {
@@ -181,7 +191,7 @@ pub struct StreamInfo<I> {
     pub filters: Vec<StreamFilter>,
 
     /// Eventual file containing the stream contentst
-    pub file: Option<FileSpec>,
+    pub file:         Option<FileSpec>,
     /// Filters to apply to external file specified in `file`.
     pub file_filters: Vec<StreamFilter>,
 
@@ -210,15 +220,15 @@ impl<I> Deref for StreamInfo<I> {
 impl<I: Default> Default for StreamInfo<I> {
     fn default() -> StreamInfo<I> {
         StreamInfo {
-            filters: Vec::new(),
-            file: None,
+            filters:      Vec::new(),
+            file:         None,
             file_filters: Vec::new(),
-            info: I::default(),
+            info:         I::default(),
         }
     }
 }
 impl<T> StreamInfo<T> {
-/*
+    /*
     /// If the stream is not encoded, this is a no-op. `decode()` should be called whenever it's uncertain
     /// whether the stream is encoded.
     pub fn encode(&mut self, _filter: StreamFilter) {
@@ -235,29 +245,37 @@ impl<T: Object> Object for StreamInfo<T> {
         let mut dict = Dictionary::from_primitive(p, resolve)?;
 
         let _length = usize::from_primitive(
-            dict.remove("Length").ok_or(PdfError::MissingEntry{ typ: "StreamInfo", field: "Length".into() })?,
-            resolve)?;
+            dict.remove("Length").ok_or(PdfError::MissingEntry {
+                typ:   "StreamInfo",
+                field: "Length".into(),
+            })?,
+            resolve,
+        )?;
 
         let filters = Vec::<String>::from_primitive(
             dict.remove("Filter").unwrap_or(Primitive::Null),
-            resolve)?;
+            resolve,
+        )?;
 
         let decode_params = Vec::<Dictionary>::from_primitive(
             dict.remove("DecodeParms").unwrap_or(Primitive::Null),
-            resolve)?;
+            resolve,
+        )?;
 
         let file = Option::<FileSpec>::from_primitive(
             dict.remove("F").unwrap_or(Primitive::Null),
-            resolve)?;
+            resolve,
+        )?;
 
         let file_filters = Vec::<String>::from_primitive(
             dict.remove("FFilter").unwrap_or(Primitive::Null),
-            resolve)?;
+            resolve,
+        )?;
 
         let file_decode_params = Vec::<Dictionary>::from_primitive(
             dict.remove("FDecodeParms").unwrap_or(Primitive::Null),
-            resolve)?;
-
+            resolve,
+        )?;
 
         let mut new_filters = Vec::new();
         let mut new_file_filters = Vec::new();
@@ -283,7 +301,7 @@ impl<T: Object> Object for StreamInfo<T> {
             file,
             file_filters: new_file_filters,
             // Special
-            info: T::from_primitive(Primitive::Dictionary (dict), resolve)?,
+            info: T::from_primitive(Primitive::Dictionary(dict), resolve)?,
         })
     }
 }
@@ -302,17 +320,15 @@ pub struct ObjStmInfo {
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
     pub extends: Option<Ref<Stream>>,
-
 }
-
 
 pub struct ObjectStream {
     /// Byte offset of each object. Index is the object number.
-    offsets:    Vec<usize>,
+    offsets: Vec<usize>,
     /// The object number of this object.
-    _id:         ObjNr,
-    
-    inner:      Stream<ObjStmInfo>
+    _id:     ObjNr,
+
+    inner: Stream<ObjStmInfo>,
 }
 
 impl Object for ObjectStream {
@@ -333,7 +349,7 @@ impl Object for ObjectStream {
         Ok(ObjectStream {
             offsets,
             _id: 0, // TODO
-            inner: stream
+            inner: stream,
         })
     }
 }
@@ -341,7 +357,10 @@ impl Object for ObjectStream {
 impl ObjectStream {
     pub fn get_object_slice(&self, index: usize) -> Result<&[u8]> {
         if index >= self.offsets.len() {
-            err!(PdfError::ObjStmOutOfBounds {index, max: self.offsets.len()});
+            err!(PdfError::ObjStmOutOfBounds {
+                index,
+                max: self.offsets.len()
+            });
         }
         let start = self.inner.info.first as usize + self.offsets[index];
         let data = self.inner.data()?;

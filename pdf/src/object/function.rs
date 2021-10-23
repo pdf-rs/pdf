@@ -1,31 +1,31 @@
 use crate as pdf;
-use crate::object::*;
 use crate::error::*;
+use crate::object::*;
 
 #[derive(Object, Debug, Clone)]
 struct RawFunction {
-    #[pdf(key="FunctionType")]
+    #[pdf(key = "FunctionType")]
     function_type: u32,
 
-    #[pdf(key="Domain")]
+    #[pdf(key = "Domain")]
     domain: Vec<f32>,
 
-    #[pdf(key="Range")]
+    #[pdf(key = "Range")]
     range: Option<Vec<f32>>,
 
     #[pdf(other)]
-    other: Dictionary
+    other: Dictionary,
 }
 
 #[derive(Object, Debug, Clone)]
 struct Function2 {
-    #[pdf(key="C0")]
+    #[pdf(key = "C0")]
     c0: Option<Vec<f32>>,
 
-    #[pdf(key="C1")]
+    #[pdf(key = "C1")]
     c1: Option<Vec<f32>>,
 
-    #[pdf(key="N")]
+    #[pdf(key = "N")]
     exponent: f32,
 }
 
@@ -35,17 +35,23 @@ pub enum Function {
     Interpolated(Vec<InterpolatedFunctionDim>),
     Stiching,
     Calculator,
-    PostScript { func: PsFunc, domain: Vec<f32>, range: Vec<f32> },
+    PostScript {
+        func:   PsFunc,
+        domain: Vec<f32>,
+        range:  Vec<f32>,
+    },
 }
 impl Function {
     pub fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
         match *self {
-            Function::Sampled(ref func) => {
-                func.apply(x, out)
-            }
+            Function::Sampled(ref func) => func.apply(x, out),
             Function::Interpolated(ref parts) => {
                 if parts.len() != out.len() {
-                    bail!("incorrect output length: expected {}, found {}.", parts.len(), out.len())
+                    bail!(
+                        "incorrect output length: expected {}, found {}.",
+                        parts.len(),
+                        out.len()
+                    )
                 }
                 for (f, y) in parts.iter().zip(out) {
                     *y = f.apply(x[0]);
@@ -53,19 +59,19 @@ impl Function {
                 Ok(())
             }
             Function::PostScript { ref func, .. } => func.exec(x, out),
-            _ => bail!("unimplemted function {:?}", self)
+            _ => bail!("unimplemted function {:?}", self),
         }
     }
     pub fn input_dim(&self) -> usize {
         match *self {
             Function::PostScript { ref domain, .. } => domain.len() / 2,
-            _ => panic!()
+            _ => panic!(),
         }
     }
     pub fn output_dim(&self) -> usize {
         match *self {
             Function::PostScript { ref range, .. } => range.len() / 2,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
@@ -77,28 +83,46 @@ impl FromDict for Function {
             2 => {
                 let f2 = Function2::from_dict(raw.other, resolve)?;
                 let mut parts = Vec::with_capacity(raw.domain.len());
-                
+
                 let n_dim = match (raw.range.as_ref(), f2.c0.as_ref(), f2.c1.as_ref()) {
                     (Some(range), _, _) => range.len() / 2,
                     (_, Some(c0), _) => c0.len(),
                     (_, _, Some(c1)) => c1.len(),
-                    _ => bail!("unknown dimensions")
+                    _ => bail!("unknown dimensions"),
                 };
                 let input_range = (raw.domain[0], raw.domain[1]);
-                for dim in 0 .. n_dim {
+                for dim in 0..n_dim {
                     let output_range = (
-                        raw.range.as_ref().and_then(|r| r.get(2*dim).cloned()).unwrap_or(-INFINITY),
-                        raw.range.as_ref().and_then(|r| r.get(2*dim+1).cloned()).unwrap_or(INFINITY)
+                        raw.range
+                            .as_ref()
+                            .and_then(|r| r.get(2 * dim).cloned())
+                            .unwrap_or(-INFINITY),
+                        raw.range
+                            .as_ref()
+                            .and_then(|r| r.get(2 * dim + 1).cloned())
+                            .unwrap_or(INFINITY),
                     );
-                    let c0 = f2.c0.as_ref().and_then(|c0| c0.get(dim).cloned()).unwrap_or(0.0);
-                    let c1 = f2.c1.as_ref().and_then(|c1| c1.get(dim).cloned()).unwrap_or(1.0);
+                    let c0 = f2
+                        .c0
+                        .as_ref()
+                        .and_then(|c0| c0.get(dim).cloned())
+                        .unwrap_or(0.0);
+                    let c1 = f2
+                        .c1
+                        .as_ref()
+                        .and_then(|c1| c1.get(dim).cloned())
+                        .unwrap_or(1.0);
                     let exponent = f2.exponent;
                     parts.push(InterpolatedFunctionDim {
-                        input_range, output_range, c0, c1, exponent
+                        input_range,
+                        output_range,
+                        c0,
+                        c1,
+                        exponent,
                     });
                 }
                 Ok(Function::Interpolated(parts))
-            },
+            }
             i => {
                 dbg!(raw);
                 bail!("unsupported function type {}", i)
@@ -118,31 +142,32 @@ impl Object for Function {
                         let s = std::str::from_utf8(&*data)?;
                         let func = PsFunc::parse(s)?;
                         let info = stream.info.info;
-                        Ok(Function::PostScript { func, domain: info.domain, range: info.range.unwrap() })
-                    },
-                    0 => {
-                        Ok(Function::Sampled(SampledFunction {
-                            input: vec![],
-                            data: vec![],
-                            order: Interpolation::Linear
-                        }))
+                        Ok(Function::PostScript {
+                            func,
+                            domain: info.domain,
+                            range: info.range.unwrap(),
+                        })
                     }
-                    ref p => bail!("found a function stream with type {:?}", p)
+                    0 => Ok(Function::Sampled(SampledFunction {
+                        input: vec![],
+                        data:  vec![],
+                        order: Interpolation::Linear,
+                    })),
+                    ref p => bail!("found a function stream with type {:?}", p),
                 }
-            },
+            }
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
-            _ => bail!("double indirection")
+            _ => bail!("double indirection"),
         }
     }
 }
 
-
 #[derive(Debug, Clone)]
 struct SampledFunctionInput {
-    domain: (f32, f32),
+    domain:        (f32, f32),
     encode_offset: f32,
-    encode_scale: f32,
-    size: u32,
+    encode_scale:  f32,
+    size:          u32,
 }
 impl SampledFunctionInput {
     fn map(&self, x: f32) -> f32 {
@@ -154,8 +179,7 @@ impl SampledFunctionInput {
 #[derive(Debug, Clone)]
 struct SampledFunctionOutput {
     output_offset: f32,
-    output_scale: f32
-
+    output_scale:  f32,
 }
 
 #[derive(Debug, Clone)]
@@ -167,28 +191,32 @@ enum Interpolation {
 #[derive(Debug, Clone)]
 pub struct SampledFunction {
     input: Vec<SampledFunctionInput>,
-    data: Vec<u8>,
+    data:  Vec<u8>,
     order: Interpolation,
 }
 impl SampledFunction {
-    fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
-        let idx: Vec<f32> = x.iter().zip(self.input.iter()).map(|(&x, dim)| dim.map(x)).collect();
+    fn apply(&self, x: &[f32], _out: &mut [f32]) -> Result<()> {
+        let _idx: Vec<f32> = x
+            .iter()
+            .zip(self.input.iter())
+            .map(|(&x, dim)| dim.map(x))
+            .collect();
         match self.order {
             Interpolation::Linear => {
                 unimplemented!()
             }
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct InterpolatedFunctionDim {
-    pub input_range: (f32, f32),
+    pub input_range:  (f32, f32),
     pub output_range: (f32, f32),
-    pub c0: f32,
-    pub c1: f32,
-    pub exponent: f32,
+    pub c0:           f32,
+    pub c1:           f32,
+    pub exponent:     f32,
 }
 impl InterpolatedFunctionDim {
     pub fn apply(&self, x: f32) -> f32 {
@@ -201,11 +229,11 @@ impl InterpolatedFunctionDim {
 #[derive(Debug)]
 pub enum PostScriptError {
     StackUnderflow,
-    IncorrectStackSize
+    IncorrectStackSize,
 }
 #[derive(Debug, Clone)]
 pub struct PsFunc {
-    pub ops: Vec<PsOp>
+    pub ops: Vec<PsOp>,
 }
 
 macro_rules! op {
@@ -240,7 +268,9 @@ impl PsFunc {
                 }
                 PsOp::Index => {
                     let n = stack.pop().ok_or(PostScriptError::StackUnderflow)? as usize;
-                    if n >= stack.len() { return Err(PostScriptError::StackUnderflow); }
+                    if n >= stack.len() {
+                        return Err(PostScriptError::StackUnderflow);
+                    }
                     let val = stack[stack.len() - n - 1];
                     stack.push(val);
                 }
@@ -256,11 +286,15 @@ impl PsFunc {
         let mut stack = Vec::with_capacity(10);
         stack.extend_from_slice(input);
         match self.exec_inner(&mut stack) {
-            Ok(()) => {},
-            Err(_) => return Err(PdfError::PostScriptExec)
+            Ok(()) => {}
+            Err(_) => return Err(PdfError::PostScriptExec),
         }
         if output.len() != stack.len() {
-            bail!("incorrect output length: expected {}, found {}.", stack.len(), output.len())
+            bail!(
+                "incorrect output length: expected {}, found {}.",
+                stack.len(),
+                output.len()
+            )
         }
         output.copy_from_slice(&stack);
         Ok(())
@@ -269,7 +303,10 @@ impl PsFunc {
         let start = s.find("{").ok_or(PdfError::PostScriptParse)?;
         let end = s.rfind("}").ok_or(PdfError::PostScriptParse)?;
 
-        let ops: Result<Vec<_>, _> = s[start + 1 .. end].split_ascii_whitespace().map(|p| PsOp::parse(p)).collect();
+        let ops: Result<Vec<_>, _> = s[start + 1..end]
+            .split_ascii_whitespace()
+            .map(PsOp::parse)
+            .collect();
         Ok(PsFunc { ops: ops? })
     }
 }

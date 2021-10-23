@@ -1,36 +1,41 @@
 extern crate pdf;
 
-use std::env::args;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::env::args;
 
-use pdf::file::File;
 use pdf::content::*;
-use pdf::primitive::Primitive;
+use pdf::file::File;
+
 use pdf::font::*;
-use pdf::parser::Lexer;
-use pdf::parser::parse_with_lexer;
-use pdf::object::{Resolve, NoResolve, RcRef};
+
 use pdf::encoding::BaseEncoding;
 use pdf::error::PdfError;
+use pdf::object::{RcRef, Resolve};
 
 struct FontInfo {
     font: RcRef<Font>,
     cmap: ToUnicodeMap,
 }
 struct Cache {
-    fonts: HashMap<String, FontInfo>
+    fonts: HashMap<String, FontInfo>,
 }
 impl Cache {
     fn new() -> Self {
         Cache {
-            fonts: HashMap::new()
+            fonts: HashMap::new(),
         }
     }
     fn add_font(&mut self, name: impl Into<String>, font: RcRef<Font>) {
         println!("add_font({:?})", font);
         if let Some(to_unicode) = font.to_unicode() {
-            self.fonts.insert(name.into(), FontInfo { font, cmap: to_unicode.unwrap() });
+            self.fonts.insert(
+                name.into(),
+                FontInfo {
+                    font,
+                    cmap: to_unicode.unwrap(),
+                },
+            );
         }
     }
     fn get_font(&self, name: &str) -> Option<&FontInfo> {
@@ -66,13 +71,13 @@ fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
     let file = File::<Vec<u8>>::open(&path).unwrap();
-    
+
     let mut out = String::new();
     for page in file.pages() {
         let page = page?;
         let resources = page.resources.as_ref().unwrap();
         let mut cache = Cache::new();
-        
+
         // make sure all fonts are in the cache, so we can reference them
         for (name, &font) in &resources.fonts {
             cache.add_font(name, file.get(font)?);
@@ -91,10 +96,10 @@ fn main() -> Result<(), PdfError> {
             match op {
                 Op::GraphicsState { name } => {
                     let gs = resources.graphics_states.get(name).unwrap();
-                    
+
                     if let Some((font, _)) = gs.font {
                         let font = file.get(font)?;
-                        if let Some(font_name) = &font.name{
+                        if let Some(font_name) = &font.name {
                             current_font = cache.get_font(font_name.as_str());
                         }
                     }
@@ -103,13 +108,17 @@ fn main() -> Result<(), PdfError> {
                 Op::TextFont { name, .. } => {
                     current_font = cache.get_font(name);
                 }
-                Op::TextDraw { text } => if let Some(font) = current_font {
-                    add_string(&text.data, &mut out, font);
+                Op::TextDraw { text } => {
+                    if let Some(font) = current_font {
+                        add_string(&text.data, &mut out, font);
+                    }
                 }
-                Op::TextDrawAdjusted { array } =>  if let Some(font) = current_font {
-                    for data in array {
-                        if let TextDrawAdjusted::Text(text) = data {
-                            add_string(&text.data, &mut out, font);
+                Op::TextDrawAdjusted { array } => {
+                    if let Some(font) = current_font {
+                        for data in array {
+                            if let TextDrawAdjusted::Text(text) = data {
+                                add_string(&text.data, &mut out, font);
+                            }
                         }
                     }
                 }

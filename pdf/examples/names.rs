@@ -1,23 +1,28 @@
 extern crate pdf;
 
+use pdf::file::File;
+use pdf::object::*;
+use pdf::primitive::PdfString;
+use std::collections::HashMap;
 use std::env::args;
 use std::fmt;
-use std::collections::HashMap;
-use pdf::file::File;
-use pdf::object::{*};
-use pdf::primitive::PdfString;
 
 struct Indent(usize);
 impl fmt::Display for Indent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for _ in 0 .. self.0 {
+        for _ in 0..self.0 {
             write!(f, "    ")?;
         }
         Ok(())
-    } 
+    }
 }
 
-fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&str) -> usize, depth: usize) {
+fn walk_outline(
+    r: &impl Resolve,
+    mut node: RcRef<OutlineItem>,
+    map: &impl Fn(&str) -> usize,
+    depth: usize,
+) {
     let indent = Indent(depth);
     loop {
         if let Some(ref title) = node.title {
@@ -44,7 +49,7 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&s
 fn main() {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
-    
+
     let file = File::<Vec<u8>>::open(&path).unwrap();
     let catalog = file.get_root();
 
@@ -54,7 +59,7 @@ fn main() {
     let mut dests_cb = |key: &PdfString, val: &Dest| {
         //println!("{:?} {:?}", key, val);
         pages_map.insert(key.as_str().unwrap().into_owned(), val.page.get_inner());
-        
+
         count += 1;
     };
 
@@ -65,7 +70,12 @@ fn main() {
     }
 
     let mut pages = HashMap::new();
-    fn add_tree(r: &impl Resolve, pages: &mut HashMap<PlainRef, usize>, tree: &PageTree, current_page: &mut usize) {
+    fn add_tree(
+        r: &impl Resolve,
+        pages: &mut HashMap<PlainRef, usize>,
+        tree: &PageTree,
+        current_page: &mut usize,
+    ) {
         for &node_ref in &tree.kids {
             let node = r.get(node_ref).unwrap();
             match *node {
@@ -80,7 +90,7 @@ fn main() {
         }
     }
     add_tree(&file, &mut pages, &catalog.pages, &mut 0);
-    
+
     let get_page_nr = |name: &str| -> usize {
         let page = pages_map[name];
         pages[&page]
@@ -93,6 +103,5 @@ fn main() {
         }
     }
 
-    
     println!("{} items", count);
 }

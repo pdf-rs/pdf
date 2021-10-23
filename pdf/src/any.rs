@@ -1,14 +1,15 @@
+use crate::error::{PdfError, Result};
+use crate::object::Object;
 use std::any::TypeId;
 use std::rc::Rc;
-use crate::object::{Object};
-use crate::error::{Result, PdfError};
 
 pub trait AnyObject {
     fn type_name(&self) -> &'static str;
     fn type_id(&self) -> TypeId;
 }
 impl<T> AnyObject for T
-    where T: Object + 'static
+where
+    T: Object + 'static,
 {
     fn type_name(&self) -> &'static str {
         std::any::type_name::<T>()
@@ -22,8 +23,9 @@ impl<T> AnyObject for T
 pub struct Any(Rc<dyn AnyObject>);
 
 impl Any {
-    pub fn downcast<T>(self) -> Result<Rc<T>> 
-        where T: AnyObject + 'static
+    pub fn downcast<T>(self) -> Result<Rc<T>>
+    where
+        T: AnyObject + 'static,
     {
         if TypeId::of::<T>() == self.0.type_id() {
             unsafe {
@@ -35,7 +37,8 @@ impl Any {
         }
     }
     pub fn new<T>(rc: Rc<T>) -> Any
-        where T: AnyObject + 'static
+    where
+        T: AnyObject + 'static,
     {
         Any(rc as _)
     }
@@ -45,5 +48,11 @@ impl Any {
 }
 
 fn type_mismatch<T: AnyObject + 'static>(any: &Any) -> PdfError {
-    PdfError::Other { msg: format!("expected {}, found {}", std::any::type_name::<T>(), any.type_name()) }
+    PdfError::Other {
+        msg: format!(
+            "expected {}, found {}",
+            std::any::type_name::<T>(),
+            any.type_name()
+        ),
+    }
 }

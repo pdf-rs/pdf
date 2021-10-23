@@ -1,28 +1,28 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
-use std::fs;
-use std::marker::PhantomData;
-use std::collections::HashMap;
 use std::cell::RefCell;
-use std::rc::Rc;
-use std::path::Path;
+use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
+use std::marker::PhantomData;
+use std::path::Path;
+use std::rc::Rc;
 
 use crate as pdf;
+use crate::any::Any;
+use crate::backend::Backend;
+use crate::crypt::CryptDict;
+use crate::crypt::Decoder;
 use crate::error::*;
 use crate::object::*;
-use crate::primitive::{Primitive, Dictionary, PdfString};
-use crate::backend::Backend;
-use crate::any::{Any};
 use crate::parser::Lexer;
-use crate::parser::{parse_indirect_object, parse};
-use crate::xref::{XRef, XRefTable, XRefInfo};
-use crate::crypt::Decoder;
-use crate::crypt::CryptDict;
+use crate::parser::{parse, parse_indirect_object};
+use crate::primitive::{Dictionary, PdfString, Primitive};
+use crate::xref::{XRef, XRefInfo, XRefTable};
 
 #[must_use]
 pub struct PromisedRef<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
+    inner:   PlainRef,
+    _marker: PhantomData<T>,
 }
 impl<T> PromisedRef<T> {
     pub fn get_inner(&self) -> PlainRef {
@@ -38,13 +38,13 @@ pub struct Storage<B: Backend> {
     cache: RefCell<HashMap<PlainRef, Any>>,
 
     // objects that differ from the backend
-    changes:    HashMap<ObjNr, Primitive>,
+    changes: HashMap<ObjNr, Primitive>,
 
-    refs:       XRefTable,
+    refs: XRefTable,
 
-    decoder:    Option<Decoder>,
+    decoder: Option<Decoder>,
 
-    backend:    B,
+    backend: B,
 
     // Position of the PDF header in the file.
     start_offset: usize,
@@ -66,26 +66,34 @@ impl<B: Backend> Resolve for Storage<B> {
         match self.changes.get(&r.id) {
             Some(ref p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
-                XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::new(t!(self.backend.read(self.start_offset + pos ..)));
-                    let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref())).1;
+                XRef::Raw { pos, .. } => {
+                    let mut lexer = Lexer::new(t!(self.backend.read(self.start_offset + pos..)));
+                    let p = t!(parse_indirect_object(
+                        &mut lexer,
+                        self,
+                        self.decoder.as_ref()
+                    ))
+                    .1;
                     Ok(p)
                 }
-                XRef::Stream {stream_id, index} => {
-                    let obj_stream = t!(self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}));
+                XRef::Stream { stream_id, index } => {
+                    let obj_stream = t!(self.resolve(PlainRef {
+                        id:  stream_id,
+                        gen: 0, /* TODO what gen nr? */
+                    }));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
                     let slice = t!(obj_stream.get_object_slice(index));
                     parse(slice, self)
                 }
-                XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
+                XRef::Free { .. } => err!(PdfError::FreeObject { obj_nr: r.id }),
                 XRef::Promised => unimplemented!(),
-                XRef::Invalid => err!(PdfError::NullRef {obj_nr: r.id}),
-            }
+                XRef::Invalid => err!(PdfError::NullRef { obj_nr: r.id }),
+            },
         }
     }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
-        
+
         if let Some(any) = self.cache.borrow().get(&key) {
             return Ok(RcRef::new(key, any.clone().downcast()?));
         }
@@ -94,7 +102,7 @@ impl<B: Backend> Resolve for Storage<B> {
         let obj = t!(T::from_primitive(primitive, self));
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
-        
+
         Ok(RcRef::new(key, rc))
     }
 }
@@ -106,38 +114,41 @@ impl<B: Backend> Updater for Storage<B> {
         self.changes.insert(id, primitive);
         let rc = Rc::new(obj);
         let r = PlainRef { id, gen: 0 };
-        
+
         Ok(RcRef::new(r, rc))
     }
     fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
         let r = match self.refs.get(old.id)? {
             XRef::Free { .. } => panic!(),
-            XRef::Raw { gen_nr, .. } => PlainRef { id: old.id, gen: gen_nr + 1 },
+            XRef::Raw { gen_nr, .. } => PlainRef {
+                id:  old.id,
+                gen: gen_nr + 1,
+            },
             XRef::Stream { .. } => return self.create(obj),
-            XRef::Promised => PlainRef { id: old.id, gen: 0 },
-            XRef::Invalid => panic!()
+            XRef::Promised => PlainRef {
+                id:  old.id,
+                gen: 0,
+            },
+            XRef::Invalid => panic!(),
         };
         let primitive = obj.to_primitive(self)?;
         self.changes.insert(old.id, primitive);
         let rc = Rc::new(obj);
-        
+
         Ok(RcRef::new(r, rc))
     }
 
     fn promise<T: Object>(&mut self) -> PromisedRef<T> {
         let id = self.refs.len() as u64;
-        
+
         self.refs.push(XRef::Promised);
-        
+
         PromisedRef {
-            inner: PlainRef {
-                id:     id,
-                gen:    0
-            },
-            _marker:    PhantomData
+            inner:   PlainRef { id, gen: 0 },
+            _marker: PhantomData,
         }
     }
-    
+
     fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
         self.update(promise.inner, obj)
     }
@@ -155,7 +166,13 @@ impl Storage<Vec<u8>> {
 
         for (&id, primitive) in changes.iter() {
             let pos = self.backend.len();
-            self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
+            self.refs.set(
+                id,
+                XRef::Raw {
+                    pos:    pos as _,
+                    gen_nr: 0,
+                },
+            );
             write!(&mut self.backend, "{} {} obj\n", id, 0)?;
             primitive.serialize(&mut self.backend, 0)?;
             write!(self.backend, "endobj\n")?;
@@ -166,7 +183,12 @@ impl Storage<Vec<u8>> {
         // only write up to the xref stream obj id
         let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
 
-        write!(&mut self.backend, "{} {} obj\n", xref_promise.get_inner().id, 0)?;
+        write!(
+            &mut self.backend,
+            "{} {} obj\n",
+            xref_promise.get_inner().id,
+            0
+        )?;
         let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
         for (k, v) in trailer.into_iter() {
             xref_and_trailer.info.insert(k, v);
@@ -199,7 +221,7 @@ pub fn load_storage_and_trailer_password<B: Backend>(
         let key = trailer
             .get("ID")
             .ok_or(PdfError::MissingEntry {
-                typ: "Trailer",
+                typ:   "Trailer",
                 field: "ID".into(),
             })?
             .as_array()?[0]
@@ -221,8 +243,8 @@ pub fn load_storage_and_trailer_password<B: Backend>(
 }
 
 pub struct File<B: Backend> {
-    storage:    Storage<B>,
-    pub trailer:    Trailer,
+    storage:     Storage<B>,
+    pub trailer: Trailer,
 }
 impl<B: Backend> Resolve for File<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
@@ -285,8 +307,8 @@ impl<B: Backend> File<B> {
         &self.trailer.root
     }
 
-    pub fn pages<'a>(&'a self) -> impl Iterator<Item=Result<PageRc>> + 'a {
-        (0 .. self.num_pages()).map(move |n| self.get_page(n))
+    pub fn pages(&'_ self) -> impl Iterator<Item = Result<PageRc>> + '_ {
+        (0..self.num_pages()).map(move |n| self.get_page(n))
     }
     pub fn num_pages(&self) -> u32 {
         self.trailer.root.pages.count
@@ -302,26 +324,25 @@ impl<B: Backend> File<B> {
     }
 }
 
-    
 #[derive(Object, ObjectWrite)]
 pub struct Trailer {
     #[pdf(key = "Size")]
-    pub highest_id:         i32,
+    pub highest_id: i32,
 
     #[pdf(key = "Prev")]
-    pub prev_trailer_pos:   Option<i32>,
+    pub prev_trailer_pos: Option<i32>,
 
     #[pdf(key = "Root")]
-    pub root:               RcRef<Catalog>,
+    pub root: RcRef<Catalog>,
 
     #[pdf(key = "Encrypt")]
-    pub encrypt_dict:       Option<RcRef<CryptDict>>,
+    pub encrypt_dict: Option<RcRef<CryptDict>>,
 
     #[pdf(key = "Info")]
-    pub info_dict:          Option<Dictionary>,
+    pub info_dict: Option<Dictionary>,
 
     #[pdf(key = "ID")]
-    pub id:                 Vec<PdfString>,
+    pub id: Vec<PdfString>,
 }
 
 /*

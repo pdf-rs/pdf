@@ -1,6 +1,6 @@
 use crate::object::ObjNr;
-use std::io;
 use std::error::Error;
+use std::io;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -12,81 +12,106 @@ pub enum PdfError {
     NoOpArg,
 
     #[snafu(display("Error parsing from string: {}", source))]
-    Parse { source: Box<dyn Error + Send + Sync> },
+    Parse {
+        source: Box<dyn Error + Send + Sync>,
+    },
 
     #[snafu(display("Invalid encoding: {}", source))]
-    Encoding { source: Box<dyn Error + Send + Sync> },
+    Encoding {
+        source: Box<dyn Error + Send + Sync>,
+    },
 
     #[snafu(display("Out of bounds: index {}, but len is {}", index, len))]
     Bounds { index: usize, len: usize },
 
     #[snafu(display("Unexpected token '{}' at {} - expected '{}'", lexeme, pos, expected))]
-    UnexpectedLexeme {pos: usize, lexeme: String, expected: &'static str},
-    
-    #[snafu(display("Expecting an object, encountered {} at pos {}. Rest:\n{}\n\n((end rest))", first_lexeme, pos, rest))]
-    UnknownType {pos: usize, first_lexeme: String, rest: String},
-    
+    UnexpectedLexeme {
+        pos:      usize,
+        lexeme:   String,
+        expected: &'static str,
+    },
+
+    #[snafu(display(
+        "Expecting an object, encountered {} at pos {}. Rest:\n{}\n\n((end rest))",
+        first_lexeme,
+        pos,
+        rest
+    ))]
+    UnknownType {
+        pos:          usize,
+        first_lexeme: String,
+        rest:         String,
+    },
+
     #[snafu(display("Unknown variant '{}' for enum {}", name, id))]
     UnknownVariant { id: &'static str, name: String },
-    
+
     #[snafu(display("'{}' not found.", word))]
     NotFound { word: String },
-    
+
     #[snafu(display("Cannot follow reference during parsing - no resolve fn given (most likely /Length of Stream)."))]
     Reference, // TODO: which one?
-    
-    #[snafu(display("Erroneous 'type' field in xref stream - expected 0, 1 or 2, found {}", found))]
+
+    #[snafu(display(
+        "Erroneous 'type' field in xref stream - expected 0, 1 or 2, found {}",
+        found
+    ))]
     XRefStreamType { found: u64 },
-    
+
     #[snafu(display("Parsing read past boundary of Contents."))]
     ContentReadPastBoundary,
-    
+
     //////////////////
     // Encode/decode
     #[snafu(display("Hex decode error. Position {}, bytes {:?}", pos, bytes))]
-    HexDecode {pos: usize, bytes: [u8; 2]},
-    
+    HexDecode { pos: usize, bytes: [u8; 2] },
+
     #[snafu(display("Ascii85 tail error"))]
     Ascii85TailError,
-    
+
     #[snafu(display("Failed to convert '{}' into PredictorType", n))]
-    IncorrectPredictorType {n: u8},
-    
+    IncorrectPredictorType { n: u8 },
+
     //////////////////
     // Dictionary
     #[snafu(display("Can't parse field {} of struct {}.", field, typ))]
     FromPrimitive {
-        typ: &'static str,
-        field: &'static str,
-        source: Box<PdfError>
+        typ:    &'static str,
+        field:  &'static str,
+        source: Box<PdfError>,
     },
-    
+
     #[snafu(display("Field /{} is missing in dictionary for type {}.", field, typ))]
-    MissingEntry {
-        typ: &'static str,
-        field: String
-    },
-    
-    #[snafu(display("Expected to find value {} for key {}. Found {} instead.", value, key, found))]
+    MissingEntry { typ: &'static str, field: String },
+
+    #[snafu(display(
+        "Expected to find value {} for key {}. Found {} instead.",
+        value,
+        key,
+        found
+    ))]
     KeyValueMismatch {
-        key: String,
+        key:   String,
         value: String,
         found: String,
     },
-    
+
     #[snafu(display("Expected dictionary /Type = {}. Found /Type = {}.", expected, found))]
-    WrongDictionaryType {expected: String, found: String},
-    
+    WrongDictionaryType { expected: String, found: String },
+
     //////////////////
     // Misc
     #[snafu(display("Tried to dereference free object nr {}.", obj_nr))]
-    FreeObject {obj_nr: u64},
-    
+    FreeObject { obj_nr: u64 },
+
     #[snafu(display("Tried to dereference non-existing object nr {}.", obj_nr))]
-    NullRef {obj_nr: u64},
+    NullRef { obj_nr: u64 },
 
     #[snafu(display("Expected primitive {}, found primive {} instead.", expected, found))]
-    UnexpectedPrimitive {expected: &'static str, found: &'static str},
+    UnexpectedPrimitive {
+        expected: &'static str,
+        found:    &'static str,
+    },
     /*
     WrongObjectType {expected: &'static str, found: &'static str} {
         description("Function called on object of wrong type.")
@@ -94,17 +119,17 @@ pub enum PdfError {
     }
     */
     #[snafu(display("Object stream index out of bounds ({}/{}).", index, max))]
-    ObjStmOutOfBounds {index: usize, max: usize},
-    
+    ObjStmOutOfBounds { index: usize, max: usize },
+
     #[snafu(display("Page out of bounds ({}/{}).", page_nr, max))]
-    PageOutOfBounds {page_nr: u32, max: u32},
-    
+    PageOutOfBounds { page_nr: u32, max: u32 },
+
     #[snafu(display("Page {} could not be found in the page tree.", page_nr))]
-    PageNotFound {page_nr: u32},
-    
+    PageNotFound { page_nr: u32 },
+
     #[snafu(display("Entry {} in xref table unspecified", id))]
-    UnspecifiedXRefEntry {id: ObjNr},
-    
+    UnspecifiedXRefEntry { id: ObjNr },
+
     #[snafu(display("Invalid password"))]
     InvalidPassword,
 
@@ -116,18 +141,33 @@ pub enum PdfError {
 
     #[snafu(display("IO Error"))]
     Io { source: io::Error },
-    
+
     #[snafu(display("{}", msg))]
     Other { msg: String },
-    
+
     #[snafu(display("NoneError at {}:{}:{}", file, line, column))]
-    NoneError { file: &'static str, line: u32, column: u32 },
+    NoneError {
+        file:   &'static str,
+        line:   u32,
+        column: u32,
+    },
 
     #[snafu(display("Try at {}:{}:{}", file, line, column))]
-    Try { file: &'static str, line: u32, column: u32, source: Box<PdfError> },
+    Try {
+        file:   &'static str,
+        line:   u32,
+        column: u32,
+        source: Box<PdfError>,
+    },
 
     #[snafu(display("TryContext at {}:{}:{}: {:?}", file, line, column, context))]
-    TryContext { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> },
+    TryContext {
+        file:    &'static str,
+        line:    u32,
+        column:  u32,
+        context: Vec<(&'static str, String)>,
+        source:  Box<PdfError>,
+    },
 
     #[snafu(display("PostScriptParseError"))]
     PostScriptParse,
@@ -154,20 +194,21 @@ impl PdfError {
     pub fn is_eof(&self) -> bool {
         match self {
             &PdfError::EOF => true,
-            &PdfError::Try { ref source, .. } | PdfError::TryContext { ref source, .. } => source.is_eof(),
-            _ => false
+            &PdfError::Try { ref source, .. } | PdfError::TryContext { ref source, .. } => {
+                source.is_eof()
+            }
+            _ => false,
         }
     }
 }
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);
     if let Some(source) = err.source() {
-        trace(source, depth+1);
+        trace(source, depth + 1);
     }
 }
-    
 
-pub type Result<T, E=PdfError> = std::result::Result<T, E>;
+pub type Result<T, E = PdfError> = std::result::Result<T, E>;
 
 impl From<io::Error> for PdfError {
     fn from(source: io::Error) -> PdfError {
@@ -182,16 +223,18 @@ impl From<String> for PdfError {
 
 #[macro_export]
 macro_rules! try_opt {
-    ($e:expr) => (
+    ($e:expr) => {
         match $e {
             Some(v) => v,
-            None => return Err($crate::PdfError::NoneError {
-                file: file!(),
-                line: line!(),
-                column: column!()
-            })
+            None => {
+                return Err($crate::PdfError::NoneError {
+                    file:   file!(),
+                    line:   line!(),
+                    column: column!(),
+                })
+            }
         }
-    )
+    };
 }
 
 #[macro_export]
@@ -246,9 +289,9 @@ macro_rules! other {
 }
 
 macro_rules! err {
-    ($e: expr) => ({
+    ($e: expr) => {{
         return Err($e);
-    })
+    }};
 }
 macro_rules! bail {
     ($($t:tt)*) => {
@@ -256,7 +299,9 @@ macro_rules! bail {
     }
 }
 macro_rules! unimplemented {
-    () => (bail!("Unimplemented @ {}:{}", file!(), line!()))
+    () => {
+        bail!("Unimplemented @ {}:{}", file!(), line!())
+    };
 }
 
 #[cfg(not(feature = "dump"))]
@@ -268,8 +313,10 @@ pub fn dump_data(data: &[u8]) {
     if let Some(path) = ::std::env::var_os("PDF_OUT") {
         let (mut file, path) = tempfile::Builder::new()
             .prefix("")
-            .tempfile_in(path).unwrap()
-            .keep().unwrap();
+            .tempfile_in(path)
+            .unwrap()
+            .keep()
+            .unwrap();
         file.write_all(&data).unwrap();
         info!("data written to {:?}", path);
     } else {

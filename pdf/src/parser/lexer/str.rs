@@ -1,5 +1,5 @@
-use std::iter::Iterator;
 use crate::error::*;
+use std::iter::Iterator;
 
 /// A lexer for PDF strings. Breaks the string up into single characters (`u8`)
 /// It's also possible to get the number of indices of the original array that was traversed by the
@@ -21,9 +21,9 @@ use crate::error::*;
 
 #[derive(Clone)]
 pub struct StringLexer<'a> {
-    pos: usize, // points to next byte
-    nested: i32, // How far in () we are nested
-    buf: &'a [u8],
+    pos:    usize, // points to next byte
+    nested: i32,   // How far in () we are nested
+    buf:    &'a [u8],
 }
 
 impl<'a> StringLexer<'a> {
@@ -37,7 +37,7 @@ impl<'a> StringLexer<'a> {
         }
     }
     pub fn iter<'b>(&'b mut self) -> StringLexerIter<'a, 'b> {
-        StringLexerIter {lexer: self}
+        StringLexerIter { lexer: self }
     }
     /// Get offset/pos from start of string
     pub fn get_offset(&self) -> usize {
@@ -50,8 +50,7 @@ impl<'a> StringLexer<'a> {
         match c {
             b'\\' => {
                 let c = self.next_byte()?;
-                Ok(
-                match c {
+                Ok(match c {
                     b'n' => Some(b'\n'),
                     b'r' => Some(b'\r'),
                     b't' => Some(b'\t'),
@@ -92,14 +91,13 @@ impl<'a> StringLexer<'a> {
                         }
                         Some(char_code as u8)
                     }
-                }
-                )
-            },
+                })
+            }
 
             b'(' => {
                 self.nested += 1;
                 Ok(Some(b'('))
-            },
+            }
             b')' => {
                 self.nested -= 1;
                 if self.nested < 0 {
@@ -107,17 +105,16 @@ impl<'a> StringLexer<'a> {
                 } else {
                     Ok(Some(b')'))
                 }
-            },
+            }
 
-            c => Ok(Some(c))
-
+            c => Ok(Some(c)),
         }
     }
 
     fn next_byte(&mut self) -> Result<u8> {
         if self.pos < self.buf.len() {
             self.pos += 1;
-            Ok(self.buf[self.pos-1])
+            Ok(self.buf[self.pos - 1])
         } else {
             Err(PdfError::EOF)
         }
@@ -187,28 +184,32 @@ impl<'a> HexStringLexer<'a> {
     pub fn next_hex_byte(&mut self) -> Result<Option<u8>> {
         let c1 = self.next_non_whitespace_char()?;
         let high_nibble: u8 = match c1 {
-            b'0' ..= b'9' => c1 - b'0',
-            b'A' ..= b'F' => c1 - b'A' + 0xA,
-            b'a' ..= b'f' => c1 - b'a' + 0xA,
+            b'0'..=b'9' => c1 - b'0',
+            b'A'..=b'F' => c1 - b'A' + 0xA,
+            b'a'..=b'f' => c1 - b'a' + 0xA,
             b'>' => return Ok(None),
-            _ => return Err(PdfError::HexDecode {
-                pos: self.pos,
-                bytes: [c1, self.peek_byte().unwrap_or(0)]
-            }),
+            _ => {
+                return Err(PdfError::HexDecode {
+                    pos:   self.pos,
+                    bytes: [c1, self.peek_byte().unwrap_or(0)],
+                })
+            }
         };
         let c2 = self.next_non_whitespace_char()?;
         let low_nibble: u8 = match c2 {
-            b'0' ..= b'9' => c2 - b'0',
-            b'A' ..= b'F' => c2 - b'A' + 0xA,
-            b'a' ..= b'f' => c2 - b'a' + 0xA,
+            b'0'..=b'9' => c2 - b'0',
+            b'A'..=b'F' => c2 - b'A' + 0xA,
+            b'a'..=b'f' => c2 - b'a' + 0xA,
             b'>' => {
                 self.back()?;
                 0
             }
-            _ => return Err(PdfError::HexDecode {
-                pos: self.pos,
-                bytes: [c1, c2]
-            }),
+            _ => {
+                return Err(PdfError::HexDecode {
+                    pos:   self.pos,
+                    bytes: [c1, c2],
+                })
+            }
         };
         Ok(Some((high_nibble << 4) | low_nibble))
     }
@@ -297,7 +298,10 @@ mod tests {
             let data = b"This string contains\\245two octal characters\\307.)";
             let mut lexer = StringLexer::new(data);
             let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
-            assert_eq!(result, &b"This string contains\xa5two octal characters\xc7."[..]);
+            assert_eq!(
+                result,
+                &b"This string contains\xa5two octal characters\xc7."[..]
+            );
         }
         {
             let data = b"\\0053)";
@@ -331,38 +335,16 @@ mod tests {
         let input = b"901FA3>";
         let mut lexer = HexStringLexer::new(input);
         let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
-        assert_eq!(
-            result,
-            vec![
-                b'\x90',
-                b'\x1f',
-                b'\xa3',
-            ]
-        );
+        assert_eq!(result, vec![b'\x90', b'\x1f', b'\xa3',]);
 
         let input = b"901FA>";
         let mut lexer = HexStringLexer::new(input);
         let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
-        assert_eq!(
-            result,
-            vec![
-                b'\x90',
-                b'\x1f',
-                b'\xa0',
-            ]
-        );
+        assert_eq!(result, vec![b'\x90', b'\x1f', b'\xa0',]);
 
         let input = b"1 9F\t5\r\n4\x0c62a>";
         let mut lexer = HexStringLexer::new(input);
         let result: Vec<u8> = lexer.iter().map(Result::unwrap).collect();
-        assert_eq!(
-            result,
-            vec![
-                b'\x19',
-                b'\xf5',
-                b'\x46',
-                b'\x2a',
-            ]
-        );
+        assert_eq!(result, vec![b'\x19', b'\xf5', b'\x46', b'\x2a',]);
     }
 }

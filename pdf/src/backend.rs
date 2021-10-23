@@ -1,17 +1,12 @@
 use crate::error::*;
-use crate::parser::Lexer;
-use crate::parser::read_xref_and_trailer_at;
-use crate::xref::XRefTable;
-use crate::primitive::Dictionary;
 use crate::object::*;
+use crate::parser::read_xref_and_trailer_at;
+use crate::parser::Lexer;
+use crate::primitive::Dictionary;
+use crate::xref::XRefTable;
 use std::ops::Deref;
 
-use std::ops::{
-    RangeFull,
-    RangeFrom,
-    RangeTo,
-    Range,
-};
+use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 
 pub const MAX_ID: u32 = 1_000_000;
 
@@ -31,10 +26,11 @@ pub trait Backend: Sized {
         // expect the header to be within the first 1KB of the file, so we do the same here.
         const HEADER: &[u8] = b"%PDF-";
         let buf = t!(self.read(..std::cmp::min(1024, self.len())));
-        buf
-            .windows(HEADER.len())
+        buf.windows(HEADER.len())
             .position(|window| window == HEADER)
-            .ok_or_else(|| PdfError::Other{ msg: "file header is missing".to_string() })
+            .ok_or_else(|| PdfError::Other {
+                msg: "file header is missing".to_string(),
+            })
     }
 
     /// Returns the value of startxref (currently only used internally!)
@@ -52,17 +48,23 @@ pub trait Backend: Sized {
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self, start_offset: usize) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
-        let pos = t!(start_offset.checked_add(xref_offset).ok_or(PdfError::Invalid));
+        let pos = t!(start_offset
+            .checked_add(xref_offset)
+            .ok_or(PdfError::Invalid));
         if pos >= self.len() {
             bail!("XRef offset outside file bounds");
         }
 
-        let mut lexer = Lexer::new(t!(self.read(pos ..)));
-        
+        let mut lexer = Lexer::new(t!(self.read(pos..)));
+
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
-        
-        let highest_id = t!(trailer.get("Size")
-            .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
+
+        let highest_id = t!(trailer
+            .get("Size")
+            .ok_or_else(|| PdfError::MissingEntry {
+                field: "Size".into(),
+                typ:   "XRefTable",
+            })?
             .as_u32());
 
         if highest_id > MAX_ID {
@@ -72,23 +74,25 @@ pub trait Backend: Sized {
         for section in xref_sections {
             refs.add_entries_from(section);
         }
-        
+
         let mut prev_trailer = {
             match trailer.get("Prev") {
                 Some(p) => Some(t!(p.as_integer())),
-                None => None
+                None => None,
             }
         };
         trace!("READ XREF AND TABLE");
         while let Some(prev_xref_offset) = prev_trailer {
-            let pos = t!(start_offset.checked_add(prev_xref_offset as usize).ok_or(PdfError::Invalid));
+            let pos = t!(start_offset
+                .checked_add(prev_xref_offset as usize)
+                .ok_or(PdfError::Invalid));
             let mut lexer = Lexer::new(t!(self.read(pos..)));
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
-            
+
             for section in xref_sections {
                 refs.add_entries_from(section);
             }
-            
+
             prev_trailer = {
                 match trailer.get("Prev") {
                     Some(p) => {
@@ -98,7 +102,7 @@ pub trait Backend: Sized {
                         }
                         Some(prev)
                     }
-                    None => None
+                    None => None,
                 }
             };
         }
@@ -106,8 +110,11 @@ pub trait Backend: Sized {
     }
 }
 
-
-impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
+impl<T> Backend for T
+where
+    T: Deref<Target = [u8]>,
+{
+    //+ DerefMut<Target=[u8]> {
     fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
         let r = t!(range.to_range(self.len()));
         Ok(&self[r])
@@ -125,8 +132,7 @@ impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
 
 /// `IndexRange` is implemented by Rust's built-in range types, produced
 /// by range syntax like `..`, `a..`, `..b` or `c..d`.
-pub trait IndexRange
-{
+pub trait IndexRange {
     /// Start index (inclusive)
     fn start(&self) -> Option<usize>;
 
@@ -136,41 +142,55 @@ pub trait IndexRange
     /// `len`: the size of whatever container that is being indexed
     fn to_range(&self, len: usize) -> Result<Range<usize>> {
         match (self.start(), self.end()) {
-            (None, None) => Ok(0 .. len),
-            (Some(start), None) if start <= len => Ok(start .. len),
-            (None, Some(end)) if end <= len => Ok(0 .. end),
-            (Some(start), Some(end)) if start <= end && end <= len => Ok(start .. end),
-            _ => Err(PdfError::ContentReadPastBoundary)
+            (None, None) => Ok(0..len),
+            (Some(start), None) if start <= len => Ok(start..len),
+            (None, Some(end)) if end <= len => Ok(0..end),
+            (Some(start), Some(end)) if start <= end && end <= len => Ok(start..end),
+            _ => Err(PdfError::ContentReadPastBoundary),
         }
     }
 }
 
-
 impl IndexRange for RangeFull {
     #[inline]
-    fn start(&self) -> Option<usize> { None }
+    fn start(&self) -> Option<usize> {
+        None
+    }
     #[inline]
-    fn end(&self) -> Option<usize> { None }
-
+    fn end(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl IndexRange for RangeFrom<usize> {
     #[inline]
-    fn start(&self) -> Option<usize> { Some(self.start) }
+    fn start(&self) -> Option<usize> {
+        Some(self.start)
+    }
     #[inline]
-    fn end(&self) -> Option<usize> { None }
+    fn end(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl IndexRange for RangeTo<usize> {
     #[inline]
-    fn start(&self) -> Option<usize> { None }
+    fn start(&self) -> Option<usize> {
+        None
+    }
     #[inline]
-    fn end(&self) -> Option<usize> { Some(self.end) }
+    fn end(&self) -> Option<usize> {
+        Some(self.end)
+    }
 }
 
 impl IndexRange for Range<usize> {
     #[inline]
-    fn start(&self) -> Option<usize> { Some(self.start) }
+    fn start(&self) -> Option<usize> {
+        Some(self.start)
+    }
     #[inline]
-    fn end(&self) -> Option<usize> { Some(self.end) }
+    fn end(&self) -> Option<usize> {
+        Some(self.end)
+    }
 }

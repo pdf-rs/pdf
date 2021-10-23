@@ -1,37 +1,39 @@
-use crate::object::*;
-use crate::content::*;
+use crate::content::Content;
 use crate::error::Result;
+use crate::object::{
+    Catalog, MaybeRef, Page, PageTree, PagesNode, PagesRc, Rect, Ref, Resources, Updater,
+};
 
 #[derive(Default)]
 pub struct PageBuilder {
-    pub content: Option<Content>,
+    pub content:   Option<Content>,
     pub media_box: Option<Rect>,
-    pub crop_box: Option<Rect>,
-    pub trim_box: Option<Rect>,
+    pub crop_box:  Option<Rect>,
+    pub trim_box:  Option<Rect>,
     pub resources: Option<MaybeRef<Resources>>,
 }
 impl PageBuilder {
     pub fn from_content(content: Content) -> PageBuilder {
         PageBuilder {
             content: Some(content),
-            .. PageBuilder::default()
+            ..PageBuilder::default()
         }
     }
     pub fn from_page(page: &Page) -> Result<PageBuilder> {
         Ok(PageBuilder {
-            content: page.contents.clone(),
+            content:   page.contents.clone(),
             media_box: Some(page.media_box()?),
-            crop_box: Some(page.crop_box()?),
-            trim_box: page.trim_box,
-            resources: Some(page.resources()?.clone())
+            crop_box:  Some(page.crop_box()?),
+            trim_box:  page.trim_box,
+            resources: Some(page.resources()?.clone()),
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
         self.media_box = Some(Rect {
-            top: 0.,
-            left: 0.,
+            top:    0.,
+            left:   0.,
             bottom: height,
-            right: width,
+            right:  width,
         });
     }
     pub fn resources(&mut self, resources: MaybeRef<Resources>) {
@@ -40,38 +42,42 @@ impl PageBuilder {
 }
 
 pub struct CatalogBuilder {
-    pages: Vec<PageBuilder>
+    pages: Vec<PageBuilder>,
 }
 impl CatalogBuilder {
     pub fn from_pages(pages: Vec<PageBuilder>) -> CatalogBuilder {
-        CatalogBuilder {
-            pages
-        }
+        CatalogBuilder { pages }
     }
     pub fn build(self, update: &mut impl Updater) -> Result<Catalog> {
-        let kids_promise: Vec<_> = self.pages.iter()
+        let kids_promise: Vec<_> = self
+            .pages
+            .iter()
             .map(|_page| update.promise::<PagesNode>())
             .collect();
-        let kids: Vec<_> = kids_promise.iter()
+        let kids: Vec<_> = kids_promise
+            .iter()
             .map(|p| Ref::new(p.get_inner()))
             .collect();
 
-        let tree = PagesRc::create(PageTree {
-            parent: None,
-            count: kids.len() as _,
-            kids,
-            resources: None,
-            media_box: None,
-            crop_box: None
-        }, update)?;
+        let tree = PagesRc::create(
+            PageTree {
+                parent: None,
+                count: kids.len() as _,
+                kids,
+                resources: None,
+                media_box: None,
+                crop_box: None,
+            },
+            update,
+        )?;
 
         for (page, promise) in self.pages.into_iter().zip(kids_promise) {
             let page = Page {
-                parent: tree.clone(),
-                contents: page.content,
+                parent:    tree.clone(),
+                contents:  page.content,
                 media_box: page.media_box,
-                crop_box: page.crop_box,
-                trim_box: page.trim_box,
+                crop_box:  page.crop_box,
+                trim_box:  page.trim_box,
                 resources: page.resources,
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
