@@ -472,16 +472,10 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
 
     match filter {
         NoFilter => {
-            #[allow(clippy::manual_memcpy)]
-            // TODO consider: `out[..len].clone_from_slice(&inp[..len])`
-            for i in 0..len {
-                out[i] = inp[i];
-            }
+            out[..len].copy_from_slice(&inp[..len]);
         }
         Sub => {
-            for i in 0..bpp {
-                out[i] = inp[i];
-            }
+            out[..bpp].copy_from_slice(&inp[..bpp]);
 
             for i in bpp..len {
                 out[i] = inp[i].wrapping_add(out[i - bpp]);

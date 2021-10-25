@@ -411,7 +411,7 @@ impl Object for Dictionary {
 
 impl Object for String {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        Ok(p.into_name()?)
+        p.into_name()
     }
 }
 
@@ -515,7 +515,7 @@ impl<V: Object> Object for HashMap<String, V> {
 }
 impl<V: ObjectWrite> ObjectWrite for HashMap<String, V> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        if self.len() == 0 {
+        if self.is_empty() {
             Ok(Primitive::Null)
         } else {
             let mut dict = Dictionary::new();
@@ -588,7 +588,7 @@ impl Trace for () {}
 
 impl<T, U> Object for (T, U) where T: Object, U: Object {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut arr = p.into_array(resolve)?;
+        let arr = p.into_array(resolve)?;
         if arr.len() != 2 {
             bail!("expected array of length 2 (found {})", arr.len());
         }

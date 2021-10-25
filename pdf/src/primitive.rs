@@ -99,7 +99,7 @@ pub struct Name<'a>(&'a str);
 impl<'a> Deref for Name<'a> {
     type Target = str;
     fn deref(&self) -> &str {
-        &self.0
+        self.0
     }
 }
 impl<'a> fmt::Display for Name<'a> {
@@ -178,13 +178,13 @@ impl Deref for Dictionary {
 }
 impl Dictionary {
     fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
-        write!(out, "<<\n")?;
+        writeln!(out, "<<")?;
         for (key, val) in self.iter() {
             write!(out, "{:w$}/{} ", "", key, w=2*level+2)?;
             val.serialize(out, level+2)?;
-            out.write_all(b"\n")?;
+            writeln!(out)?;
         }
-        write!(out, "{:w$}>>\n", "", w=2*level)?;
+        writeln!(out, "{:w$}>>", "", w=2*level)?;
         Ok(())
     }
 }
@@ -544,7 +544,7 @@ impl<'a> TryInto<&'a [Primitive]> for &'a Primitive {
 impl<'a> TryInto<&'a [u8]> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<&'a [u8]> {
-        match self {
+        match *self {
             Primitive::Name(ref s) => Ok(s.as_bytes()),
             Primitive::String(ref s) => Ok(s.as_bytes()),
             ref p => Err(PdfError::UnexpectedPrimitive {
@@ -557,7 +557,7 @@ impl<'a> TryInto<&'a [u8]> for &'a Primitive {
 impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<Cow<'a, str>> {
-        match self {
+        match *self {
             Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
             Primitive::String(ref s) => Ok(s.as_str()?),
             ref p => Err(PdfError::UnexpectedPrimitive {
@@ -570,7 +570,7 @@ impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
 impl<'a> TryInto<String> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<String> {
-        match self {
+        match *self {
             Primitive::Name(ref s) => Ok(s.clone()),
             Primitive::String(ref s) => Ok(s.as_str()?.into_owned()),
             ref p => Err(PdfError::UnexpectedPrimitive {

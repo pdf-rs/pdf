@@ -214,7 +214,7 @@ impl GlobalAttrs {
                             match lit {
                                 Lit::Str(ref value) => {
                                     let mut value = value.value();
-                                    attrs.type_required = if value.ends_with("?") {
+                                    attrs.type_required = if value.ends_with('?') {
                                         value.pop(); // remove '?'
                                         false
                                     } else {
@@ -242,7 +242,7 @@ impl GlobalAttrs {
 }
 
 fn impl_object(ast: &DeriveInput) -> TokenStream {
-    let attrs = GlobalAttrs::from_ast(&ast);
+    let attrs = GlobalAttrs::from_ast(ast);
     match (attrs.is_stream, &ast.data) {
         (true, Data::Struct(ref data)) => impl_object_for_stream(ast, &data.fields).into(),
         (false, Data::Struct(ref data)) => impl_object_for_struct(ast, &data.fields).into(),
@@ -252,7 +252,7 @@ fn impl_object(ast: &DeriveInput) -> TokenStream {
     }
 }
 fn impl_objectwrite(ast: &DeriveInput) -> TokenStream {
-    let attrs = GlobalAttrs::from_ast(&ast);
+    let attrs = GlobalAttrs::from_ast(ast);
     match (attrs.is_stream, &ast.data) {
         (false, Data::Struct(ref data)) => impl_objectwrite_for_struct(ast, &data.fields).into(),
         (false, Data::Enum(ref variants)) => impl_objectwrite_for_enum(ast, variants).into(),
@@ -274,9 +274,8 @@ fn enum_pairs(ast: &DeriveInput, data: &DataEnum) -> (Vec<(String, TokenStream2)
             .map(|lit| lit.value())
             .unwrap_or_else(|| var_ident.to_string());
         if attrs.other {
-            if other.is_some() {
-                panic!("only one 'other' variant is allowed in a name enum");
-            }
+            assert!(other.is_none(), "only one 'other' variant is allowed in a name enum");
+            
             match &var.fields {
                 Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {}
                 _ => {
@@ -498,7 +497,7 @@ fn is_option(f: &Field) -> Option<Type> {
 fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
-    let attrs = GlobalAttrs::from_ast(&ast);
+    let attrs = GlobalAttrs::from_ast(ast);
 
     ///////////////////////
     let typ = id.to_string();
@@ -605,11 +604,11 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
 fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     let id = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
-    let attrs = GlobalAttrs::from_ast(&ast);
+    let attrs = GlobalAttrs::from_ast(ast);
 
     let parts: Vec<_> = fields.iter()
     .map(|field| {
-        (field.ident.clone(), FieldAttrs::parse(&field.attrs), is_option(&field))
+        (field.ident.clone(), FieldAttrs::parse(&field.attrs), is_option(field))
     }).collect();
 
     let fields_ser = parts.iter()

@@ -110,7 +110,7 @@ impl Object for Function {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),
-            Primitive::Stream(mut s) => {
+            Primitive::Stream(s) => {
                 let stream = Stream::<RawFunction>::from_stream(s, resolve)?;
                 let data = stream.decode()?;
                 match stream.info.function_type {
@@ -266,10 +266,10 @@ impl PsFunc {
         Ok(())
     }
     pub fn parse(s: &str) -> Result<Self, PdfError> {
-        let start = s.find("{").ok_or(PdfError::PostScriptParse)?;
-        let end = s.rfind("}").ok_or(PdfError::PostScriptParse)?;
+        let start = s.find('{').ok_or(PdfError::PostScriptParse)?;
+        let end = s.rfind('}').ok_or(PdfError::PostScriptParse)?;
 
-        let ops: Result<Vec<_>, _> = s[start + 1 .. end].split_ascii_whitespace().map(|p| PsOp::parse(p)).collect();
+        let ops: Result<Vec<_>, _> = s[start + 1 .. end].split_ascii_whitespace().map(PsOp::parse).collect();
         Ok(PsFunc { ops: ops? })
     }
 }

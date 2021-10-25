@@ -361,7 +361,7 @@ impl<'a> Lexer<'a> {
 
     #[inline]
     fn is_delimiter(&self, pos: usize) -> bool {
-        self.buf.get(pos).map(|b| b"()<>[]{}/%".contains(&b)).unwrap_or(false)
+        self.buf.get(pos).map(|b| b"()<>[]{}/%".contains(b)).unwrap_or(false)
     }
 }
 
@@ -376,6 +376,7 @@ impl<'a> Substr<'a> {
     // as: &S -> &U. Cheap borrow conversion
     // into: S -> U. Cheap ownership transfer conversion.
 
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         String::from_utf8_lossy(self.as_slice()).into()
     }
@@ -398,7 +399,7 @@ impl<'a> Substr<'a> {
             }
             slice = &slice[1..];
         }
-        slice.iter().all(|&b| b'0' <= b && b <= b'9')
+        slice.iter().all(|b| (b'0'..=b'9').contains(b))
     }
     pub fn is_real_number(&self) -> bool {
         self.to::<f32>().is_ok()   

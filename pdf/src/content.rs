@@ -26,7 +26,7 @@ impl Content {
             let mut ops = OpBuilder::new();
             for part in self.parts.iter() {
                 let data = t!(part.data());
-                ops.parse(&data, resolve)?;
+                ops.parse(data, resolve)?;
             }
             Ok(ops.ops)
         }).map(|v| v.as_slice())
@@ -308,7 +308,7 @@ impl OpBuilder {
                 tag: name(&mut args)?,
                 properties: Some(args.next().ok_or(PdfError::NoOpArg)?)
             }),
-            "BI"  => push(Op::InlineImage { image: inline_image(lexer, resolve)? }),
+            "BI"  => push(Op::InlineImage { image: Box::new(inline_image(lexer, resolve)?) }),
             "BMC" => push(Op::BeginMarkedContent {
                 tag: name(&mut args)?,
                 properties: None
@@ -567,23 +567,23 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
         let mut advance = 1;
         match ops[0] {
             BeginMarkedContent { ref tag, properties: Some(ref name) } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 write!(f, " ")?;
                 name.serialize(f, 0)?;
                 writeln!(f, " BDC")?;
             }
             BeginMarkedContent { ref tag, properties: None } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 writeln!(f, " BMC")?;
             }
             MarkedContentPoint { ref tag, properties: Some(ref name) } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 write!(f, " ")?;
                 name.serialize(f, 0)?;
                 writeln!(f, " DP")?;
             }
             MarkedContentPoint { ref tag, properties: None } => {
-                serialize_name(&tag, f)?;
+                serialize_name(tag, f)?;
                 writeln!(f, " MP")?;
             }
             EndMarkedContent => writeln!(f, "EMC")?,
@@ -1069,5 +1069,5 @@ pub enum Op {
 
     XObject { name: String },
 
-    InlineImage { image: Stream<ImageDict> },
+    InlineImage { image: Box<Stream<ImageDict>> },
 }

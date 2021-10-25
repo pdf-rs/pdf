@@ -255,7 +255,7 @@ fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
 {
     loop {
         debug!("parent: {:?}", parent);
-        match (&parent.parent, f(&parent)) {
+        match (&parent.parent, f(parent)) {
             (_, Some(t)) => return Ok(Some(t)),
             (Some(ref p), None) => parent = p,
             (None, None) => return Ok(None)
@@ -797,22 +797,22 @@ impl Object for Dest {
         let kind = try_opt!(array.get(1));
         let view = match kind.as_name()? {
             "XYZ" => DestView::XYZ {
-                left: match try_opt!(array.get(2)) {
-                    &Primitive::Null => None,
-                    &Primitive::Integer(n) => Some(n as f32),
-                    &Primitive::Number(f) => Some(f),
+                left: match *try_opt!(array.get(2)) {
+                    Primitive::Null => None,
+                    Primitive::Integer(n) => Some(n as f32),
+                    Primitive::Number(f) => Some(f),
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
-                top: match try_opt!(array.get(3)) {
-                    &Primitive::Null => None,
-                    &Primitive::Integer(n) => Some(n as f32),
-                    &Primitive::Number(f) => Some(f),
+                top: match *try_opt!(array.get(3)) {
+                    Primitive::Null => None,
+                    Primitive::Integer(n) => Some(n as f32),
+                    Primitive::Number(f) => Some(f),
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
-                zoom: match try_opt!(array.get(4)) {
-                    &Primitive::Null => 0.0,
-                    &Primitive::Integer(n) => n as f32,
-                    &Primitive::Number(f) => f,
+                zoom: match *try_opt!(array.get(4)) {
+                    Primitive::Null => 0.0,
+                    Primitive::Integer(n) => n as f32,
+                    Primitive::Number(f) => f,
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
             },

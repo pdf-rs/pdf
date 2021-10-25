@@ -83,7 +83,7 @@ impl<'a> StringLexer<'a> {
                         // A character code must follow. 1-3 numbers.
                         for _ in 0..3 {
                             let c = self.peek_byte()?;
-                            if c >= b'0' && c <= b'7' {
+                            if (b'0'..=b'7').contains(&c) {
                                 self.next_byte()?;
                                 char_code = char_code * 8 + (c - b'0') as u16;
                             } else {

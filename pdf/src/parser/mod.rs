@@ -24,7 +24,7 @@ pub struct Context<'a> {
 }
 impl<'a> Context<'a> {
     pub fn decrypt<'buf>(&self, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
-        if let Some(ref decoder) = self.decoder {
+        if let Some(decoder) = self.decoder {
             decoder.decrypt(self.obj_nr, self.gen_nr, data)
         } else {
             Ok(data)

@@ -64,7 +64,7 @@ impl<B: Backend> Storage<B> {
 impl<B: Backend> Resolve for Storage<B> {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         match self.changes.get(&r.id) {
-            Some(ref p) => Ok((*p).clone()),
+            Some(p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
                     let mut lexer = Lexer::new(t!(self.backend.read(self.start_offset + pos ..)));
@@ -131,8 +131,8 @@ impl<B: Backend> Updater for Storage<B> {
         
         PromisedRef {
             inner: PlainRef {
-                id:     id,
-                gen:    0
+                id,
+                gen: 0
             },
             _marker:    PhantomData
         }
@@ -156,9 +156,9 @@ impl Storage<Vec<u8>> {
         for (&id, primitive) in changes.iter() {
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
-            write!(&mut self.backend, "{} {} obj\n", id, 0)?;
+            writeln!(&mut self.backend, "{} {} obj", id, 0)?;
             primitive.serialize(&mut self.backend, 0)?;
-            write!(self.backend, "endobj\n")?;
+            writeln!(self.backend, "endobj")?;
         }
 
         let xref_pos = self.backend.len();
@@ -166,14 +166,14 @@ impl Storage<Vec<u8>> {
         // only write up to the xref stream obj id
         let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
 
-        write!(&mut self.backend, "{} {} obj\n", xref_promise.get_inner().id, 0)?;
+        writeln!(&mut self.backend, "{} {} obj", xref_promise.get_inner().id, 0)?;
         let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
         for (k, v) in trailer.into_iter() {
             xref_and_trailer.info.insert(k, v);
         }
 
         xref_and_trailer.serialize(&mut self.backend)?;
-        write!(self.backend, "endobj\n")?;
+        writeln!(self.backend, "endobj")?;
 
         let _ = self.fulfill(xref_promise, stream)?;
 
@@ -285,7 +285,7 @@ impl<B: Backend> File<B> {
         &self.trailer.root
     }
 
-    pub fn pages<'a>(&'a self) -> impl Iterator<Item=Result<PageRc>> + 'a {
+    pub fn pages(&self) -> impl Iterator<Item=Result<PageRc>> + '_ {
         (0 .. self.num_pages()).map(move |n| self.get_page(n))
     }
     pub fn num_pages(&self) -> u32 {

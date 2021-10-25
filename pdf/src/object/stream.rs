@@ -120,9 +120,7 @@ impl<I: ObjectWrite> Stream<I> {
                     StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
                     _ => None
                 } {
-                    if params.is_some() {
-                        panic!();
-                    }
+                    assert!(params.is_none());
                     params = Some(para);
                 }
             }

@@ -204,7 +204,7 @@ impl Decoder {
         }
 
         fn check_password_rev_3_4(document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
-            compute_u_rev_3_4(id, key) == &document_u[..16]
+            compute_u_rev_3_4(id, key) == document_u[..16]
         }
 
         fn check_password_rc4(revision: u32, document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
@@ -311,7 +311,7 @@ impl Decoder {
             v => err!(other!("unsupported V value {}", v)),
         };
         let level = dict.r;
-        if level < 2 || level > 6 {
+        if !(2..=6).contains(&level) {
             err!(other!("unsupported standard security handler revision {}", level))
         };
         if level <= 4 {
@@ -476,7 +476,7 @@ impl Decoder {
         input_sha256.update(salt);
         input_sha256.update(u);
         let input = input_sha256.finalize();
-        let (mut key, mut iv) = input.clone().split();
+        let (mut key, mut iv) = input.split();
 
         let mut block = [0u8; 64];
         let mut block_size = 32;

@@ -211,8 +211,8 @@ impl Font {
         match self.data {
             Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(resolve),
             Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => {
-                match info {
-                    &TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
+                match *info {
+                    TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
                         default: 0.0,
                         first_char: first as usize,
                         values: widths.clone()
@@ -223,7 +223,7 @@ impl Font {
             Ok(FontData::CIDFontType0(ref cid)) | Ok(FontData::CIDFontType2(ref cid, _)) => {
                 let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
-                while let Some(ref p) = iter.next() {
+                while let Some(p) = iter.next() {
                     let c1 = p.as_integer()? as usize;
                     match iter.next() {
                         Some(&Primitive::Array(ref array)) => {
@@ -493,7 +493,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
 
                         for (cid, unicode_data) in (cid_start..=cid_end).zip(unicode_data_arr) {
                             let unicode =
-                                utf16be_to_string(&unicode_data.as_string()?.as_bytes())?;
+                                utf16be_to_string(unicode_data.as_string()?.as_bytes())?;
                             map.insert(cid, unicode);
                         }
                     }
