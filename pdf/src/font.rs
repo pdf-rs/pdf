@@ -264,7 +264,7 @@ impl Font {
 #[derive(Object, Debug)]
 pub struct TFont {
     #[pdf(key="BaseFont")]
-    pub name: Option<String>,
+    pub base_font: Option<String>,
     
     /// per spec required, but some files lack it.
     #[pdf(key="FirstChar")]
