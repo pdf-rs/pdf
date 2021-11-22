@@ -161,6 +161,7 @@ struct SampledFunctionOutput {
 #[derive(Debug, Clone)]
 enum Interpolation {
     Linear,
+    #[allow(dead_code)]  // TODO
     Cubic,
 }
 
