@@ -1,5 +1,4 @@
 use std::str;
-use std::rc::Rc;
 use pdf::file::File;
 use pdf::object::*;
 use pdf::parser::parse;
