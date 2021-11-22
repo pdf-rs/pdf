@@ -78,7 +78,7 @@ pub trait ToDict: ObjectWrite {
 pub trait SubType<T> {}
 
 pub trait Trace {
-    fn trace(&self, cb: &mut impl FnMut(PlainRef)) {}
+    fn trace(&self, _cb: &mut impl FnMut(PlainRef)) {}
 }
 
 ///////
