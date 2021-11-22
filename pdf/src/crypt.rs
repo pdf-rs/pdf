@@ -424,6 +424,7 @@ impl Decoder {
                 user_check_hash.update(password_encoded);
                 user_check_hash.update(user_validation_salt);
                 let user_hash_computed = user_check_hash.finalize();
+                #[allow(clippy::branches_sharing_code)]
                 if user_hash_computed.as_slice() == user_hash {
                     let mut intermediate_kdf_hash = Sha256::new();
                     intermediate_kdf_hash.update(password_encoded);
