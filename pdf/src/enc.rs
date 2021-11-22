@@ -237,29 +237,6 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     buf
 }
 
-#[test]
-fn base_85() {
-    fn s(b: &[u8]) -> &str { std::str::from_utf8(b).unwrap() }
-
-    let case = &b"hello world!"[..];
-    let encoded = encode_85(case);
-    assert_eq!(s(&encoded), "BOu!rD]j7BEbo80~>");
-    let decoded = decode_85(&encoded).unwrap();
-    assert_eq!(case, &*decoded);
-    /*
-    assert_eq!(
-        s(&decode_85(
-            &lzw_decode(
-                &decode_85(&include_bytes!("data/t01_lzw+base85.txt")[..]).unwrap(),
-                &LZWFlateParams::default()
-            ).unwrap()
-        ).unwrap()),
-        include_str!("data/t01_plain.txt")
-    );
-    */
-}
-
-
 fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
@@ -548,5 +525,32 @@ pub fn filter(method: PredictorType, bpp: usize, previous: &[u8], current: &mut 
                 current[i] = current[i].wrapping_sub(filter_paeth(0, previous[i], 0));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_85() {
+        fn s(b: &[u8]) -> &str { std::str::from_utf8(b).unwrap() }
+
+        let case = &b"hello world!"[..];
+        let encoded = encode_85(case);
+        assert_eq!(s(&encoded), "BOu!rD]j7BEbo80~>");
+        let decoded = decode_85(&encoded).unwrap();
+        assert_eq!(case, &*decoded);
+        /*
+        assert_eq!(
+            s(&decode_85(
+                &lzw_decode(
+                    &decode_85(&include_bytes!("data/t01_lzw+base85.txt")[..]).unwrap(),
+                    &LZWFlateParams::default()
+                ).unwrap()
+            ).unwrap()),
+            include_str!("data/t01_plain.txt")
+        );
+        */
     }
 }

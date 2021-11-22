@@ -226,23 +226,6 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
     Ok(Stream::new_with_filters(image_dict, data, filters))
 }
 
-#[test]
-fn test_inline_image() {
-    let data = br###"
-/W 768
-/H 150
-/BPC 1
-/IM true
-/F [/A85 /Fl]
-ID
-Gb"0F_%"1&#XD6"#B1qiGGG^V6GZ#ZkijB5'RjB4S^5I61&$Ni:Xh=4S_9KYN;c9MUZPn/h,c]oCLUmg*Fo?0Hs0nQHp41KkO\Ls5+g0aoD*btT?l]lq0YAucfaoqHp4
-1KkO\Ls5+g0aoD*btT?l^#mD&ORf[0~>
-EI
-"###;
-    let mut lexer = Lexer::new(data);
-    assert!(inline_image(&mut lexer, &NoResolve).is_ok()); 
-}
-
 struct OpBuilder {
     last: Point,
     compability_section: bool,
@@ -1070,4 +1053,26 @@ pub enum Op {
     XObject { name: String },
 
     InlineImage { image: Box<Stream<ImageDict>> },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_inline_image() {
+        let data = br###"
+/W 768
+/H 150
+/BPC 1
+/IM true
+/F [/A85 /Fl]
+ID
+Gb"0F_%"1&#XD6"#B1qiGGG^V6GZ#ZkijB5'RjB4S^5I61&$Ni:Xh=4S_9KYN;c9MUZPn/h,c]oCLUmg*Fo?0Hs0nQHp41KkO\Ls5+g0aoD*btT?l]lq0YAucfaoqHp4
+1KkO\Ls5+g0aoD*btT?l^#mD&ORf[0~>
+EI
+"###;
+        let mut lexer = Lexer::new(data);
+        assert!(inline_image(&mut lexer, &NoResolve).is_ok()); 
+    }
 }

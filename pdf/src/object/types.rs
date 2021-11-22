@@ -612,10 +612,6 @@ pub enum FieldType {
     #[pdf(name="Sig")]
     Signature,
 }
-#[test]
-fn test_field_type() {
-    assert_eq!(FieldType::from_primitive(Primitive::Name("Tx".into()), &NoResolve).unwrap(), FieldType::Text);
-}
 
 #[derive(Object, ObjectWrite, Debug)]
 pub struct FieldDictionary {
@@ -1148,10 +1144,7 @@ pub enum StructType {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        object::{NoResolve, Object, StructType},
-        primitive::Primitive,
-    };
+    use super::*;
 
     #[test]
     fn parse_struct_type() {
@@ -1167,5 +1160,13 @@ mod tests {
         } else {
             panic!("Incorrect result of {:?}", &result);
         }
+    }
+
+    #[test]
+    fn test_field_type() {
+        assert_eq!(
+            FieldType::from_primitive(Primitive::Name("Tx".into()), &NoResolve).unwrap(),
+            FieldType::Text
+        );
     }
 }

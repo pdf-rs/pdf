@@ -28,11 +28,6 @@ fn boundary_rev(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usiz
         None => 0
     }
 }
-#[test]
-fn test_boundary_rev() {
-    assert_eq!(boundary_rev(&*b" hello", 3, not(is_whitespace)), 1);
-    assert_eq!(boundary_rev(&*b" hello", 3, is_whitespace), 3);
-}
 
 // find the position where condition(data[pos-1]) == true and condition(data[pos]) == false
 #[inline]
@@ -41,14 +36,6 @@ fn boundary(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usize {
         Some(start) => pos + start,
         None => data.len()
     }
-}
-#[test]
-fn test_boundary() {
-    assert_eq!(boundary(&*b" hello ", 3, not(is_whitespace)), 6);
-    assert_eq!(boundary(&*b" hello ", 3, is_whitespace), 3);
-    assert_eq!(boundary(&*b"01234  7orld", 5, is_whitespace), 7);
-    assert_eq!(boundary(&*b"01234  7orld", 7, is_whitespace), 7);
-    assert_eq!(boundary(&*b"q\n", 1, is_whitespace), 2);
 }
 
 #[inline]
@@ -436,5 +423,25 @@ impl<'a> PartialEq<&[u8]> for Substr<'a> {
 impl<'a> PartialEq<&str> for Substr<'a> {
     fn eq(&self, rhs: &&str) -> bool {
         self.equals(rhs.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_boundary_rev() {
+        assert_eq!(boundary_rev(&*b" hello", 3, not(is_whitespace)), 1);
+        assert_eq!(boundary_rev(&*b" hello", 3, is_whitespace), 3);
+    }
+
+    #[test]
+    fn test_boundary() {
+        assert_eq!(boundary(&*b" hello ", 3, not(is_whitespace)), 6);
+        assert_eq!(boundary(&*b" hello ", 3, is_whitespace), 3);
+        assert_eq!(boundary(&*b"01234  7orld", 5, is_whitespace), 7);
+        assert_eq!(boundary(&*b"01234  7orld", 7, is_whitespace), 7);
+        assert_eq!(boundary(&*b"q\n", 1, is_whitespace), 2);
     }
 }
