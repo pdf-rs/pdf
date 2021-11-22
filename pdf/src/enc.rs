@@ -1,3 +1,5 @@
+#![allow(dead_code)]  // TODO
+
 use itertools::Itertools;
 use inflate::{inflate_bytes_zlib, inflate_bytes};
 use deflate::deflate_bytes;
