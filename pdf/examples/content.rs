@@ -19,7 +19,7 @@ fn main() -> Result<(), PdfError> {
             println!("{:?}", c);
         }
 
-        let content = Content::from_ops(vec![
+        let _content = Content::from_ops(vec![
             Op::MoveTo { p: Point { x: 100., y: 100. } },
             Op::LineTo { p: Point { x: 100., y: 200. } },
             Op::LineTo { p: Point { x: 200., y: 100. } },
