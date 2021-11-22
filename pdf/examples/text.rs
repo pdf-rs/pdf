@@ -6,11 +6,8 @@ use std::convert::TryInto;
 
 use pdf::file::File;
 use pdf::content::*;
-use pdf::primitive::Primitive;
 use pdf::font::*;
-use pdf::parser::Lexer;
-use pdf::parser::parse_with_lexer;
-use pdf::object::{Resolve, NoResolve, RcRef};
+use pdf::object::{Resolve, RcRef};
 use pdf::encoding::BaseEncoding;
 use pdf::error::PdfError;
 

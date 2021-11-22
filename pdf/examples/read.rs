@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use pdf::file::File;
 use pdf::object::*;
-use pdf::primitive::{Primitive, PdfString};
+use pdf::primitive::Primitive;
 use pdf::error::PdfError;
 
 
