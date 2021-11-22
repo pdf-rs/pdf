@@ -172,8 +172,8 @@ pub struct SampledFunction {
     order: Interpolation,
 }
 impl SampledFunction {
-    fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
-        let idx: Vec<f32> = x.iter().zip(self.input.iter()).map(|(&x, dim)| dim.map(x)).collect();
+    fn apply(&self, x: &[f32], _out: &mut [f32]) -> Result<()> {
+        let _idx: Vec<f32> = x.iter().zip(self.input.iter()).map(|(&x, dim)| dim.map(x)).collect();
         match self.order {
             Interpolation::Linear => {
                 unimplemented!()
