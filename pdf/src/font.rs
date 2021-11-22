@@ -143,6 +143,7 @@ impl Widths {
             self.values.reserve(missing);
         }
     }
+    #[allow(clippy::float_cmp)]  // TODO
     fn set(&mut self, cid: usize, width: f32) {
         self._set(cid, width);
         debug_assert_eq!(self.get(cid), width);

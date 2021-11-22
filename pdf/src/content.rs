@@ -554,7 +554,7 @@ impl Object for FormXObject {
     }
 }
 
-
+#[allow(clippy::float_cmp)]  // TODO
 fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
     use Op::*;
     use std::io::Write;
