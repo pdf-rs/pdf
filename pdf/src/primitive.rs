@@ -345,12 +345,16 @@ impl PdfString {
     }
     pub fn as_str(&self) -> Result<Cow<str>> {
         if self.data.starts_with(&[0xfe, 0xff]) {
-            // FIXME: avoid extra allocation
-            let utf16: Vec<u16> = self.data[2..]
-                .chunks(2)
-                .map(|c| (c[0] as u16) << 8 | c[1] as u16)
-                .collect();
-            Ok(Cow::Owned(String::from_utf16(&utf16)?))
+            // avoids extra allocation of String::from_utf16, mem::transmute fails on LE-cpu
+            assert!(self.data.len() % 2 == 0);
+            let s: String = std::char::decode_utf16(
+                self.data[2..]
+                    .chunks(2)
+                    .map(|c| u16::from_be_bytes([c[0], c[1]])),
+            )
+            .map(|r| r.unwrap_or(std::char::REPLACEMENT_CHARACTER))
+            .collect();
+            Ok(Cow::Owned(s))
         } else {
             Ok(Cow::Borrowed(str::from_utf8(&self.data)?))
         }
@@ -637,5 +641,15 @@ impl Object for DateTime<FixedOffset> {
             }
             _ => unexpected_primitive!(String, p.get_debug_name()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::primitive::PdfString;
+    #[test]
+    fn utf16be_string() {
+        let s = PdfString::new(vec![0xfe, 0xff, 0x20, 0x09]);
+        assert_eq!(s.as_str().unwrap(), "\u{2009}");
     }
 }
