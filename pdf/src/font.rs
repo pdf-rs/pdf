@@ -5,11 +5,9 @@ use crate::error::*;
 use crate::encoding::Encoding;
 use std::collections::HashMap;
 use crate::parser::{Lexer, parse_with_lexer};
-use utf16_ext::Utf16ReadExt;
-use byteorder::BE;
 use std::convert::TryInto;
 
-#[allow(non_upper_case_globals, dead_code)] 
+#[allow(non_upper_case_globals, dead_code)]
 mod flags {
     pub const FixedPitch: u32    = 1 << 0;
     pub const Serif: u32         = 1 << 1;
@@ -38,11 +36,11 @@ pub struct Font {
     pub subtype: FontType,
     pub name: Option<String>,
     pub data: Result<FontData>,
-    
+
     encoding: Option<Encoding>,
-    
+
     to_unicode: Option<Stream>,
-    
+
     /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
     pub _other: Dictionary
 }
@@ -75,7 +73,7 @@ impl Object for Font {
                 field: "BaseFont".to_string()
             })
         };
-        
+
         let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
 
         let to_unicode = match dict.remove("ToUnicode") {
@@ -83,7 +81,7 @@ impl Object for Font {
             None => None
         };
         let _other = dict.clone();
-        let data = { || 
+        let data = { ||
             Ok(match subtype {
                 FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
                 FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
@@ -104,7 +102,7 @@ impl Object for Font {
                 _ => FontData::Other(dict)
             })
         }();
-        
+
         Ok(Font {
             subtype,
             name: base_font,
@@ -266,18 +264,18 @@ impl Font {
 pub struct TFont {
     #[pdf(key="BaseFont")]
     pub base_font: Option<String>,
-    
+
     /// per spec required, but some files lack it.
     #[pdf(key="FirstChar")]
     pub first_char: Option<i32>,
-    
+
     /// same
     #[pdf(key="LastChar")]
     pub last_char: Option<i32>,
-    
+
     #[pdf(key="Widths")]
     pub widths: Vec<f32>,
-    
+
     #[pdf(key="FontDescriptor")]
     pub font_descriptor: Option<FontDescriptor>
 }
@@ -286,7 +284,7 @@ pub struct TFont {
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
     descendant_fonts: Vec<RcRef<Font>>,
-    
+
     #[pdf(key="ToUnicode")]
     to_unicode: Option<Stream>,
 }
@@ -295,13 +293,13 @@ pub struct Type0Font {
 pub struct CIDFont {
     #[pdf(key="CIDSystemInfo")]
     system_info: Dictionary,
-    
+
     #[pdf(key="FontDescriptor")]
     font_descriptor: FontDescriptor,
-    
+
     #[pdf(key="DW", default="1000.")]
     default_width: f32,
-    
+
     #[pdf(key="W")]
     pub widths: Vec<Primitive>,
 
@@ -314,65 +312,65 @@ pub struct CIDFont {
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
     pub font_name: String,
-    
+
     #[pdf(key="FontFamily")]
     pub font_family: Option<PdfString>,
-    
+
     #[pdf(key="FontStretch")]
     pub font_stretch: Option<FontStretch>,
 
     #[pdf(key="FontWeight")]
     pub font_weight: Option<f32>,
-    
+
     #[pdf(key="Flags")]
     pub flags: u32,
-    
+
     #[pdf(key="FontBBox")]
     pub font_bbox: Rect,
-    
+
     #[pdf(key="ItalicAngle")]
     pub italic_angle: f32,
-    
+
     // required as per spec, but still missing in some cases
     #[pdf(key="Ascent")]
     pub ascent: Option<f32>,
-    
+
     #[pdf(key="Descent")]
     pub descent: Option<f32>,
-    
+
     #[pdf(key="Leading", default="0.")]
     pub leading: f32,
-    
+
     #[pdf(key="CapHeight")]
     pub cap_height: Option<f32>,
-    
+
     #[pdf(key="XHeight", default="0.")]
     pub xheight: f32,
-    
+
     #[pdf(key="StemV", default="0.")]
     pub stem_v: f32,
-    
+
     #[pdf(key="StemH", default="0.")]
     pub stem_h: f32,
-    
+
     #[pdf(key="AvgWidth", default="0.")]
     pub avg_width: f32,
-    
+
     #[pdf(key="MaxWidth", default="0.")]
     pub max_width: f32,
-    
+
     #[pdf(key="MissingWidth", default="0.")]
     pub missing_width: f32,
-    
+
     #[pdf(key="FontFile")]
     pub font_file: Option<Stream>,
-    
+
     #[pdf(key="FontFile2")]
     pub font_file2: Option<Stream>,
-    
+
     #[pdf(key="FontFile3")]
     pub font_file3: Option<Stream<FontStream3>>,
-    
+
     #[pdf(key="CharSet")]
     pub char_set: Option<PdfString>
 }
@@ -423,7 +421,7 @@ pub struct ToUnicodeMap {
 }
 impl ToUnicodeMap {
     /// Create a new ToUnicodeMap from key/value pairs.
-    /// 
+    ///
     /// subject to change
     pub fn create(iter: impl Iterator<Item=(u16, String)>) -> Self {
         ToUnicodeMap { inner: iter.collect() }
@@ -433,9 +431,22 @@ impl ToUnicodeMap {
     }
 }
 
-fn utf16be_to_string(mut data: &[u8]) -> Result<String> {
-    (&mut data)
-        .utf16_chars::<BE>()
+/// helper function to decode UTF-16-BE data
+/// takes a slice of u8 and returns an iterator for char or an decoding error
+pub fn utf16be_to_char(
+    data: &[u8],
+) -> impl Iterator<Item = std::result::Result<char, std::char::DecodeUtf16Error>> + '_ {
+    char::decode_utf16(data.chunks(2).map(|w| u16::from_be_bytes([w[0], w[1]])))
+}
+/// converts UTF16-BE to a string replacing illegal/unknown characters
+pub fn utf16be_to_string_lossy(data: &[u8]) -> pdf::error::Result<String> {
+    Ok(utf16be_to_char(data)
+        .map(|r| r.unwrap_or(std::char::REPLACEMENT_CHARACTER))
+        .collect())
+}
+/// converts UTF16-BE to a string errors out in illegal/unknonw characters
+fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<String> {
+    utf16be_to_char(data)
         .map(|r| r.map_err(|_| PdfError::Utf16Decode))
         .collect()
 }
@@ -507,4 +518,56 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
     }
 
     Ok(ToUnicodeMap { inner: map })
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::font::{utf16be_to_string, utf16be_to_char, utf16be_to_string_lossy};
+    #[test]
+    fn utf16be_to_string_quick() {
+        let v = vec![0x20, 0x09];
+        let s = utf16be_to_string(&v);
+        assert_eq!(s.unwrap(), "\u{2009}");
+        assert!(!v.is_empty());
+    }
+
+    #[test]
+    fn test_to_char() {
+        // 𝄞mus<invalid>ic<invalid>
+        let v = [
+            0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0xDD, 0x1E, 0x00, 0x69, 0x00,
+            0x63, 0xD8, 0x34,
+        ];
+
+        assert_eq!(
+            utf16be_to_char(&v)
+                .map(|r| r.map_err(|e| e.unpaired_surrogate()))
+                .collect::<Vec<_>>(),
+            vec![
+                Ok('𝄞'),
+                Ok('m'),
+                Ok('u'),
+                Ok('s'),
+                Err(0xDD1E),
+                Ok('i'),
+                Ok('c'),
+                Err(0xD834)
+            ]
+        );
+
+        let mut lossy = String::from("𝄞mus");
+        lossy.push(std::char::REPLACEMENT_CHARACTER);
+        lossy.push('i');
+        lossy.push('c');
+        lossy.push(std::char::REPLACEMENT_CHARACTER);
+
+        let r = utf16be_to_string(&v);
+        if let Err(r) = r {
+            // FIXME: compare against PdfError::Utf16Decode variant
+            assert_eq!(r.to_string(), "UTF16 decode error");
+        }
+        assert_eq!(utf16be_to_string(&v[..8]).unwrap(), String::from("𝄞mu"));
+        assert_eq!(utf16be_to_string_lossy(&v).unwrap(), lossy);
+    }
 }
