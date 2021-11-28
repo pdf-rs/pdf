@@ -241,7 +241,7 @@ impl Object for PdfStream {
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         self.info.serialize(out, 0)?;
-        
+
         writeln!(out, "stream")?;
         out.write_all(&self.data)?;
         writeln!(out, "\nendstream")?;
@@ -330,20 +330,27 @@ impl PdfString {
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
     }
-    pub fn as_str(&self) -> Result<Cow<str>> {
-        if self.data.starts_with(&[0xfe, 0xff]) {
-            // FIXME: avoid extra allocation
-            let utf16: Vec<u16> = self.data[2..].chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect();
-            Ok(Cow::Owned(String::from_utf16(&utf16)?))
-        } else {
-            Ok(Cow::Borrowed(str::from_utf8(&self.data)?))
-        }
-    }
     pub fn into_bytes(self) -> Vec<u8> {
         self.data
     }
-    pub fn into_string(self) -> Result<String> {
-        Ok(self.as_str()?.into_owned())
+    /// Do not use this method any more, doesn't make sense without encoding info
+    #[deprecated(since = "0.7.2", note = "does not make sense without encoding info, use as_str_lossy()")]
+    pub fn as_str(&self) -> Result<Cow<str>> {
+        Ok(Cow::Owned(self.into_string_lossy()?))
+    }
+    /// without encoding information the PdfString cannot be decoded into a String
+    /// therefore only lossy decoding is possible. For decoding correctly see
+    /// pdf_tools/src/lib.rs
+    pub fn as_str_lossy(&self) -> Result<Cow<str>> {
+        if self.data.starts_with(&[0xfe, 0xff]) {
+            Ok(Cow::Owned(crate::font::utf16be_to_string_lossy(&self.data[2..])?))
+        }
+        else {
+            Ok(String::from_utf8_lossy(&self.data))
+        }
+    }
+    pub fn into_string_lossy(&self) -> Result<String> {
+        Ok(self.as_str_lossy()?.into())
     }
 }
 
@@ -406,7 +413,7 @@ impl Primitive {
         }
     }
     pub fn as_str(&self) -> Option<Cow<str>> {
-        self.as_string().ok().and_then(|s| s.as_str().ok())
+        self.as_string().ok().and_then(|s| s.as_str_lossy().ok())
     }
     /// Does not accept a Reference
     pub fn as_array(&self) -> Result<&[Primitive]> {
@@ -559,7 +566,7 @@ impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     fn try_into(self) -> Result<Cow<'a, str>> {
         match *self {
             Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
-            Primitive::String(ref s) => Ok(s.as_str()?),
+            Primitive::String(ref s) => Ok(s.as_str_lossy()?),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
@@ -572,7 +579,7 @@ impl<'a> TryInto<String> for &'a Primitive {
     fn try_into(self) -> Result<String> {
         match *self {
             Primitive::Name(ref s) => Ok(s.clone()),
-            Primitive::String(ref s) => Ok(s.as_str()?.into_owned()),
+            Primitive::String(ref s) => Ok(s.as_str_lossy()?.into_owned()),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
@@ -626,3 +633,27 @@ impl Object for DateTime<FixedOffset> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::primitive::PdfString;
+    #[test]
+    fn utf16be_string() {
+        let s = PdfString::new(vec![0xfe, 0xff, 0x20, 0x09]);
+        assert_eq!(s.as_str_lossy().unwrap(), "\u{2009}");
+    }
+
+    #[test]
+    fn utf16be_invalid_string() {
+        let s = PdfString::new(vec![0xfe, 0xff, 0xd8, 0x34]);
+        let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
+        assert_eq!(s.as_str_lossy().unwrap(), repl_ch);
+    }
+
+    #[test]
+    #[should_panic]
+    fn utf16be_invalid_bytelen() {
+        let s = PdfString::new(vec![0xfe, 0xff, 0xd8, 0x34, 0x20]);
+        let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
+        assert_eq!(s.as_str_lossy().unwrap(), repl_ch);
+    }
+}
