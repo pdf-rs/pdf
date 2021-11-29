@@ -4,7 +4,7 @@ use std::env::args;
 use std::fmt;
 use std::collections::HashMap;
 use pdf::file::File;
-use pdf::object::{*};
+use pdf::object::*;
 use pdf::primitive::PdfString;
 
 struct Indent(usize);
@@ -14,17 +14,17 @@ impl fmt::Display for Indent {
             write!(f, "    ")?;
         }
         Ok(())
-    } 
+    }
 }
 
 fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&str) -> usize, depth: usize) {
     let indent = Indent(depth);
     loop {
         if let Some(ref title) = node.title {
-            println!("{}title: {:?}", indent, title.as_str().unwrap());
+            println!("{}title: {:?}", indent, title.to_string_lossy());
         }
         if let Some(ref dest) = node.dest {
-            let name = dest.as_str().unwrap();
+            let name = dest.to_string_lossy().unwrap();
             let page_nr = map(&name);
             println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
         }
@@ -44,7 +44,7 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&s
 fn main() {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
-    
+
     let file = File::<Vec<u8>>::open(&path).unwrap();
     let catalog = file.get_root();
 
@@ -53,8 +53,8 @@ fn main() {
     let mut count = 0;
     let mut dests_cb = |key: &PdfString, val: &Dest| {
         //println!("{:?} {:?}", key, val);
-        pages_map.insert(key.as_str().unwrap().into_owned(), val.page.get_inner());
-        
+        pages_map.insert(key.to_string_lossy().unwrap(), val.page.get_inner());
+
         count += 1;
     };
 
@@ -80,7 +80,7 @@ fn main() {
         }
     }
     add_tree(&file, &mut pages, &catalog.pages, &mut 0);
-    
+
     let get_page_nr = |name: &str| -> usize {
         let page = pages_map[name];
         pages[&page]
@@ -93,6 +93,6 @@ fn main() {
         }
     }
 
-    
+
     println!("{} items", count);
 }
