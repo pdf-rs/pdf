@@ -445,7 +445,7 @@ pub fn utf16be_to_string_lossy(data: &[u8]) -> pdf::error::Result<String> {
         .collect())
 }
 /// converts UTF16-BE to a string errors out in illegal/unknonw characters
-fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<String> {
+pub fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<String> {
     utf16be_to_char(data)
         .map(|r| r.map_err(|_| PdfError::Utf16Decode))
         .collect()
