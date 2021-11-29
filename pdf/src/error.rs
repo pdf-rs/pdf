@@ -22,36 +22,36 @@ pub enum PdfError {
 
     #[snafu(display("Unexpected token '{}' at {} - expected '{}'", lexeme, pos, expected))]
     UnexpectedLexeme {pos: usize, lexeme: String, expected: &'static str},
-    
+
     #[snafu(display("Expecting an object, encountered {} at pos {}. Rest:\n{}\n\n((end rest))", first_lexeme, pos, rest))]
     UnknownType {pos: usize, first_lexeme: String, rest: String},
-    
+
     #[snafu(display("Unknown variant '{}' for enum {}", name, id))]
     UnknownVariant { id: &'static str, name: String },
-    
+
     #[snafu(display("'{}' not found.", word))]
     NotFound { word: String },
-    
+
     #[snafu(display("Cannot follow reference during parsing - no resolve fn given (most likely /Length of Stream)."))]
     Reference, // TODO: which one?
-    
+
     #[snafu(display("Erroneous 'type' field in xref stream - expected 0, 1 or 2, found {}", found))]
     XRefStreamType { found: u64 },
-    
+
     #[snafu(display("Parsing read past boundary of Contents."))]
     ContentReadPastBoundary,
-    
+
     //////////////////
     // Encode/decode
     #[snafu(display("Hex decode error. Position {}, bytes {:?}", pos, bytes))]
     HexDecode {pos: usize, bytes: [u8; 2]},
-    
+
     #[snafu(display("Ascii85 tail error"))]
     Ascii85TailError,
-    
+
     #[snafu(display("Failed to convert '{}' into PredictorType", n))]
     IncorrectPredictorType {n: u8},
-    
+
     //////////////////
     // Dictionary
     #[snafu(display("Can't parse field {} of struct {}.", field, typ))]
@@ -60,28 +60,28 @@ pub enum PdfError {
         field: &'static str,
         source: Box<PdfError>
     },
-    
+
     #[snafu(display("Field /{} is missing in dictionary for type {}.", field, typ))]
     MissingEntry {
         typ: &'static str,
         field: String
     },
-    
+
     #[snafu(display("Expected to find value {} for key {}. Found {} instead.", value, key, found))]
     KeyValueMismatch {
         key: String,
         value: String,
         found: String,
     },
-    
+
     #[snafu(display("Expected dictionary /Type = {}. Found /Type = {}.", expected, found))]
     WrongDictionaryType {expected: String, found: String},
-    
+
     //////////////////
     // Misc
     #[snafu(display("Tried to dereference free object nr {}.", obj_nr))]
     FreeObject {obj_nr: u64},
-    
+
     #[snafu(display("Tried to dereference non-existing object nr {}.", obj_nr))]
     NullRef {obj_nr: u64},
 
@@ -95,16 +95,16 @@ pub enum PdfError {
     */
     #[snafu(display("Object stream index out of bounds ({}/{}).", index, max))]
     ObjStmOutOfBounds {index: usize, max: usize},
-    
+
     #[snafu(display("Page out of bounds ({}/{}).", page_nr, max))]
     PageOutOfBounds {page_nr: u32, max: u32},
-    
+
     #[snafu(display("Page {} could not be found in the page tree.", page_nr))]
     PageNotFound {page_nr: u32},
-    
+
     #[snafu(display("Entry {} in xref table unspecified", id))]
     UnspecifiedXRefEntry {id: ObjNr},
-    
+
     #[snafu(display("Invalid password"))]
     InvalidPassword,
 
@@ -116,10 +116,10 @@ pub enum PdfError {
 
     #[snafu(display("IO Error"))]
     Io { source: io::Error },
-    
+
     #[snafu(display("{}", msg))]
     Other { msg: String },
-    
+
     #[snafu(display("NoneError at {}:{}:{}", file, line, column))]
     NoneError { file: &'static str, line: u32, column: u32 },
 
@@ -137,6 +137,9 @@ pub enum PdfError {
 
     #[snafu(display("UTF16 decode error"))]
     Utf16Decode,
+
+    #[snafu(display("UTF8 decode error"))]
+    Utf8Decode,
 
     #[snafu(display("CID decode error"))]
     CidDecode,
@@ -165,7 +168,7 @@ fn trace(err: &dyn Error, depth: usize) {
         trace(source, depth+1);
     }
 }
-    
+
 
 pub type Result<T, E=PdfError> = std::result::Result<T, E>;
 
