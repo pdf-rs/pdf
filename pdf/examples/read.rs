@@ -15,24 +15,24 @@ fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
     let now = SystemTime::now();
-    
+
     let file = File::<Vec<u8>>::open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
-        let title = info.get("Title").and_then(|p| p.as_str());
-        let author = info.get("Author").and_then(|p| p.as_str());
+        let title = info.get("Title").and_then(|p| Some(p.to_string_lossy().unwrap()));
+        let author = info.get("Author").and_then(|p| Some(p.to_string_lossy().unwrap()));
 
         let descr = match (title, author) {
-            (Some(title), None) => title.into(),
+            (Some(title), None) => title,
             (None, Some(author)) => format!("[no title] – {}", author),
             (Some(title), Some(author)) => format!("{} – {}", title, author),
             _ => "PDF".into()
         };
         println!("{}", descr);
     }
-    
+
     let mut images: Vec<_> = vec![];
     let mut fonts = HashMap::new();
-    
+
     for page in file.pages() {
         let page = page.unwrap();
         let resources = page.resources().unwrap();
@@ -71,14 +71,14 @@ fn main() -> Result<(), PdfError> {
         }
     }
     println!("Found {} font(s).", fonts.len());
-    
+
     if let Some(ref forms) = file.get_root().forms {
         println!("Forms:");
         for field in forms.fields.iter() {
             print!("  {:?} = ", field.name);
             match field.value {
                 Primitive::String(ref s) => {
-                    match s.as_str() {
+                    match s.to_string_lossy() {
                         Ok(s) => println!("{:?}", s),
                         Err(_) => println!("{:?}", s),
                     }
