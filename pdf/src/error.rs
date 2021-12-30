@@ -1,6 +1,7 @@
 use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
+use crate::parser::ParseFlags;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -40,6 +41,9 @@ pub enum PdfError {
 
     #[snafu(display("Parsing read past boundary of Contents."))]
     ContentReadPastBoundary,
+
+    #[snafu(display("Primitive not allowed"))]
+    PrimitiveNotAllowed { allowed: ParseFlags, found: ParseFlags },
 
     //////////////////
     // Encode/decode
