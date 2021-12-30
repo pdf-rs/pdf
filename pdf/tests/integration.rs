@@ -1,7 +1,7 @@
 use std::str;
 use pdf::file::File;
 use pdf::object::*;
-use pdf::parser::parse;
+use pdf::parser::{parse, ParseFlags};
 use glob::glob;
 
 macro_rules! file_path {
@@ -101,7 +101,7 @@ fn parse_objects_from_stream() {
     for i in 0..obj_stream.n_objects() {
         let slice = run!(obj_stream.get_object_slice(i));
         println!("Object slice #{}: {}\n", i, str::from_utf8(slice).unwrap());
-        run!(parse(slice, &NoResolve));
+        run!(parse(slice, &NoResolve, ParseFlags::ANY));
     }
 }
 

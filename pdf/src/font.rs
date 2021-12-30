@@ -4,7 +4,7 @@ use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
 use std::collections::HashMap;
-use crate::parser::{Lexer, parse_with_lexer};
+use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
 
 #[allow(non_upper_case_globals, dead_code)]
@@ -464,8 +464,8 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
     while let Ok(substr) = lexer.next() {
         match substr.as_slice() {
             b"beginbfchar" => loop {
-                let a = parse_with_lexer(&mut lexer, &NoResolve);
-                let b = parse_with_lexer(&mut lexer, &NoResolve);
+                let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
+                let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
                 match (a, b) {
                     (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
                         let cid = parse_cid(&cid_data)?;
@@ -476,9 +476,9 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                 }
             },
             b"beginbfrange" => loop {
-                let a = parse_with_lexer(&mut lexer, &NoResolve);
-                let b = parse_with_lexer(&mut lexer, &NoResolve);
-                let c = parse_with_lexer(&mut lexer, &NoResolve);
+                let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
+                let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
+                let c = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING | ParseFlags::ARRAY);
                 match (a, b, c) {
                     (
                         Ok(Primitive::String(cid_start_data)),

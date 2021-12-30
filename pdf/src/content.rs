@@ -6,7 +6,7 @@ use once_cell::unsync::OnceCell;
 
 use crate::error::*;
 use crate::object::*;
-use crate::parser::{Lexer, parse_with_lexer};
+use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use crate::primitive::*;
 use crate::enc::StreamFilter;
 
@@ -126,7 +126,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
     let mut dict = Dictionary::new();
     loop {
         let backup_pos = lexer.get_pos();
-        let obj = parse_with_lexer(lexer, &NoResolve);
+        let obj = parse_with_lexer(lexer, &NoResolve, ParseFlags::ANY);
         let key = match obj {
             Ok(Primitive::Name(key)) => key,
             Err(e) if e.is_eof() => return Err(e),
@@ -147,7 +147,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
             ("I", "Interpolate"),
             ("W", "Width"),
         ]);
-        let val = parse_with_lexer(lexer, &NoResolve)?;
+        let val = parse_with_lexer(lexer, &NoResolve, ParseFlags::ANY)?;
         dict.insert(key, val);
     }
     lexer.next_expect("ID")?;
@@ -245,7 +245,7 @@ impl OpBuilder {
 
         loop {
             let backup_pos = lexer.get_pos();
-            let obj = parse_with_lexer(&mut lexer, resolve);
+            let obj = parse_with_lexer(&mut lexer, resolve, ParseFlags::ANY);
             match obj {
                 Ok(obj) => {
                     // Operand

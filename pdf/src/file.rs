@@ -14,7 +14,7 @@ use crate::primitive::{Primitive, Dictionary, PdfString};
 use crate::backend::Backend;
 use crate::any::{Any};
 use crate::parser::Lexer;
-use crate::parser::{parse_indirect_object, parse};
+use crate::parser::{parse_indirect_object, parse, ParseFlags};
 use crate::xref::{XRef, XRefTable, XRefInfo};
 use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
@@ -62,20 +62,21 @@ impl<B: Backend> Storage<B> {
     }
 }
 impl<B: Backend> Resolve for Storage<B> {
-    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
                     let mut lexer = Lexer::new(t!(self.backend.read(self.start_offset + pos ..)));
-                    let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref())).1;
+                    let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref(), flags)).1;
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
+                    assert!(flags.contains(ParseFlags::STREAM));
                     let obj_stream = t!(self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
                     let slice = t!(obj_stream.get_object_slice(index));
-                    parse(slice, self)
+                    parse(slice, self, flags)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
                 XRef::Promised => unimplemented!(),
@@ -225,8 +226,8 @@ pub struct File<B: Backend> {
     pub trailer:    Trailer,
 }
 impl<B: Backend> Resolve for File<B> {
-    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
-        self.storage.resolve(r)
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags) -> Result<Primitive> {
+        self.storage.resolve_flags(r, flags)
     }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.storage.get(r)

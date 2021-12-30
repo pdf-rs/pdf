@@ -13,8 +13,26 @@ use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use self::lexer::{HexStringLexer, StringLexer};
 use crate::crypt::Decoder;
+use bitflags::bitflags;
 
 const MAX_DEPTH: usize = 20;
+
+
+bitflags! {
+    pub struct ParseFlags: u16 {
+        const INTEGER = 1 << 0;
+        const STREAM = 1 << 1;
+        const DICT = 1 << 2;
+        const NUMBER = 1 << 3;
+        const NAME = 1 << 4;
+        const ARRAY = 1 << 5;
+        const STRING = 1 << 6;
+        const BOOL = 1 << 7;
+        const NULL = 1 << 8;
+        const REF = 1 << 9;
+        const ANY = (1 << 10) - 1;
+    }
+}
 
 
 pub struct Context<'a> {
@@ -34,14 +52,14 @@ impl<'a> Context<'a> {
 
 /// Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is insufficient.
-pub fn parse(data: &[u8], r: &impl Resolve) -> Result<Primitive> {
-    parse_with_lexer(&mut Lexer::new(data), r)
+pub fn parse(data: &[u8], r: &impl Resolve, flags: ParseFlags) -> Result<Primitive> {
+    parse_with_lexer(&mut Lexer::new(data), r, flags)
 }
 
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
-pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve) -> Result<Primitive> {
-    parse_with_lexer_ctx(lexer, r, None, MAX_DEPTH)
+pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve, flags: ParseFlags) -> Result<Primitive> {
+    parse_with_lexer_ctx(lexer, r, None, flags, MAX_DEPTH)
 }
 
 fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, max_depth: usize) -> Result<Dictionary> {
@@ -51,7 +69,7 @@ fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
         let token = t!(lexer.next());
         if token.starts_with(b"/") {
             let key = token.reslice(1..).to_string();
-            let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, max_depth));
+            let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, ParseFlags::ANY, max_depth));
             dict.insert(key, obj);
         } else if token.equals(b">>") {
             break;
@@ -67,7 +85,7 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
 
     let length = match dict.get("Length") {
         Some(&Primitive::Integer(n)) => n,
-        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve(reference)).as_integer()),
+        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER)).as_integer()),
         Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "Integer or Reference", found: other.get_debug_name() }),
         None => err!(PdfError::MissingEntry { typ: "<Stream>", field: "Length".into() }),
     };
@@ -91,10 +109,12 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
 
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
-pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, max_depth: usize) -> Result<Primitive> {
+pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, flags: ParseFlags, max_depth: usize) -> Result<Primitive> {
     let first_lexeme = t!(lexer.next());
 
     let obj = if first_lexeme.equals(b"<<") {
+        assert!(flags.contains(ParseFlags::DICT));
+
         if max_depth == 0 {
             return Err(PdfError::MaxDepth);
         }
@@ -107,6 +127,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         }
     } else if first_lexeme.is_integer() {
         // May be Integer or Reference
+        assert!(flags.intersects(ParseFlags::INTEGER | ParseFlags::REF));
 
         // First backup position
         let pos_bk = lexer.get_pos();
@@ -116,28 +137,34 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
             let third_lexeme = t!(lexer.next());
             if third_lexeme.equals(b"R") {
                 // It is indeed a reference to an indirect object
+                assert!(flags.contains(ParseFlags::REF));
                 Primitive::Reference (PlainRef {
                     id: t!(first_lexeme.to::<ObjNr>()),
                     gen: t!(second_lexeme.to::<GenNr>()),
                 })
             } else {
+                assert!(flags.contains(ParseFlags::INTEGER));
                 // We are probably in an array of numbers - it's not a reference anyway
                 lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
                 Primitive::Integer(t!(first_lexeme.to::<i32>()))
             }
         } else {
+            assert!(flags.contains(ParseFlags::INTEGER));
             // It is but a number
             lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
             Primitive::Integer(t!(first_lexeme.to::<i32>()))
         }
     } else if first_lexeme.is_real_number() {
+        assert!(flags.contains(ParseFlags::NUMBER));
         // Real Number
         Primitive::Number (t!(first_lexeme.to::<f32>()))
     } else if first_lexeme.starts_with(b"/") {
+        assert!(flags.contains(ParseFlags::NAME));
         // Name
         let s = first_lexeme.reslice(1..).to_string();
         Primitive::Name(s)
     } else if first_lexeme.equals(b"[") {
+        assert!(flags.contains(ParseFlags::ARRAY));
         if max_depth == 0 {
             return Err(PdfError::MaxDepth);
         }
@@ -149,14 +176,14 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
                 break;
             }
 
-            let element = t!(parse_with_lexer_ctx(lexer, r, ctx, max_depth-1));
+            let element = t!(parse_with_lexer_ctx(lexer, r, ctx, ParseFlags::ANY, max_depth-1));
             array.push(element);
         }
         t!(lexer.next()); // Move beyond closing delimiter
 
         Primitive::Array (array)
     } else if first_lexeme.equals(b"(") {
-
+        assert!(flags.contains(ParseFlags::STRING));
         let mut string: Vec<u8> = Vec::new();
 
         let bytes_traversed = {
@@ -174,6 +201,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
+        assert!(flags.contains(ParseFlags::STRING));
         let mut string: Vec<u8> = Vec::new();
 
         let bytes_traversed = {
@@ -192,10 +220,13 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"true") {
+        assert!(flags.contains(ParseFlags::BOOL));
         Primitive::Boolean (true)
     } else if first_lexeme.equals(b"false") {
+        assert!(flags.contains(ParseFlags::BOOL));
         Primitive::Boolean (false)
     } else if first_lexeme.equals(b"null") {
+        assert!(flags.contains(ParseFlags::NULL));
         Primitive::Null
     } else {
         err!(PdfError::UnknownType {pos: lexer.get_pos(), first_lexeme: first_lexeme.to_string(), rest: lexer.read_n(50).to_string()});
@@ -235,10 +266,10 @@ mod tests {
     #[test]
     fn dict_with_empty_name_as_value() {
         use crate::object::NoResolve;
-
+        use super::ParseFlags;
         {
             let data = b"<</App<</Name/>>>>";
-            let primitive = super::parse(data, &NoResolve).unwrap();
+            let primitive = super::parse(data, &NoResolve, ParseFlags::DICT).unwrap();
             let dict = primitive.into_dictionary(&NoResolve).unwrap();
 
             assert_eq!(dict.len(), 1);
@@ -264,10 +295,11 @@ mod tests {
     #[test]
     fn dict_with_empty_name_as_key() {
         use crate::object::NoResolve;
+        use super::ParseFlags;
 
         {
             let data = b"<</ true>>";
-            let primitive = super::parse(data, &NoResolve).unwrap();
+            let primitive = super::parse(data, &NoResolve, ParseFlags::DICT).unwrap();
             let dict = primitive.into_dictionary(&NoResolve).unwrap();
 
             assert_eq!(dict.len(), 1);
@@ -287,9 +319,10 @@ mod tests {
     #[test]
     fn empty_array() {
         use crate::object::NoResolve;
+        use super::ParseFlags;
 
         let data = b"[]";
-        let primitive = super::parse(data, &NoResolve).unwrap();
+        let primitive = super::parse(data, &NoResolve, ParseFlags::ARRAY).unwrap();
         let array = primitive.into_array(&NoResolve).unwrap();
         assert!(array.is_empty());
     }

@@ -4,7 +4,7 @@
 use crate::parser::{lexer::*, MAX_DEPTH};
 use crate::error::*;
 use crate::primitive::{Primitive, PdfStream};
-use crate::parser::{parse_with_lexer_ctx, parse_stream_with_lexer, Context};
+use crate::parser::{parse_with_lexer_ctx, parse_stream_with_lexer, Context, ParseFlags};
 use crate::object::*;
 use crate::crypt::Decoder;
 
@@ -12,7 +12,7 @@ use crate::crypt::Decoder;
 /// `Reader::parse_object`, but this function does not take `Reader`, at the expense that it
 /// cannot dereference 
 
-pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Option<&Decoder>) -> Result<(PlainRef, Primitive)> {
+pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Option<&Decoder>, flags: ParseFlags) -> Result<(PlainRef, Primitive)> {
     let obj_nr = t!(lexer.next()).to::<ObjNr>()?;
     let gen_nr = t!(lexer.next()).to::<GenNr>()?;
     lexer.next_expect("obj")?;
@@ -22,7 +22,7 @@ pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Optio
         obj_nr,
         gen_nr
     };
-    let obj = t!(parse_with_lexer_ctx(lexer, r, Some(&ctx), MAX_DEPTH));
+    let obj = t!(parse_with_lexer_ctx(lexer, r, Some(&ctx), flags, MAX_DEPTH));
 
     t!(lexer.next_expect("endobj"));
 

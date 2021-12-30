@@ -3,7 +3,7 @@ use crate::parser::lexer::Lexer;
 use crate::xref::{XRef, XRefSection, XRefInfo};
 use crate::primitive::{Primitive, Dictionary};
 use crate::object::*;
-use crate::parser::{parse_with_lexer};
+use crate::parser::{parse_with_lexer, ParseFlags};
 use crate::parser::parse_object::{parse_indirect_stream};
 
 // Just the part of Parser which reads xref sections from xref stream.
@@ -48,7 +48,7 @@ fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
 pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let xref_stream = t!(parse_indirect_stream(lexer, resolve, None)).1;
     let trailer = if t!(lexer.next()) == "trailer" {
-        let trailer = t!(parse_with_lexer(lexer, resolve));
+        let trailer = t!(parse_with_lexer(lexer, resolve, ParseFlags::DICT));
         t!(trailer.into_dictionary(resolve))
     } else {
         xref_stream.info.clone()
@@ -102,7 +102,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
     }
 
     t!(lexer.next_expect("trailer"));
-    let trailer = t!(parse_with_lexer(lexer, resolve));
+    let trailer = t!(parse_with_lexer(lexer, resolve, ParseFlags::DICT));
     let trailer = t!(trailer.into_dictionary(resolve));
 
     Ok((sections, trailer))

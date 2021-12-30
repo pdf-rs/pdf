@@ -12,6 +12,7 @@ pub use self::stream::*;
 pub use self::color::*;
 pub use self::function::*;
 pub use crate::file::PromisedRef;
+use crate::parser::ParseFlags;
 
 use crate::primitive::*;
 use crate::error::*;
@@ -29,13 +30,16 @@ pub type ObjNr = u64;
 pub type GenNr = u16;
 
 pub trait Resolve: {
-    fn resolve(&self, r: PlainRef) -> Result<Primitive>;
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags) -> Result<Primitive>;
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+        self.resolve_flags(r, ParseFlags::ANY)
+    }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>>;
 }
 
 pub struct NoResolve;
 impl Resolve for NoResolve {
-    fn resolve(&self, _: PlainRef) -> Result<Primitive> {
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
     fn get<T: Object>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
