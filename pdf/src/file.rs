@@ -62,7 +62,7 @@ impl<B: Backend> Storage<B> {
     }
 }
 impl<B: Backend> Resolve for Storage<B> {
-    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags) -> Result<Primitive> {
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
@@ -73,7 +73,10 @@ impl<B: Backend> Resolve for Storage<B> {
                 }
                 XRef::Stream {stream_id, index} => {
                     assert!(flags.contains(ParseFlags::STREAM));
-                    let obj_stream = t!(self.resolve(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}));
+                    if depth == 0 {
+                        bail!("too deep");
+                    }
+                    let obj_stream = t!(self.resolve_flags(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}, flags, depth-1));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
                     let slice = t!(obj_stream.get_object_slice(index));
                     parse(slice, self, flags)
@@ -232,8 +235,8 @@ pub struct File<B: Backend> {
     pub trailer:    Trailer,
 }
 impl<B: Backend> Resolve for File<B> {
-    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags) -> Result<Primitive> {
-        self.storage.resolve_flags(r, flags)
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
+        self.storage.resolve_flags(r, flags, depth)
     }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.storage.get(r)

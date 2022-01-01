@@ -85,7 +85,7 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
 
     let length = match dict.get("Length") {
         Some(&Primitive::Integer(n)) => n,
-        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER)).as_integer()),
+        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER, 1)).as_integer()),
         Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "Integer or Reference", found: other.get_debug_name() }),
         None => err!(PdfError::MissingEntry { typ: "<Stream>", field: "Length".into() }),
     };
