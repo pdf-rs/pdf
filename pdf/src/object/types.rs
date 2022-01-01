@@ -169,13 +169,19 @@ pub struct PageTree {
 }
 impl PageTree {
     pub fn page(&self, resolve: &impl Resolve, page_nr: u32) -> Result<PageRc> {
+        self.page_limited(resolve, page_nr, 16)
+    }
+    fn page_limited(&self, resolve: &impl Resolve, page_nr: u32, depth: usize) -> Result<PageRc> {
+        if depth == 0 {
+            bail!("page tree depth exeeded");
+        }
         let mut pos = 0;
         for &kid in &self.kids {
             let node = resolve.get(kid)?;
             match *node {
                 PagesNode::Tree(ref tree) => {
                     if (pos .. pos + tree.count).contains(&page_nr) {
-                        return tree.page(resolve, page_nr - pos);
+                        return tree.page_limited(resolve, page_nr - pos, depth - 1);
                     }
                     pos += tree.count;
                 }

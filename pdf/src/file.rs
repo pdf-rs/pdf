@@ -35,7 +35,7 @@ impl<T> PromisedRef<T> {
 
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
-    cache: RefCell<HashMap<PlainRef, Any>>,
+    cache: RefCell<HashMap<PlainRef, Option<Any>>>,
 
     // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
@@ -87,14 +87,20 @@ impl<B: Backend> Resolve for Storage<B> {
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
-        if let Some(any) = self.cache.borrow().get(&key) {
-            return Ok(RcRef::new(key, any.clone().downcast()?));
+        if let Some(opt) = self.cache.borrow().get(&key) {
+            match opt {
+                Some(any) => return Ok(RcRef::new(key, any.clone().downcast()?)),
+                None => bail!("recursion")
+            }
         }
 
         let primitive = t!(self.resolve(key));
+
+        self.cache.borrow_mut().insert(key, None);
+
         let obj = t!(T::from_primitive(primitive, self));
         let rc = Rc::new(obj);
-        self.cache.borrow_mut().insert(key, Any::new(rc.clone()));
+        self.cache.borrow_mut().insert(key, Some(Any::new(rc.clone())));
         
         Ok(RcRef::new(key, rc))
     }
