@@ -92,6 +92,34 @@ fn owner_password() {
     }
 }
 
+// Test for invalid PDFs found by fuzzing.
+// We don't care if they give an Err or Ok, as long as they don't panic.
+#[test]
+fn invalid_pdfs() {
+    for entry in glob(file_path!("invalid/*.pdf"))
+        .expect("Failed to read glob pattern")
+    {
+        match entry {
+            Ok(path) => {
+                let path = path.to_str().unwrap();
+                println!("\n\n == Now testing `{}` ==\n", path);
+
+                match File::<Vec<u8>>::open(path) {
+                    Ok(file) => {
+                        for i in 0 .. file.num_pages() {
+                            let _ = file.get_page(i);
+                        }
+                    }
+                    Err(_) => {
+                        continue;
+                    }
+                }
+            }
+            Err(e) => panic!("error when reading glob patterns: {:?}", e),
+        }
+    }
+}
+
 #[test]
 fn parse_objects_from_stream() {
     use pdf::object::NoResolve;
