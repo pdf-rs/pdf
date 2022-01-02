@@ -5,17 +5,22 @@ use crate::primitive::{Primitive, Dictionary};
 use crate::object::*;
 use crate::parser::{parse_with_lexer, ParseFlags};
 use crate::parser::parse_object::{parse_indirect_stream};
+use std::convert::TryInto;
 
 // Just the part of Parser which reads xref sections from xref stream.
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32], data: &mut &[u8]) -> Result<XRefSection> {
+fn parse_xref_section_from_stream(first_id: u32, num_entries: u32, width: &[usize], data: &mut &[u8]) -> Result<XRefSection> {
     let mut entries = Vec::new();
+    let [w0, w1, w2]: [usize; 3] = width.try_into().map_err(|e| other!("invalid xref length array"))?;
+    if num_entries as usize * (w0 + w1 + w2) > data.len() {
+        bail!("not enough xref data");
+    }
     for _ in 0..num_entries {
         // println!("{:?}", &data[.. width.iter().map(|&i| i as usize).sum()]);
          // TODO Check if width[i] are 0. Use default values from the PDF references.
-        let _type = read_u64_from_stream(width[0], data);
-        let field1 = read_u64_from_stream(width[1], data);
-        let field2 = read_u64_from_stream(width[2], data);
+        let _type = read_u64_from_stream(w0, data);
+        let field1 = read_u64_from_stream(w1, data);
+        let field2 = read_u64_from_stream(w2, data);
 
         let entry =
         match _type {
@@ -27,12 +32,12 @@ fn parse_xref_section_from_stream(first_id: i32, num_entries: i32, width: &[i32]
         entries.push(entry);
     }
     Ok(XRefSection {
-        first_id: first_id as u32,
+        first_id,
         entries,
     })
 }
 /// Helper to read an integer with a certain amount of bits `width` from stream.
-fn read_u64_from_stream(width: i32, data: &mut &[u8]) -> u64 {
+fn read_u64_from_stream(width: usize, data: &mut &[u8]) -> u64 {
     let mut result = 0;
     for i in (0..width).rev() {
         let base = 8 * i; // (width, 0]

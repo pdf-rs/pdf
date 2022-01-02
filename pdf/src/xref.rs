@@ -140,10 +140,10 @@ impl XRefTable {
             data.extend_from_slice(&b.to_be_bytes()[8 - b_w ..]);
         }
         let info = XRefInfo {
-            size: size as i32,
-            index: vec![0, size as i32],
+            size: size as u32,
+            index: vec![0, size as u32],
             prev: None,
-            w: vec![1, a_w as i32, b_w as i32],
+            w: vec![1, a_w, b_w],
         };
         Ok(Stream::new(info, data).hexencode())
     }
@@ -210,19 +210,19 @@ impl XRefSection {
 pub struct XRefInfo {
     // XRefStream fields
     #[pdf(key = "Size")]
-    pub size: i32,
+    pub size: u32,
 
     //
     #[pdf(key = "Index", default = "vec![0, size]")]
     /// Array of pairs of integers for each subsection, (first object number, number of entries).
     /// Default value (assumed when None): `(0, self.size)`.
-    pub index: Vec<i32>,
+    pub index: Vec<u32>,
 
     #[pdf(key = "Prev")]
     prev: Option<i32>,
 
     #[pdf(key = "W")]
-    pub w: Vec<i32>,
+    pub w: Vec<usize>,
 }
 
 // read_xref_table
