@@ -272,7 +272,7 @@ fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         let mut out_off = 0; // offset into output buffer
         let mut last_out_off = 0; // last offset to output buffer
         
-        while in_off < inp.len() {
+        while in_off + stride < inp.len() {
             let predictor = PredictorType::from_u8(inp[in_off])?;
             in_off += 1; // +1 because the first byte on each row is predictor
             
