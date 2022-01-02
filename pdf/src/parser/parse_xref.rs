@@ -66,6 +66,9 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
 
     let index = &xref_stream.index;
     
+    if index.len() % 2 != 0 {
+        return Err(PdfError::Other { msg: format!("xref stream has {} elements which is not an even number", index.len()) });
+    }
 
     let mut sections = Vec::new();
     for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {
