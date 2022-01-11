@@ -24,7 +24,7 @@ fn open_file() {
     let _ = run!(File::open(file_path!("example.pdf")));
     #[cfg(feature = "mmap")]
     let _ = run!({
-        use memmap::Mmap;
+        use memmap2::Mmap;
         let file = std::fs::File::open(file_path!("example.pdf")).expect("can't open file");
         let mmap = unsafe { Mmap::map(&file).expect("can't mmap file") };
         File::from_data(mmap)
