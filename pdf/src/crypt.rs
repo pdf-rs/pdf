@@ -567,7 +567,7 @@ impl Decoder {
             }
             CryptMethod::AESV2 => {
                 // b)
-                let mut key = [0; 16 + 5 + 4];
+                let mut key = [0; 32 + 5 + 4];
                 let n = self.key_size;
                 key[..n].copy_from_slice(self.key());
                 key[n..n + 3].copy_from_slice(&id.to_le_bytes()[..3]);
