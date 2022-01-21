@@ -112,7 +112,7 @@ impl Object for Function {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),
             Primitive::Stream(s) => {
                 let stream = Stream::<RawFunction>::from_stream(s, resolve)?;
-                let data = stream.decode()?;
+                let data = stream.decode()?.into_owned();
                 match stream.info.function_type {
                     4 => {
                         let s = std::str::from_utf8(&*data)?;
@@ -121,10 +121,18 @@ impl Object for Function {
                         Ok(Function::PostScript { func, domain: info.domain, range: info.range.unwrap() })
                     },
                     0 => {
+                        let info = stream.info.info;
                         Ok(Function::Sampled(SampledFunction {
-                            input: vec![],
-                            data: vec![],
-                            order: Interpolation::Linear
+                            input: info.domain.chunks_exact(2).map(|c| {
+                                SampledFunctionInput {
+                                    domain: (c[0], c[1]),
+                                    encode_offset: 0.0,
+                                    encode_scale: 1.0,
+                                }
+                            }).collect(),
+                            data,
+                            order: Interpolation::Linear,
+                            range: try_opt!(info.range),
                         }))
                     }
                     ref p => bail!("found a function stream with type {:?}", p)
@@ -142,7 +150,6 @@ struct SampledFunctionInput {
     domain: (f32, f32),
     encode_offset: f32,
     encode_scale: f32,
-    size: u32,
 }
 impl SampledFunctionInput {
     fn map(&self, x: f32) -> f32 {
@@ -155,7 +162,6 @@ impl SampledFunctionInput {
 struct SampledFunctionOutput {
     output_offset: f32,
     output_scale: f32
-
 }
 
 #[derive(Debug, Clone)]
@@ -170,16 +176,35 @@ pub struct SampledFunction {
     input: Vec<SampledFunctionInput>,
     data: Vec<u8>,
     order: Interpolation,
+    range: Vec<f32>,
 }
 impl SampledFunction {
-    fn apply(&self, x: &[f32], _out: &mut [f32]) -> Result<()> {
+    fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
         let _idx: Vec<f32> = x.iter().zip(self.input.iter()).map(|(&x, dim)| dim.map(x)).collect();
-        match self.order {
-            Interpolation::Linear => {
-                unimplemented!()
+        if x.len() != self.input.len() {
+            bail!("input dimension mismatch {} != {}", x.len(), self.input.len());
+        }
+        let n_out = out.len();
+        if out.len() * 2 != self.range.len() {
+            bail!("output dimension mismatch 2 * {} != {}", out.len(), self.range.len())
+        }
+        match x.len() {
+            1 => {
+                match self.order {
+                    Interpolation::Linear => {
+                        let y = self.input[0].map(x[0]);
+                        let idx_base = (y.floor() as usize) * n_out;
+                        let s = y.fract();
+                        for ((o, &a), &b) in out.iter_mut().zip(&self.data[idx_base..]).zip(&self.data[idx_base + n_out..]) {
+                            *o = a as f32 * (s - 1.) + b as f32 * s;
+                        }
+                    }
+                    _ => unimplemented!()
+                }
             }
             _ => unimplemented!()
         }
+        Ok(())
     }
 }
 
