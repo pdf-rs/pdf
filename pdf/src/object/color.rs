@@ -29,6 +29,7 @@ pub enum ColorSpace {
     Indexed(Box<ColorSpace>, Vec<u8>),
     Separation(String, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
+    Pattern,
     Other(Vec<Primitive>)
 }
 
@@ -49,7 +50,8 @@ impl ColorSpace {
                 "DeviceGray" => ColorSpace::DeviceGray,
                 "DeviceRGB" => ColorSpace::DeviceRGB,
                 "DeviceCMYK" => ColorSpace::DeviceCMYK,
-                _ => unimplemented!()
+                "Pattern" => ColorSpace::Pattern,
+                _ => bail!("unimplemented color space {}", name)
             };
             return Ok(cs);
         }
