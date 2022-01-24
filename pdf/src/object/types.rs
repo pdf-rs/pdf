@@ -811,11 +811,12 @@ impl Object for Dest {
                     Primitive::Number(f) => Some(f),
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
-                zoom: match *try_opt!(array.get(4)) {
-                    Primitive::Null => 0.0,
-                    Primitive::Integer(n) => n as f32,
-                    Primitive::Number(f) => f,
-                    ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                zoom: match array.get(4) {
+                    Some(&Primitive::Null) => 0.0,
+                    Some(&Primitive::Integer(n)) => n as f32,
+                    Some(&Primitive::Number(f)) => f,
+                    Some(ref p) => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                    None => 0.0,
                 },
             },
             "Fit" => DestView::Fit,

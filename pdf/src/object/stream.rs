@@ -291,11 +291,11 @@ impl<T: Object> Object for StreamInfo<T> {
 pub struct ObjStmInfo {
     #[pdf(key = "N")]
     /// Number of compressed objects in the stream.
-    pub num_objects: i32,
+    pub num_objects: usize,
 
     #[pdf(key = "First")]
     /// The byte offset in the decoded stream, of the first compressed object.
-    pub first: i32,
+    pub first: usize,
 
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
@@ -341,12 +341,12 @@ impl ObjectStream {
         if index >= self.offsets.len() {
             err!(PdfError::ObjStmOutOfBounds {index, max: self.offsets.len()});
         }
-        let start = self.inner.info.first as usize + self.offsets[index];
+        let start = self.inner.info.first + self.offsets[index];
         let data = self.inner.data()?;
         let end = if index == self.offsets.len() - 1 {
             data.len()
         } else {
-            self.inner.info.first as usize + self.offsets[index + 1]
+            self.inner.info.first + self.offsets[index + 1]
         };
 
         Ok(&data[start..end])
@@ -354,5 +354,8 @@ impl ObjectStream {
     /// Returns the number of contained objects
     pub fn n_objects(&self) -> usize {
         self.offsets.len()
+    }
+    pub fn _data(&self) -> Result<&[u8]> {
+        self.inner.data()
     }
 }

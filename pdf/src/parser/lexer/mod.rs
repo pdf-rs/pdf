@@ -160,7 +160,10 @@ impl<'a> Lexer<'a> {
             if self.buf[pos] == b'/' {
                 pos = self.advance_pos(pos)?;
                 while !self.is_whitespace(pos) && !self.is_delimiter(pos) {
-                    pos = self.advance_pos(pos)?;
+                    match self.advance_pos(pos) {
+                        Ok(p) => pos = p,
+                        Err(_) => break,
+                    }
                 }
                 return Ok((self.new_substr(start_pos..pos), pos));
             }
@@ -328,7 +331,7 @@ impl<'a> Lexer<'a> {
 
     /// Returns slice from current position to end.
     #[inline]
-    pub fn get_remaining_slice(&self) -> &[u8] {
+    pub fn get_remaining_slice(&self) -> &'a [u8] {
         &self.buf[self.pos..]
     }
 

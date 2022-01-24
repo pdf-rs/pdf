@@ -124,14 +124,11 @@ pub enum PdfError {
     #[snafu(display("{}", msg))]
     Other { msg: String },
 
-    #[snafu(display("NoneError at {}:{}:{}", file, line, column))]
-    NoneError { file: &'static str, line: u32, column: u32 },
+    #[snafu(display("NoneError at {}:{}:{}: {:?}", file, line, column, context))]
+    NoneError { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)> },
 
-    #[snafu(display("Try at {}:{}:{}", file, line, column))]
-    Try { file: &'static str, line: u32, column: u32, source: Box<PdfError> },
-
-    #[snafu(display("TryContext at {}:{}:{}: {:?}", file, line, column, context))]
-    TryContext { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> },
+    #[snafu(display("Try at {}:{}:{}: {:?}", file, line, column, context))]
+    Try { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> },
 
     #[snafu(display("PostScriptParseError"))]
     PostScriptParse,
@@ -160,8 +157,8 @@ impl PdfError {
     }
     pub fn is_eof(&self) -> bool {
         match self {
-            &PdfError::EOF => true,
-            &PdfError::Try { ref source, .. } | PdfError::TryContext { ref source, .. } => source.is_eof(),
+            PdfError::EOF => true,
+            PdfError::Try { ref source, .. } => source.is_eof(),
             _ => false
         }
     }
@@ -189,32 +186,30 @@ impl From<String> for PdfError {
 
 #[macro_export]
 macro_rules! try_opt {
-    ($e:expr) => (
+    ($e:expr $(,$c:expr)*) => (
         match $e {
             Some(v) => v,
-            None => return Err($crate::PdfError::NoneError {
-                file: file!(),
-                line: line!(),
-                column: column!()
-            })
+            None => {
+                let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
+                return Err($crate::PdfError::NoneError {
+                    file: file!(),
+                    line: line!(),
+                    column: column!(),
+                    context,
+                });
+            }
         }
-    )
+    );
 }
 
 #[macro_export]
 macro_rules! t {
-    ($e:expr) => {
-        match $e {
-            Ok(v) => v,
-            Err(e) => return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), source: e.into() })
-        }
-    };
-    ($e:expr, $($c:expr),*) => {
+    ($e:expr $(,$c:expr)*) => {
         match $e {
             Ok(v) => v,
             Err(e) => {
                 let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
-                return Err($crate::PdfError::TryContext { file: file!(), line: line!(), column: column!(), context, source: e.into() })
+                return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), context, source: e.into() })
             }
         }
     };
