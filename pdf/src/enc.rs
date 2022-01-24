@@ -83,6 +83,7 @@ pub enum StreamFilter {
     JPXDecode, //Jpeg2k
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
+    JBIG2Decode,
     Crypt
 }
 impl StreamFilter {
@@ -97,6 +98,7 @@ impl StreamFilter {
            "JPXDecode" => StreamFilter::JPXDecode,
            "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
+           "JBIG2Decode" => StreamFilter::JBIG2Decode,
            "Crypt" => StreamFilter::Crypt,
            ty => bail!("Unrecognized filter type {:?}", ty),
        } 
@@ -367,6 +369,12 @@ fn decode_jpx(data: &[u8]) -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
+#[cfg(feature="jbig2")]
+fn jbig2_decode(mut data: &[u8]) -> Result<Vec<u8>> {
+    let doc = jbig2dec::Document::from_reader(&mut data).map_err(|e| PdfError::Other { msg: format!("{:?}", e) })?;
+    Ok(doc.images()[0].data().to_owned())
+}
+
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
@@ -380,6 +388,11 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::JPXDecode => decode_jpx(data),
         #[cfg(not(feature="jpeg2k"))]
         StreamFilter::JPXDecode => bail!("disabled StreamFilter::JPXDecode. please enable `jpeg2k` feature."),
+
+        #[cfg(feature="jbig2")]
+        StreamFilter::JBIG2Decode => jbig2_decode(data),
+        #[cfg(not(feature="jbig2"))]
+        StreamFilter::JBIG2Decode => bail!("disabled StreamFilter::JBIG2Decode. please enable `jbig2` feature."),
 
         StreamFilter::Crypt => bail!("unimplemented StreamFilter::Crypt"),
     }
