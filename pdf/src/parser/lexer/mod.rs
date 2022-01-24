@@ -180,7 +180,10 @@ impl<'a> Lexer<'a> {
 
         // Read to past the end of lexeme
         while !self.is_whitespace(pos) && !self.is_delimiter(pos) {
-            pos = self.advance_pos(pos)?;
+            match self.advance_pos(pos) {
+                Ok(p) => pos = p,
+                Err(_) => break,
+            }
         }
         let result = self.new_substr(start_pos..pos);
 
@@ -447,4 +450,5 @@ mod tests {
         assert_eq!(boundary(&*b"01234  7orld", 7, is_whitespace), 7);
         assert_eq!(boundary(&*b"q\n", 1, is_whitespace), 2);
     }
+
 }

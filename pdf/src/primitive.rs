@@ -10,7 +10,7 @@ use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
 use itertools::Itertools;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
     Null,
     Integer (i32),
@@ -109,7 +109,7 @@ impl<'a> fmt::Display for Name<'a> {
 }
 
 /// Primitive Dictionary type.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Dictionary {
     dict: BTreeMap<String, Primitive>
 }
@@ -224,7 +224,7 @@ impl<'a> IntoIterator for &'a Dictionary {
 }
 
 /// Primitive Stream (as opposed to the higher-level `Stream`)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PdfStream {
     pub info: Dictionary,
     pub data: Vec<u8>,
@@ -260,7 +260,7 @@ macro_rules! unexpected_primitive {
 }
 
 /// Primitive String type.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct PdfString {
     pub data: Vec<u8>,
 }

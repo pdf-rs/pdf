@@ -335,4 +335,23 @@ mod tests {
         let array = primitive.into_array().unwrap();
         assert!(array.is_empty());
     }
+
+    #[test]
+    fn compact_array() {
+        use crate::object::NoResolve;
+        use crate::primitive::{Primitive, PdfString};
+        use super::lexer::{Substr, Lexer};
+        use super::*;
+        let mut lx = Lexer::new(b"[(Complete L)20(egend for Physical and P)20(olitical Maps)]TJ");
+        assert_eq!(parse_with_lexer(&mut lx, &NoResolve, ParseFlags::ANY).unwrap(),
+            Primitive::Array(vec![
+                Primitive::String(PdfString::new("Complete L".into())),
+                Primitive::Integer(20),
+                Primitive::String(PdfString::new("egend for Physical and P".into())),
+                Primitive::Integer(20),
+                Primitive::String(PdfString::new("olitical Maps".into()))
+            ])
+        );
+        assert_eq!(lx.next().unwrap().as_str().unwrap(), "TJ");
+    }
 }
