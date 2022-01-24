@@ -164,7 +164,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
         ]
     ), resolve)).transpose()?;
     let decode = dict.get("Decode").map(|p| Object::from_primitive(p.clone(), resolve)).transpose()?;
-    let decode_parms = dict.get("DecodeParms").map(|p| p.clone().into_dictionary(resolve)).transpose()?.unwrap_or_default();
+    let decode_parms = dict.get("DecodeParms").map(|p| p.clone().resolve(resolve)?.into_dictionary()).transpose()?.unwrap_or_default();
     let filter = expand_abbr(
         dict.require("InlineImage", "Filter")?,
         &[

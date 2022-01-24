@@ -279,10 +279,10 @@ mod tests {
         {
             let data = b"<</App<</Name/>>>>";
             let primitive = super::parse(data, &NoResolve, ParseFlags::DICT).unwrap();
-            let dict = primitive.into_dictionary(&NoResolve).unwrap();
+            let dict = primitive.into_dictionary().unwrap();
 
             assert_eq!(dict.len(), 1);
-            let app_dict = dict.get("App").unwrap().clone().into_dictionary(&NoResolve).unwrap();
+            let app_dict = dict.get("App").unwrap().clone().into_dictionary().unwrap();
             assert_eq!(app_dict.len(), 1);
             let name = app_dict.get("Name").unwrap().as_name().unwrap();
             assert_eq!(name, "");
@@ -294,7 +294,7 @@ mod tests {
             let dict = stream.info;
 
             assert_eq!(dict.len(), 2);
-            let app_dict = dict.get("App").unwrap().clone().into_dictionary(&NoResolve).unwrap();
+            let app_dict = dict.get("App").unwrap().clone().into_dictionary().unwrap();
             assert_eq!(app_dict.len(), 1);
             let name = app_dict.get("Name").unwrap().as_name().unwrap();
             assert_eq!(name, "");
@@ -309,7 +309,7 @@ mod tests {
         {
             let data = b"<</ true>>";
             let primitive = super::parse(data, &NoResolve, ParseFlags::DICT).unwrap();
-            let dict = primitive.into_dictionary(&NoResolve).unwrap();
+            let dict = primitive.into_dictionary().unwrap();
 
             assert_eq!(dict.len(), 1);
             assert_eq!(dict.get("").unwrap().as_bool().unwrap(), true);
@@ -321,7 +321,7 @@ mod tests {
             let dict = stream.info;
 
             assert_eq!(dict.len(), 2);
-            assert_eq!(dict.get("").unwrap().as_bool().unwrap(), true);
+            assert!(dict.get("").unwrap().as_bool().unwrap());
         }
     }
 
@@ -332,7 +332,7 @@ mod tests {
 
         let data = b"[]";
         let primitive = super::parse(data, &NoResolve, ParseFlags::ARRAY).unwrap();
-        let array = primitive.into_array(&NoResolve).unwrap();
+        let array = primitive.into_array().unwrap();
         assert!(array.is_empty());
     }
 }

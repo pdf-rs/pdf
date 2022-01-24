@@ -380,6 +380,13 @@ impl Primitive {
             Primitive::Name (..) => "Name",
         }
     }
+    /// resolve the primitive if it is a refernce, otherwise do nothing
+    pub fn resolve(self, r: &impl Resolve) -> Result<Primitive> {
+        match self {
+            Primitive::Reference(id) => r.resolve(id),
+            _ => Ok(self)
+        }
+    }
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
@@ -418,7 +425,6 @@ impl Primitive {
             p => unexpected_primitive!(String, p.get_debug_name())
         }
     }
-    /// Does not accept a Reference
     pub fn as_array(&self) -> Result<&[Primitive]> {
         match self {
             Primitive::Array(ref v) => Ok(v),
@@ -431,29 +437,24 @@ impl Primitive {
             p => unexpected_primitive!(Reference, p.get_debug_name())
         }
     }
-    /// Does accept a Reference
-    pub fn into_array(self, r: &impl Resolve) -> Result<Vec<Primitive>> {
+    pub fn into_array(self) -> Result<Vec<Primitive>> {
         match self {
             Primitive::Array(v) => Ok(v),
-            Primitive::Reference(id) => r.resolve(id)?.into_array(r),
             p => unexpected_primitive!(Array, p.get_debug_name())
         }
     }
-    pub fn into_dictionary(self, r: &impl Resolve) -> Result<Dictionary> {
+    pub fn into_dictionary(self) -> Result<Dictionary> {
         match self {
             Primitive::Dictionary(dict) => Ok(dict),
-            Primitive::Reference(id) => r.resolve(id)?.into_dictionary(r),
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
     pub fn into_name(self) -> Result<String> {
         match self {
             Primitive::Name(name) => Ok(name),
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
-    /// Doesn't accept a Reference
     pub fn into_string(self) -> Result<PdfString> {
         match self {
             Primitive::String(data) => Ok(data),
@@ -461,18 +462,16 @@ impl Primitive {
         }
     }
     pub fn to_string_lossy(&self) -> Result<String> {
-        let s  = self.as_string()?;
+        let s = self.as_string()?;
         s.to_string_lossy()
     }
     pub fn to_string(&self) -> Result<String> {
-        let s  = self.as_string()?;
+        let s = self.as_string()?;
         s.to_string()
     }
-    /// Doesn't accept a Reference
     pub fn into_stream(self, _r: &impl Resolve) -> Result<PdfStream> {
         match self {
             Primitive::Stream (s) => Ok(s),
-            // Primitive::Reference (id) => r.resolve(id)?.to_stream(r),
             p => unexpected_primitive!(Stream, p.get_debug_name())
         }
     }

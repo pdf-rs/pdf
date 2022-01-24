@@ -54,7 +54,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
     let xref_stream = t!(parse_indirect_stream(lexer, resolve, None)).1;
     let trailer = if t!(lexer.next()) == "trailer" {
         let trailer = t!(parse_with_lexer(lexer, resolve, ParseFlags::DICT));
-        t!(trailer.into_dictionary(resolve))
+        t!(trailer.into_dictionary())
     } else {
         xref_stream.info.clone()
     };
@@ -111,7 +111,7 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
 
     t!(lexer.next_expect("trailer"));
     let trailer = t!(parse_with_lexer(lexer, resolve, ParseFlags::DICT));
-    let trailer = t!(trailer.into_dictionary(resolve));
+    let trailer = t!(trailer.into_dictionary());
 
     Ok((sections, trailer))
 }

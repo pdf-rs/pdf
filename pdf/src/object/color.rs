@@ -45,6 +45,7 @@ impl Object for ColorSpace {
 }
 impl ColorSpace {
     fn from_primitive_depth(p: Primitive, resolve: &impl Resolve, depth: usize) -> Result<ColorSpace> {
+        let p = p.resolve(resolve)?;
         if let Ok(name) = p.as_name() {
             let cs = match name {
                 "DeviceGray" => ColorSpace::DeviceGray,
@@ -55,7 +56,7 @@ impl ColorSpace {
             };
             return Ok(cs);
         }
-        let arr = t!(p.into_array(resolve));
+        let arr = t!(p.into_array());
         let typ = t!(t!(get_index(&arr, 0)).as_name());
         
         if depth == 0 {

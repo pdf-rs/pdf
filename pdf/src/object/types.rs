@@ -17,7 +17,7 @@ pub enum PagesNode {
 
 impl Object for PagesNode {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PagesNode> {
-        let mut dict = p.into_dictionary(resolve)?;
+        let mut dict = p.resolve(resolve)?.into_dictionary()?;
         match dict.require("PagesNode", "Type")?.as_name()? {
             "Page" => Ok(PagesNode::Leaf(t!(Page::from_dict(dict, resolve)))),
             "Pages" => Ok(PagesNode::Tree(t!(PageTree::from_dict(dict, resolve)))),
@@ -713,12 +713,12 @@ impl<T: Object> NameTree<T> {
 
 impl<T: Object> Object for NameTree<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut dict = t!(p.into_dictionary(resolve));
+        let mut dict = t!(p.resolve(resolve)?.into_dictionary());
         
         // Quite long function..=
         let limits = match dict.remove("Limits") {
             Some(limits) => {
-                let limits = limits.into_array(resolve)?;
+                let limits = limits.resolve(resolve)?.into_array()?;
                 if limits.len() != 2 {
                     bail!("Error reading NameTree: 'Limits' is not of length 2");
                 }
@@ -735,7 +735,7 @@ impl<T: Object> Object for NameTree<T> {
         // If no `kids`, try `names`. Else there is an error.
         Ok(match (kids, names) {
             (Some(kids), _) => {
-                let kids = t!(kids.into_array(resolve)?.iter().map(|kid|
+                let kids = t!(kids.resolve(resolve)?.into_array()?.iter().map(|kid|
                     Ref::<NameTree<T>>::from_primitive(kid.clone(), resolve)
                 ).collect::<Result<Vec<_>>>());
                 NameTree {
@@ -744,7 +744,7 @@ impl<T: Object> Object for NameTree<T> {
                 }
             }
             (None, Some(names)) => {
-                let names = names.into_array(resolve)?;
+                let names = names.resolve(resolve)?.into_array()?;
                 let mut new_names = Vec::new();
                 for pair in names.chunks(2) {
                     let name = pair[0].clone().into_string()?;
@@ -1037,7 +1037,7 @@ pub struct Rect {
 }
 impl Object for Rect {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        let arr = p.into_array(r)?;
+        let arr = p.resolve(r)?.into_array()?;
         if arr.len() != 4 {
             bail!("len != 4");
         }

@@ -58,7 +58,7 @@ pub enum FontData {
 
 impl Object for Font {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let mut dict = p.into_dictionary(resolve)?;
+        let mut dict = p.resolve(resolve)?.into_dictionary()?;
 
         let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
 

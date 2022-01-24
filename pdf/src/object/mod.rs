@@ -425,7 +425,7 @@ impl<T: Object> Object for Vec<T> {
         Ok(
         match p {
             Primitive::Array(_) => {
-                p.into_array(r)?
+                p.resolve(r)?.into_array()?
                     .into_iter()
                     .map(|p| T::from_primitive(p, r))
                     .collect::<Result<Vec<T>>>()?
@@ -592,7 +592,7 @@ impl Trace for () {}
 
 impl<T, U> Object for (T, U) where T: Object, U: Object {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        let arr = p.into_array(resolve)?;
+        let arr = p.resolve(resolve)?.into_array()?;
         if arr.len() != 2 {
             bail!("expected array of length 2 (found {})", arr.len());
         }
