@@ -361,6 +361,7 @@ impl<'a> Lexer<'a> {
 
 
 /// A slice from some original string - a lexeme.
+#[derive(Debug)]
 pub struct Substr<'a> {
     slice: &'a [u8],
 }

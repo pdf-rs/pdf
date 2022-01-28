@@ -353,5 +353,6 @@ mod tests {
             ])
         );
         assert_eq!(lx.next().unwrap().as_str().unwrap(), "TJ");
+        assert!(lx.next().unwrap_err().is_eof());
     }
 }

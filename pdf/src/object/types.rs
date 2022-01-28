@@ -335,7 +335,7 @@ pub struct Resources {
     pub fonts: HashMap<String, Ref<Font>>,
 
     #[pdf(key="Properties")]
-    pub properties: HashMap<String, RcRef<Dictionary>>,
+    pub properties: HashMap<String, MaybeRef<Dictionary>>,
 }
 impl Resources {
     pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {

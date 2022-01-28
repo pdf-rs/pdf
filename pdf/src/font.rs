@@ -429,6 +429,9 @@ impl ToUnicodeMap {
     pub fn get(&self, gid: u16) -> Option<&str> {
         self.inner.get(&gid).map(|s| s.as_str())
     }
+    pub fn insert(&mut self, gid: u16, unicode: String) {
+        self.inner.insert(gid, unicode);
+    }
 }
 
 /// helper function to decode UTF-16-BE data
