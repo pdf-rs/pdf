@@ -80,7 +80,13 @@ pub trait Backend: Sized {
             }
         };
         trace!("READ XREF AND TABLE");
+        let mut seen = vec![];
         while let Some(prev_xref_offset) = prev_trailer {
+            if seen.contains(&prev_xref_offset) {
+                bail!("xref offsets loop");
+            }
+            seen.push(prev_xref_offset);
+
             let pos = t!(start_offset.checked_add(prev_xref_offset as usize).ok_or(PdfError::Invalid));
             let mut lexer = Lexer::new(t!(self.read(pos..)));
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
@@ -93,9 +99,6 @@ pub trait Backend: Sized {
                 match trailer.get("Prev") {
                     Some(p) => {
                         let prev = t!(p.as_integer());
-                        if prev >= prev_xref_offset {
-                            bail!("previous xref offset not before current one");
-                        }
                         Some(prev)
                     }
                     None => None
