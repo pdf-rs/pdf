@@ -23,11 +23,12 @@ pub struct Content {
 impl Content {
     pub fn operations(&self, resolve: &impl Resolve) -> Result<&[Op]> {
         self.operations.get_or_try_init(|| -> Result<Vec<Op>> {
+            let mut data = vec![];
             let mut ops = OpBuilder::new();
             for part in self.parts.iter() {
-                let data = t!(part.data());
-                ops.parse(data, resolve)?;
+                data.extend_from_slice(t!(part.data()));
             }
+            ops.parse(&data, resolve)?;
             Ok(ops.ops)
         }).map(|v| v.as_slice())
     }
@@ -259,7 +260,7 @@ impl OpBuilder {
                     lexer.set_pos(backup_pos);
                     let op = t!(lexer.next());
                     let operator = t!(op.as_str());
-                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), op.as_str());
+                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), operator);
                 }
             }
             match lexer.get_pos().cmp(&data.len()) {
