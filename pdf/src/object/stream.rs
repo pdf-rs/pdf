@@ -89,6 +89,10 @@ impl<I: Object + fmt::Debug> Stream<I> {
         self.info.filters.push(StreamFilter::ASCIIHexDecode);
         self
     }
+
+    pub fn raw_data(&self) -> &[u8] {
+        &self.raw_data
+    }
 }
 
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
