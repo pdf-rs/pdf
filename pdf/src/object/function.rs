@@ -230,8 +230,12 @@ impl SampledFunction {
                     Interpolation::Linear => {
                         let (i, _, s) = self.input[0].map(x[0]);
                         let idx = i * n_out;
-                        for ((o, &a), &b) in out.iter_mut().zip(&self.data[idx..]).zip(&self.data[idx + n_out..]) {
-                            *o = a as f32 * (s - 1.) + b as f32 * s;
+
+                        for (o, &a) in out.iter_mut().zip(&self.data[idx..]) {
+                            *o = a as f32 * (1. - s);
+                        }
+                        for (o, &b) in out.iter_mut().zip(&self.data[idx + n_out..]) {
+                            *o += b as f32 * s;
                         }
                     }
                     _ => unimplemented!()
