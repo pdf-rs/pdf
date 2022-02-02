@@ -1,6 +1,7 @@
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
+use itertools::izip;
 
 #[derive(Object, Debug, Clone)]
 struct RawFunction {
@@ -12,6 +13,21 @@ struct RawFunction {
 
     #[pdf(key="Range")]
     range: Option<Vec<f32>>,
+
+    #[pdf(key="Size")]
+    size: Option<Vec<u32>>,
+
+    #[pdf(key="BitsPerSample")]
+    bits_per_sample: u32,
+
+    #[pdf(key="Order", default="1")]
+    order: u32,
+
+    #[pdf(key="Encode")]
+    encode: Option<Vec<f32>>,
+
+    #[pdf(key="Decode")]
+    decode: Option<Vec<f32>>,
 
     #[pdf(other)]
     other: Dictionary
@@ -59,12 +75,14 @@ impl Function {
     pub fn input_dim(&self) -> usize {
         match *self {
             Function::PostScript { ref domain, .. } => domain.len() / 2,
+            Function::Sampled(ref f) => f.input.len(),
             _ => panic!()
         }
     }
     pub fn output_dim(&self) -> usize {
         match *self {
             Function::PostScript { ref range, .. } => range.len() / 2,
+            Function::Sampled(ref f) => f.output.len(),
             _ => panic!()
         }
     }
@@ -122,17 +140,33 @@ impl Object for Function {
                     },
                     0 => {
                         let info = stream.info.info;
+                        let order = match info.order {
+                            1 => Interpolation::Linear,
+                            3 => Interpolation::Cubic,
+                            n => bail!("Invalid interpolation order {}", n),
+                        };
+
+                        let size = try_opt!(info.size);
+                        let range = try_opt!(info.range);
+                        let encode = info.encode.unwrap_or_else(|| size.iter().flat_map(|&n| [0.0, (n-1) as f32]).collect());
+                        let decode = info.decode.unwrap_or_else(|| range.clone());
+
                         Ok(Function::Sampled(SampledFunction {
-                            input: info.domain.chunks_exact(2).map(|c| {
+                            input: izip!(info.domain.chunks_exact(2), encode.chunks_exact(2), size.iter()).map(|(c, e, &s)| {
                                 SampledFunctionInput {
                                     domain: (c[0], c[1]),
-                                    encode_offset: 0.0,
-                                    encode_scale: 1.0,
+                                    encode_offset: e[0],
+                                    encode_scale: e[1],
+                                    size: s as usize,
                                 }
                             }).collect(),
+                            output: decode.chunks_exact(2).map(|c| SampledFunctionOutput { 
+                                output_offset: c[0],
+                                output_scale: c[1] - c[0],
+                            }).collect(),
                             data,
-                            order: Interpolation::Linear,
-                            range: try_opt!(info.range),
+                            order,
+                            range,
                         }))
                     }
                     ref p => bail!("found a function stream with type {:?}", p)
@@ -150,11 +184,13 @@ struct SampledFunctionInput {
     domain: (f32, f32),
     encode_offset: f32,
     encode_scale: f32,
+    size: usize,
 }
 impl SampledFunctionInput {
-    fn map(&self, x: f32) -> f32 {
+    fn map(&self, x: f32) -> (usize, usize, f32) {
         let x = x.clamp(self.domain.0, self.domain.1);
-        x.mul_add(self.encode_scale, self.encode_offset)
+        let y = x.mul_add(self.encode_scale, self.encode_offset);
+        (y.floor() as usize, self.size, y.fract())
     }
 }
 
@@ -174,13 +210,13 @@ enum Interpolation {
 #[derive(Debug, Clone)]
 pub struct SampledFunction {
     input: Vec<SampledFunctionInput>,
+    output: Vec<SampledFunctionOutput>,
     data: Vec<u8>,
     order: Interpolation,
     range: Vec<f32>,
 }
 impl SampledFunction {
     fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
-        let _idx: Vec<f32> = x.iter().zip(self.input.iter()).map(|(&x, dim)| dim.map(x)).collect();
         if x.len() != self.input.len() {
             bail!("input dimension mismatch {} != {}", x.len(), self.input.len());
         }
@@ -192,21 +228,77 @@ impl SampledFunction {
             1 => {
                 match self.order {
                     Interpolation::Linear => {
-                        let y = self.input[0].map(x[0]);
-                        let idx_base = (y.floor() as usize) * n_out;
-                        let s = y.fract();
-                        for ((o, &a), &b) in out.iter_mut().zip(&self.data[idx_base..]).zip(&self.data[idx_base + n_out..]) {
+                        let (i, _, s) = self.input[0].map(x[0]);
+                        let idx = i * n_out;
+                        for ((o, &a), &b) in out.iter_mut().zip(&self.data[idx..]).zip(&self.data[idx + n_out..]) {
                             *o = a as f32 * (s - 1.) + b as f32 * s;
                         }
                     }
                     _ => unimplemented!()
                 }
             }
-            _ => unimplemented!()
+            2 => match self.order {
+                Interpolation::Linear => {
+                    let (i0, s0, f0) = self.input[0].map(x[0]);
+                    let (i1, s1, f1) = self.input[1].map(x[1]);
+                    let (j0, j1) = (i0+1, i1+1);
+                    let (g0, g1) = (1. - f0, 1. - f1);
+                    
+                    out.fill(0.0);
+                    let mut add = |i0, i1, f| {
+                        let idx = (i0 + s0 * i1) * n_out;
+                        
+                        if let Some(part) = self.data.get(idx .. idx+n_out) {
+                            for (o, &b) in out.iter_mut().zip(part) {
+                                *o += f * b as f32;
+                            }
+                        }
+                    };
+
+                    add(i0, i1, g0 * g1);
+                    add(j0, i1, f0 * g1);
+                    add(i0, j1, g0 * f1);
+                    add(j0, j1, f0 * f1);
+                }
+                _ => unimplemented!()
+            }
+            3 => match self.order {
+                Interpolation::Linear => {
+                    let (i0, s0, f0) = self.input[0].map(x[0]);
+                    let (i1, s1, f1) = self.input[1].map(x[1]);
+                    let (i2, s2, f2) = self.input[2].map(x[2]);
+                    let (j0, j1, j2) = (i0+1, i1+1, i2+1);
+                    let (g0, g1, g2) = (1. - f0, 1. - f1, 1. - f2);
+                    
+                    out.fill(0.0);
+                    let mut add = |i0, i1, i2, f| {
+                        let idx = (i0 + s0 * (i1 + s1 * i2)) * n_out;
+                        
+                        if let Some(part) = self.data.get(idx .. idx+n_out) {
+                            for (o, &b) in out.iter_mut().zip(part) {
+                                *o += f * b as f32;
+                            }
+                        }
+                    };
+
+                    add(i0, i1, i2, g0 * g1 * g2);
+                    add(j0, i1, i2, f0 * g1 * g2);
+                    add(i0, j1, i2, g0 * f1 * g2);
+                    add(j0, j1, i2, f0 * f1 * g2);
+
+                    add(i0, i1, j2, g0 * g1 * f2);
+                    add(j0, i1, j2, f0 * g1 * f2);
+                    add(i0, j1, j2, g0 * f1 * f2);
+                    add(j0, j1, j2, f0 * f1 * f2);
+                }
+                _ => unimplemented!()
+            }
+            n => bail!("Order {}", n)
         }
         Ok(())
     }
 }
+
 
 #[derive(Debug, Clone)]
 pub struct InterpolatedFunctionDim {
