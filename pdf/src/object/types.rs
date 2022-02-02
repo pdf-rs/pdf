@@ -254,7 +254,10 @@ pub struct Page {
     pub trim_box:   Option<Rect>,
     
     #[pdf(key="Contents")]
-    pub contents:   Option<Content>
+    pub contents:   Option<Content>,
+
+    #[pdf(key="Rotate", default="0")]
+    pub rotate: i32,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -277,7 +280,8 @@ impl Page {
             crop_box:   None,
             trim_box:   None,
             resources:  None,
-            contents:   None
+            contents:   None,
+            rotate:     0,
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
@@ -326,7 +330,9 @@ pub struct Resources {
     #[pdf(key="ColorSpace")]
     pub color_spaces: HashMap<String, ColorSpace>,
 
-    // pattern: Option<Pattern>,
+    #[pdf(key="Pattern")]
+    pub pattern: HashMap<String, RcRef<Pattern>>,
+
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
     pub xobjects: HashMap<String, Ref<XObject>>,
@@ -341,6 +347,14 @@ impl Resources {
     pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {
         self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
+}
+
+
+
+#[derive(Object, ObjectWrite, Debug)]
+pub struct Pattern {
+    #[pdf(other)]
+    _other: Dictionary
 }
 
 
@@ -891,7 +905,7 @@ pub struct NameDictionary {
     pub pages: Option<NameTree<Primitive>>,
     
     #[pdf(key="Dests")]
-    pub dests: Option<NameTree<Dest>>,
+    pub dests: Option<NameTree<Option<Dest>>>,
     
     #[pdf(key="AP")]
     pub ap: Option<NameTree<Primitive>>,
@@ -1002,7 +1016,7 @@ pub struct OutlineItem {
     pub dest: Option<PdfString>,
 
     #[pdf(key="A")]
-    pub action: Option<Dictionary>,
+    pub action: Option<Action>,
 
     #[pdf(key="SE")]
     pub se: Option<Dictionary>,
@@ -1012,6 +1026,37 @@ pub struct OutlineItem {
 
     #[pdf(key="F")]
     pub flags: Option<i32>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Action {
+    Goto(Dest),
+    Other(Dictionary)
+}
+impl Object for Action {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let mut d = t!(p.resolve(resolve)?.into_dictionary());
+        let s = try_opt!(d.get("S")).as_name()?;
+        match s {
+            "GoTo" => {
+                let dest = t!(Dest::from_primitive(try_opt!(d.remove("D")), resolve));
+                Ok(Action::Goto(dest))
+            }
+            _ => Ok(Action::Other(d))
+        }
+    }
+}
+impl ObjectWrite for Action {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            Action::Goto(dest) => {
+                let mut dict = Dictionary::new();
+                dict.insert("D", dest.to_primitive(update)?);
+                Ok(Primitive::Dictionary(dict))
+            }
+            Action::Other(dict) => Ok(Primitive::Dictionary(dict.clone()))
+        }
+    }
 }
 
 #[derive(Object, ObjectWrite, Debug)]
