@@ -36,7 +36,7 @@ aes = "0.7.5"
 block-modes = "0.8.1"
 stringprep = "0.1.2"
 sha2 = "0.9.2"
-fax = "0.1.0"
+fax = "0.1.1"
 euclid = { version = "0.22.6", optional = true }
 jp2k = { git = "https://github.com/s3bk/jp2k", optional = true }
 jbig2dec = { version = "*", optional = true }

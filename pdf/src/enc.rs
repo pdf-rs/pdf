@@ -345,7 +345,7 @@ fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
                 Color::Black => 0,
                 Color::White => 255
             }));
-        });
+        }).ok_or(PdfError::Other { msg: "faxdecode failed".into() })?;
         if buf.len() != params.columns as usize * params.rows as usize {
             bail!("decoded length does not match (expected {}∙{}, got {})", params.rows, params.columns, buf.len());
         }
