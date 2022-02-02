@@ -17,7 +17,7 @@ impl fmt::Display for Indent {
     }
 }
 
-fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&str) -> usize, depth: usize) {
+fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl Fn(&str) -> usize, page_map: &impl Fn(PlainRef) -> usize, depth: usize) {
     let indent = Indent(depth);
     loop {
         if let Some(ref title) = node.title {
@@ -25,12 +25,24 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, map: &impl Fn(&s
         }
         if let Some(ref dest) = node.dest {
             let name = dest.to_string_lossy().unwrap();
-            let page_nr = map(&name);
+            let page_nr = name_map(&name);
             println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
+        }
+        if let Some(ref a) = node.action {
+            match a {
+                Action::Goto(dest) => {
+                    let page_nr = page_map(dest.page.get_inner());
+                    println!("{}action -> page nr. {:?}", indent, page_nr);
+                }
+                _ => {}
+            }
+        }
+        if let Some(ref a) = node.se {
+            println!("{} -> {:?}", indent, a);
         }
         if let Some(entry_ref) = node.first {
             let entry = r.get(entry_ref).unwrap();
-            walk_outline(r, entry, map, depth + 1);
+            walk_outline(r, entry, name_map, page_map, depth + 1);
         }
         if let Some(entry_ref) = node.next {
             node = r.get(entry_ref).unwrap();
@@ -51,9 +63,11 @@ fn main() {
     let mut pages_map: HashMap<String, PlainRef> = HashMap::new();
 
     let mut count = 0;
-    let mut dests_cb = |key: &PdfString, val: &Dest| {
+    let mut dests_cb = |key: &PdfString, val: &Option<Dest>| {
         //println!("{:?} {:?}", key, val);
-        pages_map.insert(key.to_string_lossy().unwrap(), val.page.get_inner());
+        if let Some(dest) = val {
+            pages_map.insert(key.to_string_lossy().unwrap(), dest.page.get_inner());
+        }
 
         count += 1;
     };
@@ -85,11 +99,14 @@ fn main() {
         let page = pages_map[name];
         pages[&page]
     };
+    let page_nr = |r: PlainRef| -> usize {
+        pages[&r]
+    };
 
     if let Some(ref outlines) = catalog.outlines {
         if let Some(entry_ref) = outlines.first {
             let entry = file.get(entry_ref).unwrap();
-            walk_outline(&file, entry, &get_page_nr, 0);
+            walk_outline(&file, entry, &get_page_nr, &page_nr, 0);
         }
     }
 

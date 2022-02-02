@@ -9,6 +9,7 @@ pub struct PageBuilder {
     pub crop_box: Option<Rect>,
     pub trim_box: Option<Rect>,
     pub resources: Option<MaybeRef<Resources>>,
+    pub rotate: i32,
 }
 impl PageBuilder {
     pub fn from_content(content: Content) -> PageBuilder {
@@ -23,7 +24,8 @@ impl PageBuilder {
             media_box: Some(page.media_box()?),
             crop_box: Some(page.crop_box()?),
             trim_box: page.trim_box,
-            resources: Some(page.resources()?.clone())
+            resources: Some(page.resources()?.clone()),
+            rotate: page.rotate,
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
@@ -73,6 +75,7 @@ impl CatalogBuilder {
                 crop_box: page.crop_box,
                 trim_box: page.trim_box,
                 resources: page.resources,
+                rotate: page.rotate,
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }

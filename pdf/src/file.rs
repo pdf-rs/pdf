@@ -101,7 +101,8 @@ impl<B: Backend> Resolve for Storage<B> {
 
         self.cache.borrow_mut().insert(key, None);
 
-        let obj = t!(T::from_primitive(primitive, self));
+        let name = std::any::type_name::<T>();
+        let obj = t!(T::from_primitive(primitive, self), name);
         let rc = Rc::new(obj);
         self.cache.borrow_mut().insert(key, Some(Any::new(rc.clone())));
         
