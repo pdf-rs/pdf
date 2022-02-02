@@ -161,8 +161,8 @@ impl Object for Function {
                                 }
                             }).collect(),
                             output: decode.chunks_exact(2).map(|c| SampledFunctionOutput { 
-                                output_offset: c[0],
-                                output_scale: c[1] - c[0],
+                                offset: c[0],
+                                scale: (c[1] - c[0]) / 255.,
                             }).collect(),
                             data,
                             order,
@@ -196,8 +196,13 @@ impl SampledFunctionInput {
 
 #[derive(Debug, Clone)]
 struct SampledFunctionOutput {
-    output_offset: f32,
-    output_scale: f32
+    offset: f32,
+    scale: f32
+}
+impl SampledFunctionOutput {
+    fn map(&self, x: f32) -> f32 {
+        x.mul_add(self.scale, self.offset)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +303,9 @@ impl SampledFunction {
                 _ => unimplemented!()
             }
             n => bail!("Order {}", n)
+        }
+        for (o, y) in self.output.iter().zip(out.iter_mut()) {
+            *y = o.map(*y);
         }
         Ok(())
     }
