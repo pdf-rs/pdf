@@ -15,22 +15,17 @@ use crate::enc::StreamFilter;
 pub struct Content {
     /// The raw content stream parts. usually one, but could be any number.
     pub parts: Vec<Stream<()>>,
-
-    /// The parsed operations. You probably want to use these.
-    operations: OnceCell<Vec<Op>>,
 }
 
 impl Content {
-    pub fn operations(&self, resolve: &impl Resolve) -> Result<&[Op]> {
-        self.operations.get_or_try_init(|| -> Result<Vec<Op>> {
-            let mut data = vec![];
-            let mut ops = OpBuilder::new();
-            for part in self.parts.iter() {
-                data.extend_from_slice(t!(part.data()));
-            }
-            ops.parse(&data, resolve)?;
-            Ok(ops.ops)
-        }).map(|v| v.as_slice())
+    pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
+        let mut data = vec![];
+        let mut ops = OpBuilder::new();
+        for part in self.parts.iter() {
+            data.extend_from_slice(&t!(part.decode()));
+        }
+        ops.parse(&data, resolve)?;
+        Ok(ops.ops)
     }
 }
 
@@ -166,8 +161,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
     ), resolve)).transpose()?;
     let decode = dict.get("Decode").map(|p| Object::from_primitive(p.clone(), resolve)).transpose()?;
     let decode_parms = dict.get("DecodeParms").map(|p| p.clone().resolve(resolve)?.into_dictionary()).transpose()?.unwrap_or_default();
-    let filter = expand_abbr(
-        dict.require("InlineImage", "Filter")?,
+    let filter = dict.remove("Filter").map(|p| expand_abbr(p,
         &[
             ("AHx", "ASCIIHexDecode"),
             ("A85", "ASCII85Decode"),
@@ -177,12 +171,13 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
             ("CCF", "CCITTFaxDecode"),
             ("DCT", "DCTDecode"),
         ]
-    );
+    ));
     let filters = match filter {
-        Primitive::Array(parts) => parts.into_iter()
+        Some(Primitive::Array(parts)) => parts.into_iter()
             .map(|p| p.as_name().and_then(|kind| StreamFilter::from_kind_and_params(kind, decode_parms.clone(), resolve)))
             .collect::<Result<_>>()?,
-        Primitive::Name(kind) => vec![StreamFilter::from_kind_and_params(&kind, decode_parms, resolve)?],
+        Some(Primitive::Name(kind)) => vec![StreamFilter::from_kind_and_params(&kind, decode_parms, resolve)?],
+        None => vec![],
         _ => bail!("invalid filter")
     };
     
@@ -511,18 +506,23 @@ impl Object for Content {
             }
         }
 
-        Ok(Content { operations: OnceCell::new(), parts })
+        Ok(Content { parts })
     }
 }
 
 #[derive(Debug)]
 pub struct FormXObject {
-    pub operations: Vec<Op>,
     pub stream: Stream<FormDict>,
 }
 impl FormXObject {
     pub fn dict(&self) -> &FormDict {
         &self.stream.info.info
+    }
+    pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
+        let mut ops = OpBuilder::new();
+        let data = self.stream.decode()?;
+        ops.parse(&data, resolve)?;
+        Ok(ops.ops)
     }
 }
 impl Object for FormXObject {
@@ -533,7 +533,6 @@ impl Object for FormXObject {
         ops.parse(stream.data()?, resolve)?;
         Ok(FormXObject {
             stream,
-            operations: ops.ops
         })
     }
 }
@@ -727,7 +726,6 @@ impl Content {
     pub fn from_ops(operations: Vec<Op>) -> Self {
         let data = serialize_ops(&operations).unwrap();
         Content {
-            operations: OnceCell::from(operations),
             parts: vec![Stream::new((), data)]
         }
     }
