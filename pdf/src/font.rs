@@ -6,6 +6,7 @@ use crate::encoding::Encoding;
 use std::collections::HashMap;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
+use std::borrow::Cow;
 
 #[allow(non_upper_case_globals, dead_code)]
 mod flags {
@@ -178,7 +179,7 @@ impl Widths {
     }
 }
 impl Font {
-    pub fn embedded_data(&self) -> Option<Result<&[u8]>> {
+    pub fn embedded_data(&self) -> Option<Result<Cow<[u8]>>> {
         match self.data.as_ref().ok()? {
             FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data()),
             FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(),
@@ -375,13 +376,13 @@ pub struct FontDescriptor {
     pub char_set: Option<PdfString>
 }
 impl FontDescriptor {
-    pub fn data(&self) -> Option<Result<&[u8]>> {
+    pub fn data(&self) -> Option<Result<Cow<[u8]>>> {
         if let Some(ref s) = self.font_file {
-            Some(s.data())
+            Some(s.decode())
         } else if let Some(ref s) = self.font_file2 {
-            Some(s.data())
+            Some(s.decode())
         } else if let Some(ref s) = self.font_file3 {
-            Some(s.data())
+            Some(s.decode())
         } else {
             None
         }
