@@ -18,8 +18,8 @@ fn main() -> Result<(), PdfError> {
 
     let file = File::<Vec<u8>>::open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
-        let title = info.get("Title").and_then(|p| Some(p.to_string_lossy().unwrap()));
-        let author = info.get("Author").and_then(|p| Some(p.to_string_lossy().unwrap()));
+        let title = info.get("Title").and_then(|p| p.to_string_lossy().ok());
+        let author = info.get("Author").and_then(|p| p.to_string_lossy().ok());
 
         let descr = match (title, author) {
             (Some(title), None) => title,
