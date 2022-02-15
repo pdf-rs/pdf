@@ -366,6 +366,9 @@ pub struct Substr<'a> {
     slice: &'a [u8],
 }
 impl<'a> Substr<'a> {
+    pub fn new<T: AsRef<[u8]> + ?Sized>(data: &'a T) -> Self {
+        Substr { slice: data.as_ref() }
+    }
     // to: &S -> U. Possibly expensive conversion.
     // as: &S -> &U. Cheap borrow conversion
     // into: S -> U. Cheap ownership transfer conversion.
@@ -393,10 +396,24 @@ impl<'a> Substr<'a> {
             }
             slice = &slice[1..];
         }
-        slice.iter().all(|b| (b'0'..=b'9').contains(b))
+        is_int(slice)
     }
     pub fn is_real_number(&self) -> bool {
-        self.to::<f32>().is_ok()   
+        if self.slice.len() == 0 {
+            return false;
+        }
+        let mut slice = self.slice;
+        if slice[0] == b'-' {
+            if slice.len() < 2 {
+                return false;
+            }
+            slice = &slice[1..];
+        }
+        if let Some(i) = slice.iter().position(|&b| b == b'.') {
+            is_int(&slice[..i]) && is_int(&slice[i+1..])
+        } else {
+            is_int(slice)
+        }
     }
 
     pub fn as_slice(&self) -> &'a [u8] {
@@ -415,6 +432,10 @@ impl<'a> Substr<'a> {
     }
 }
 
+#[inline]
+fn is_int(b: &[u8]) -> bool {
+    b.iter().all(|&b| matches!(b, b'0'..=b'9'))
+}
 impl<'a> Deref for Substr<'a> {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
@@ -452,4 +473,14 @@ mod tests {
         assert_eq!(boundary(&*b"q\n", 1, is_whitespace), 2);
     }
 
+    #[test]
+    fn test_substr() {
+        assert!(Substr::new("123").is_real_number());
+        assert!(Substr::new("123.").is_real_number());
+        assert!(Substr::new("123.45").is_real_number());
+        assert!(Substr::new(".45").is_real_number());
+        assert!(Substr::new("-.45").is_real_number());
+        assert!(!Substr::new("123.45").is_integer());
+        assert!(Substr::new("123").is_integer());
+    }
 }
