@@ -17,6 +17,7 @@ threads = ["jpeg-decoder/default"]
 standard-fonts = []
 jpeg2k = ["jp2k"]
 jbig2 = ["jbig2dec"]
+sync = []
 
 [dependencies]
 pdf_derive = { version = "0.1.22", path = "../pdf_derive" }

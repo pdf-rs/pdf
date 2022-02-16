@@ -1,5 +1,6 @@
 use std::any::TypeId;
 use std::rc::Rc;
+use std::sync::Arc;
 use crate::object::{Object};
 use crate::error::{Result, PdfError};
 
@@ -31,7 +32,7 @@ impl Any {
                 Ok(Rc::from_raw(raw as *const T))
             }
         } else {
-            Err(type_mismatch::<T>(&self))
+            Err(type_mismatch::<T>(self.0.type_name()))
         }
     }
     pub fn new<T>(rc: Rc<T>) -> Any
@@ -43,7 +44,42 @@ impl Any {
         self.0.type_name()
     }
 }
+impl<T: AnyObject + 'static> From<Rc<T>> for Any {
+    fn from(t: Rc<T>) -> Self {
+        Any::new(t)
+    }
+}
 
-fn type_mismatch<T: AnyObject + 'static>(any: &Any) -> PdfError {
-    PdfError::Other { msg: format!("expected {}, found {}", std::any::type_name::<T>(), any.type_name()) }
+#[derive(Clone)]
+pub struct AnySync(Arc<dyn AnyObject+Sync+Send>);
+
+impl AnySync {
+    pub fn downcast<T>(self) -> Result<Arc<T>> 
+        where T: AnyObject + Sync + Send + 'static
+    {
+        if TypeId::of::<T>() == self.0.type_id() {
+            unsafe {
+                let raw: *const (dyn AnyObject+Sync+Send) = Arc::into_raw(self.0);
+                Ok(Arc::from_raw(raw as *const T))
+            }
+        } else {
+            Err(type_mismatch::<T>(self.0.type_name()))
+        }
+    }
+    pub fn new<T>(arc: Arc<T>) -> AnySync
+        where T: AnyObject + Sync + Send + 'static
+    {
+        AnySync(arc as _)
+    }
+    pub fn type_name(&self) -> &'static str {
+        self.0.type_name()
+    }
+}
+impl<T: AnyObject + Sync + Send + 'static> From<Arc<T>> for AnySync {
+    fn from(t: Arc<T>) -> Self {
+        AnySync::new(t)
+    }
+}
+fn type_mismatch<T: AnyObject + 'static>(name: &str) -> PdfError {
+    PdfError::Other { msg: format!("expected {}, found {}", std::any::type_name::<T>(), name) }
 }

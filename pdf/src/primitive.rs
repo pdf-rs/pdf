@@ -219,7 +219,7 @@ impl<'a> IntoIterator for &'a Dictionary {
     type Item = (&'a String, &'a Primitive);
     type IntoIter = btree_map::Iter<'a, String, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
-        (&self.dict).iter()
+        self.dict.iter()
     }
 }
 

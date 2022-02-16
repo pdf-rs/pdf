@@ -5,7 +5,10 @@ use crate::error::*;
 use crate::parser::Lexer;
 use crate::enc::{self, decode};
 
+#[cfg(not(feature="sync"))]
 use once_cell::unsync::OnceCell;
+#[cfg(feature="sync")]
+use once_cell::sync::OnceCell;
 
 use std::borrow::Cow;
 use std::ops::Deref;

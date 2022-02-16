@@ -2,7 +2,6 @@
 use std::fmt::{self, Display};
 use std::cmp::Ordering;
 use itertools::Itertools;
-use once_cell::unsync::OnceCell;
 
 use crate::error::*;
 use crate::object::*;

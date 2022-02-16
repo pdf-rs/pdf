@@ -22,6 +22,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::ops::Deref;
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
@@ -48,6 +49,12 @@ impl Resolve for NoResolve {
 }
 
 /// A PDF Object
+#[cfg(feature="sync")]
+pub trait Object: Sized + Sync + Send + 'static {
+    /// Convert primitive to Self
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
+}
+#[cfg(not(feature="sync"))]
 pub trait Object: Sized + 'static {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
@@ -174,14 +181,21 @@ impl<T> PartialEq for Ref<T> {
 }
 impl<T> Eq for Ref<T> {}
 
+#[cfg(not(feature="sync"))]
+pub type Shared<T> = Rc<T>;
+
+#[cfg(feature="sync")]
+pub type Shared<T> = Arc<T>;
+
+
 #[derive(Debug)]
 pub struct RcRef<T> {
     inner: PlainRef,
-    data: Rc<T>
+    data: Shared<T>
 }
 
 impl<T> RcRef<T> {
-    pub fn new(inner: PlainRef, data: Rc<T>) -> RcRef<T> {
+    pub fn new(inner: PlainRef, data: Shared<T>) -> RcRef<T> {
         RcRef { inner, data }
     }
     pub fn get_ref(&self) -> Ref<T> {
@@ -239,7 +253,7 @@ impl<T> Eq for RcRef<T> {}
 
 #[derive(Debug)]
 pub enum MaybeRef<T> {
-    Direct(Rc<T>),
+    Direct(Shared<T>),
     Indirect(RcRef<T>),
 }
 impl<T> MaybeRef<T> {
@@ -254,7 +268,7 @@ impl<T: Object> Object for MaybeRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         Ok(match p {
             Primitive::Reference(r) => MaybeRef::Indirect(resolve.get(Ref::new(r))?),
-            p => MaybeRef::Direct(Rc::new(T::from_primitive(p, resolve)?))
+            p => MaybeRef::Direct(Shared::new(T::from_primitive(p, resolve)?))
         })
     }
 }
@@ -291,21 +305,21 @@ impl<T> Trace for MaybeRef<T> {
         }
     }
 }
-impl<T> From<Rc<T>> for MaybeRef<T> {
-    fn from(r: Rc<T>) -> MaybeRef<T> {
+impl<T> From<Shared<T>> for MaybeRef<T> {
+    fn from(r: Shared<T>) -> MaybeRef<T> {
         MaybeRef::Direct(r)
     }
 }
-impl<T> From<MaybeRef<T>> for Rc<T> {
-    fn from(r: MaybeRef<T>) -> Rc<T> {
+impl<T> From<MaybeRef<T>> for Shared<T> {
+    fn from(r: MaybeRef<T>) -> Shared<T> {
         match r {
             MaybeRef::Direct(rc) => rc,
             MaybeRef::Indirect(r) => r.data
         }
     }
 }
-impl<'a, T> From<&'a MaybeRef<T>> for Rc<T> {
-    fn from(r: &'a MaybeRef<T>) -> Rc<T> {
+impl<'a, T> From<&'a MaybeRef<T>> for Shared<T> {
+    fn from(r: &'a MaybeRef<T>) -> Shared<T> {
         match r {
             MaybeRef::Direct(ref rc) => rc.clone(),
             MaybeRef::Indirect(ref r) => r.data.clone()

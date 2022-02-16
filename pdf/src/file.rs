@@ -2,17 +2,19 @@
 use std::fs;
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, RwLock, Mutex, Condvar};
 use std::path::Path;
 use std::io::Write;
+
+#[cfg(not(feature="sync"))]
+use std::cell::RefCell;
 
 use crate as pdf;
 use crate::error::*;
 use crate::object::*;
 use crate::primitive::{Primitive, Dictionary, PdfString};
 use crate::backend::Backend;
-use crate::any::{Any};
+use crate::any::*;
 use crate::parser::Lexer;
 use crate::parser::{parse_indirect_object, parse, ParseFlags};
 use crate::xref::{XRef, XRefTable, XRefInfo};
@@ -33,9 +35,23 @@ impl<T> PromisedRef<T> {
     }
 }
 
+use std::thread::ThreadId;
+#[cfg(feature="sync")]
+#[derive(Default)]
+struct Waiter {
+    mutex: Mutex<HashMap<PlainRef, (ThreadId, Arc<Condvar>)>>,
+}
+
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
+    #[cfg(not(feature="sync"))]
     cache: RefCell<HashMap<PlainRef, Option<Any>>>,
+
+    #[cfg(feature="sync")]
+    cache: RwLock<HashMap<PlainRef, AnySync>>,
+
+    #[cfg(feature="sync")]
+    waiter: Waiter,
 
     // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
@@ -55,9 +71,12 @@ impl<B: Backend> Storage<B> {
             backend,
             refs,
             start_offset,
-            cache: RefCell::new(HashMap::new()),
+            cache: Default::default(),
             changes: HashMap::new(),
             decoder: None,
+
+            #[cfg(feature="sync")]
+            waiter: Default::default(),
         }
     }
 }
@@ -87,6 +106,8 @@ impl<B: Backend> Resolve for Storage<B> {
             }
         }
     }
+
+    #[cfg(not(feature="sync"))]
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
@@ -103,8 +124,62 @@ impl<B: Backend> Resolve for Storage<B> {
 
         let name = std::any::type_name::<T>();
         let obj = t!(T::from_primitive(primitive, self), name);
-        let rc = Rc::new(obj);
-        self.cache.borrow_mut().insert(key, Some(Any::new(rc.clone())));
+        let rc = Shared::new(obj);
+        self.cache.borrow_mut().insert(key, Some(rc.clone().into()));
+        
+        Ok(RcRef::new(key, rc))
+    }
+    #[cfg(feature="sync")]
+    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+        use std::collections::hash_map::Entry;
+        let key = r.get_inner();
+        
+        if let Some(any) = self.cache.read().unwrap().get(&key).cloned() {
+            return Ok(RcRef::new(key, any.downcast()?));
+        }
+        let current_thread = std::thread::current().id();
+        let mut guard = self.waiter.mutex.lock().unwrap();
+        
+        let wait;
+        let cvar;
+        match guard.entry(key) {
+            Entry::Vacant(e) => {
+                cvar = Arc::new(Condvar::new());
+                e.insert((current_thread, cvar.clone()));
+                wait = false;
+            }
+            Entry::Occupied(e) => {
+                let &(other_thread, ref cvar2) = e.get();
+                if other_thread == current_thread {
+                    bail!("cyclic");
+                }
+                wait = true;
+                cvar = cvar2.clone();
+            }
+        }
+
+        if wait {
+            loop {
+                guard = cvar.wait(guard).unwrap();
+                if !guard.contains_key(&key) {
+                    break;
+                }
+            }
+            drop(guard);
+            let any = self.cache.read().unwrap().get(&key).cloned().unwrap();
+            return Ok(RcRef::new(key, any.downcast()?));
+        }
+        drop(guard);
+
+        let primitive = t!(self.resolve(key));
+
+        let name = std::any::type_name::<T>();
+        let obj = t!(T::from_primitive(primitive, self), name);
+        let rc = Shared::new(obj);
+        self.cache.write().unwrap().insert(key, rc.clone().into());
+
+        self.waiter.mutex.lock().unwrap().remove(&key);
+        cvar.notify_all();
         
         Ok(RcRef::new(key, rc))
     }
@@ -115,7 +190,7 @@ impl<B: Backend> Updater for Storage<B> {
         self.refs.push(XRef::Promised);
         let primitive = obj.to_primitive(self)?;
         self.changes.insert(id, primitive);
-        let rc = Rc::new(obj);
+        let rc = Shared::new(obj);
         let r = PlainRef { id, gen: 0 };
         
         Ok(RcRef::new(r, rc))
@@ -130,7 +205,7 @@ impl<B: Backend> Updater for Storage<B> {
         };
         let primitive = obj.to_primitive(self)?;
         self.changes.insert(old.id, primitive);
-        let rc = Rc::new(obj);
+        let rc = Shared::new(obj);
         
         Ok(RcRef::new(r, rc))
     }
@@ -167,7 +242,7 @@ impl Storage<Vec<u8>> {
         for (&id, primitive) in changes.iter() {
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
-            writeln!(&mut self.backend, "{} {} obj", id, 0)?;
+            writeln!(self.backend, "{} {} obj", id, 0)?;
             primitive.serialize(&mut self.backend, 0)?;
             writeln!(self.backend, "endobj")?;
         }
@@ -177,7 +252,7 @@ impl Storage<Vec<u8>> {
         // only write up to the xref stream obj id
         let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
 
-        writeln!(&mut self.backend, "{} {} obj", xref_promise.get_inner().id, 0)?;
+        writeln!(self.backend, "{} {} obj", xref_promise.get_inner().id, 0)?;
         let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
         for (k, v) in trailer.into_iter() {
             xref_and_trailer.info.insert(k, v);

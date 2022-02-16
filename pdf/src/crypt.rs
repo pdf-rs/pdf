@@ -259,7 +259,7 @@ impl Decoder {
             }
 
             let mut key = [0u8; 32];
-            (&mut key[..16]).copy_from_slice(&data);
+            key[..16].copy_from_slice(&data);
             key
         }
 
