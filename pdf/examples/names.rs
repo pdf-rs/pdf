@@ -28,8 +28,8 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
             let page_nr = name_map(&name);
             println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
         }
-        if let Some(Action::Goto(ref dest)) = node.action {
-            let page_nr = page_map(dest.page.get_inner());
+        if let Some(Action::Goto(Dest { page: Some(page), ..})) = node.action {
+            let page_nr = page_map(page.get_inner());
             println!("{}action -> page nr. {:?}", indent, page_nr);
         }
         if let Some(ref a) = node.se {
@@ -60,8 +60,8 @@ fn main() {
     let mut count = 0;
     let mut dests_cb = |key: &PdfString, val: &Option<Dest>| {
         //println!("{:?} {:?}", key, val);
-        if let Some(dest) = val {
-            pages_map.insert(key.to_string_lossy().unwrap(), dest.page.get_inner());
+        if let Some(Dest { page: Some(page), ..}) = val {
+            pages_map.insert(key.to_string_lossy().unwrap(), page.get_inner());
         }
 
         count += 1;

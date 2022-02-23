@@ -180,11 +180,11 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
         _ => bail!("invalid filter")
     };
     
-    let height = dict.require("InlineImage", "Height")?.as_integer()?;
+    let height = dict.require("InlineImage", "Height")?.as_u32()?;
     let image_mask = dict.get("ImageMask").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
     let intent = dict.remove("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
     let interpolate = dict.get("Interpolate").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
-    let width = dict.require("InlineImage", "Width")?.as_integer()?;
+    let width = dict.require("InlineImage", "Width")?.as_u32()?;
 
     let image_dict = ImageDict {
         width,

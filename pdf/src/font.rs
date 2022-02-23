@@ -421,6 +421,11 @@ pub struct ToUnicodeMap {
     inner: HashMap<u16, String>
 }
 impl ToUnicodeMap {
+    pub fn new() -> Self {
+        ToUnicodeMap {
+            inner: HashMap::new()
+        }
+    }
     /// Create a new ToUnicodeMap from key/value pairs.
     ///
     /// subject to change
@@ -464,7 +469,7 @@ fn parse_cid(s: &PdfString) -> Result<u16> {
 }
 fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
     let mut lexer = Lexer::new(data);
-    let mut map = HashMap::new();
+    let mut map = ToUnicodeMap::new();
     while let Ok(substr) = lexer.next() {
         match substr.as_slice() {
             b"beginbfchar" => loop {
@@ -473,8 +478,11 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                 match (a, b) {
                     (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
                         let cid = parse_cid(&cid_data)?;
-                        let unicode = utf16be_to_string(unicode_data.as_bytes())?;
-                        map.insert(cid, unicode);
+                        let bytes = unicode_data.as_bytes();
+                        match utf16be_to_string(bytes) {
+                            Ok(unicode) => map.insert(cid, unicode),
+                            Err(e) => warn!("invalid unicode for cid {cid} {bytes:?}"),
+                        }
                     }
                     _ => break,
                 }
@@ -494,8 +502,10 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         let mut unicode_data = unicode_data.into_bytes();
 
                         for cid in cid_start..=cid_end {
-                            let unicode = utf16be_to_string(&unicode_data)?;
-                            map.insert(cid, unicode);
+                            match utf16be_to_string(&unicode_data) {
+                                Ok(unicode) => map.insert(cid, unicode),
+                                Err(e) => warn!("invalid unicode for cid {cid} {unicode_data:?}"),
+                            }
                             *unicode_data.last_mut().unwrap() += 1;
                         }
                     }
@@ -508,9 +518,11 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         let cid_end = parse_cid(&cid_end_data)?;
 
                         for (cid, unicode_data) in (cid_start..=cid_end).zip(unicode_data_arr) {
-                            let unicode =
-                                utf16be_to_string(unicode_data.as_string()?.as_bytes())?;
-                            map.insert(cid, unicode);
+                            let bytes = unicode_data.as_string()?.as_bytes();
+                            match utf16be_to_string(bytes) {
+                                Ok(unicode) => map.insert(cid, unicode),
+                                Err(e) => warn!("invalid unicode for cid {cid} {bytes:?}"),
+                            }
                         }
                     }
                     _ => break,
@@ -521,7 +533,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
         }
     }
 
-    Ok(ToUnicodeMap { inner: map })
+    Ok(map)
 }
 
 #[cfg(test)]

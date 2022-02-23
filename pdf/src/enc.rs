@@ -10,20 +10,21 @@ use crate::error::*;
 use crate::object::{Object, Resolve};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::TryInto;
+use once_cell::sync::OnceCell;
 
 
 #[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
-    predictor: i32,
+    pub predictor: i32,
     #[pdf(key="Colors", default="1")]
-    n_components: i32,
+    pub n_components: i32,
     #[pdf(key="BitsPerComponent", default="8")]
-    bits_per_component: i32,
+    pub bits_per_component: i32,
     #[pdf(key="Columns", default="1")]
-    columns: i32,
+    pub columns: i32,
     #[pdf(key="EarlyChange", default="1")]
-    early_change: i32,
+    pub early_change: i32,
 }
 impl Default for LZWFlateParams {
     fn default() -> LZWFlateParams {
@@ -45,34 +46,34 @@ pub struct DCTDecodeParams {
     //      If the image has four components, transform CMYK values to YUVK before encoding and from YUVK to CMYK after decoding.
     //      This option is ignored if the image has one or two color components.
     #[pdf(key="ColorTransform")]
-    color_transform: Option<i32>,
+    pub color_transform: Option<i32>,
 }
 
 #[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct CCITTFaxDecodeParams {
     #[pdf(key="K", default="0")]
-    k: i32,
+    pub k: i32,
 
     #[pdf(key="EndOfLine", default="false")]
-    end_of_line: bool,
+    pub end_of_line: bool,
 
     #[pdf(key="EncodedByteAlign", default="false")]
-    encoded_byte_align: bool,
+    pub encoded_byte_align: bool,
 
     #[pdf(key="Columns", default="1728")]
-    columns: u32,
+    pub columns: u32,
 
     #[pdf(key="Rows", default="0")]
-    rows: u32,
+    pub rows: u32,
 
     #[pdf(key="EndOfBlock", default="true")]
-    end_of_block: bool,
+    pub end_of_block: bool,
 
     #[pdf(key="BlackIs1", default="false")]
-    black_is_1: bool,
+    pub black_is_1: bool,
 
     #[pdf(key="DamagedRowsBeforeError", default="0")]
-    damaged_rows_before_error: u32,
+    pub damaged_rows_before_error: u32,
 }
 #[derive(Debug, Clone)]
 pub enum StreamFilter {
@@ -128,7 +129,11 @@ fn encode_nibble(c: u8) -> u8 {
 
 pub fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(data.len() / 2);
-    for (i, (&high, &low)) in data.iter().tuples().enumerate() {
+    let pairs = data.iter().cloned()
+        .take_while(|&b| b != b'>')
+        .filter(|&b| !matches!(b, 0 | 9 | 10 | 12 | 13 | 32))
+        .tuples();
+    for (i, (high, low)) in pairs.enumerate() {
         if let (Some(low), Some(high)) = (decode_nibble(low), decode_nibble(high)) {
             out.push(high << 4 | low);
         } else {
@@ -161,7 +166,7 @@ fn word_85([a, b, c, d, e]: [u8; 5]) -> Option<[u8; 4]> {
     Some(q.to_be_bytes())
 }
 
-fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
+pub fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity((data.len() + 4) / 5 * 4);
     
     let mut stream = data.iter().cloned()
@@ -242,7 +247,7 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     buf
 }
 
-fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
@@ -301,14 +306,14 @@ fn flate_encode(data: &[u8]) -> Vec<u8> {
     deflate_bytes(data)
 }
 
-fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
+pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
     use jpeg_decoder::Decoder;
     let mut decoder = Decoder::new(data);
     let pixels = decoder.decode()?;
     Ok(pixels)
 }
 
-fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+pub fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     use weezl::{BitOrder, decode::Decoder};
     let mut out = vec![];
 
@@ -335,19 +340,26 @@ fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     Ok(compressed)
 }
 
-fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
+pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
     use fax::{Color, decoder::{pels, decode_g4}};
 
     if params.k < 0 {
-        let mut buf = Vec::with_capacity(params.columns as usize * params.rows as usize);
-        decode_g4(data.iter().cloned(), params.columns as u16, |line| {
-            buf.extend(pels(line, params.columns as u16).map(|c| match c {
+        let columns = params.columns as usize;
+        let rows = params.rows as usize;
+
+        let height = if params.rows == 0 { None } else { Some(params.rows as u16)};
+        let mut buf = Vec::with_capacity(columns * rows);
+        decode_g4(data.iter().cloned(), columns as u16, height, |line| {
+            buf.extend(pels(line, columns as u16).map(|c| match c {
                 Color::Black => 0,
                 Color::White => 255
             }));
+            assert_eq!(buf.len() % columns, 0, "len={}, columns={}", buf.len(), columns);
         }).ok_or(PdfError::Other { msg: "faxdecode failed".into() })?;
-        if buf.len() != params.columns as usize * params.rows as usize {
-            bail!("decoded length does not match (expected {}∙{}, got {})", params.rows, params.columns, buf.len());
+        assert_eq!(buf.len() % columns, 0, "len={}, columns={}", buf.len(), columns);
+
+        if rows != 0 && buf.len() != columns * rows {
+            bail!("decoded length does not match (expected {rows}∙{columns}, got {})", buf.len());
         }
         Ok(buf)
     } else {
@@ -355,24 +367,22 @@ fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
     }
 }
 
-#[cfg(feature="jpeg2k")]
-fn decode_jpx(data: &[u8]) -> Result<Vec<u8>> {
-    let codec = jp2k::Codec::jp2();
-    let stream = jp2k::Stream::from_bytes(data).unwrap();
+pub type DecodeFn = dyn Fn(&[u8]) -> Result<Vec<u8>> + Sync + Send + 'static;
+static JPX_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
+static JBIG2_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
 
-    let jp2k::ImageBuffer { buffer, width, height, num_bands } = jp2k::ImageBuffer::build(
-        codec,
-        stream,
-        jp2k::DecodeParams::default(),
-    ).map_err(|e| other!("Jpeg2K decode: {:?}", e))?;
-
-    Ok(buffer)
+pub fn set_jpx_decoder(f: Box<DecodeFn>) {
+    JPX_DECODER.set(f);
+}
+pub fn set_jbig2_decoder(f: Box<DecodeFn>) {
+    JBIG2_DECODER.set(f);
 }
 
-#[cfg(feature="jbig2")]
-fn jbig2_decode(mut data: &[u8]) -> Result<Vec<u8>> {
-    let doc = jbig2dec::Document::from_reader(&mut data).map_err(|e| PdfError::Other { msg: format!("{:?}", e) })?;
-    Ok(doc.images()[0].data().to_owned())
+pub fn jpx_decode(data: &[u8]) -> Result<Vec<u8>> {
+    JPX_DECODER.get().ok_or_else(|| PdfError::Other { msg: "jp2k decoder not set".into()})?(data)
+}
+pub fn jbig2_decode(data: &[u8]) -> Result<Vec<u8>> {
+    JBIG2_DECODER.get().ok_or_else(|| PdfError::Other { msg: "jbig2 decoder not set".into()})?(data)
 }
 
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
@@ -381,20 +391,8 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCII85Decode => decode_85(data),
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
-        StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
-        StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params),
-        
-        #[cfg(feature="jpeg2k")]
-        StreamFilter::JPXDecode => decode_jpx(data),
-        #[cfg(not(feature="jpeg2k"))]
-        StreamFilter::JPXDecode => bail!("disabled StreamFilter::JPXDecode. please enable `jpeg2k` feature."),
 
-        #[cfg(feature="jbig2")]
-        StreamFilter::JBIG2Decode => jbig2_decode(data),
-        #[cfg(not(feature="jbig2"))]
-        StreamFilter::JBIG2Decode => bail!("disabled StreamFilter::JBIG2Decode. please enable `jbig2` feature."),
-
-        StreamFilter::Crypt => bail!("unimplemented StreamFilter::Crypt"),
+        _ => bail!("unimplemented {filter:?}"),
     }
 }
 

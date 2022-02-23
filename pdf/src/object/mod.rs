@@ -555,10 +555,7 @@ impl<T: Object> Object for Option<T> {
                 // References to non-existing objects ought not to be an error
                 Err(PdfError::NullRef {..}) => Ok(None),
                 Err(PdfError::FreeObject {..}) => Ok(None),
-                Err(e) => {
-                    info!("Ignoring error: {:?}", e);
-                    Ok(None)
-                }
+                Err(e) => Err(e)
             }
         }
     }

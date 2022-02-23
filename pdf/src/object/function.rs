@@ -18,7 +18,7 @@ struct RawFunction {
     size: Option<Vec<u32>>,
 
     #[pdf(key="BitsPerSample")]
-    bits_per_sample: u32,
+    bits_per_sample: Option<u32>,
 
     #[pdf(key="Order", default="1")]
     order: u32,

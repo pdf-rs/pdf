@@ -260,7 +260,7 @@ macro_rules! unexpected_primitive {
 }
 
 /// Primitive String type.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PdfString {
     pub data: Vec<u8>,
 }

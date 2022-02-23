@@ -1,12 +1,14 @@
 //! Models of PDF types
 
 use std::collections::HashMap;
+use std::borrow::Cow;
 
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 use crate::content::{Content, FormXObject};
 use crate::font::Font;
+use crate::enc::StreamFilter;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
 #[derive(Debug, Clone)]
@@ -351,12 +353,29 @@ impl Resources {
 
 
 
-#[derive(Object, ObjectWrite, Debug)]
-pub struct Pattern {
-    #[pdf(other)]
-    _other: Dictionary
+#[derive(Debug)]
+pub enum Pattern {
+    Dict(Dictionary),
+    Stream(PdfStream)
 }
-
+impl Object for Pattern {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let p = p.resolve(resolve)?;
+        match p {
+            Primitive::Dictionary(dict) => Ok(Pattern::Dict(dict)),
+            Primitive::Stream(s) => Ok(Pattern::Stream(s)),
+            p => Err(PdfError::UnexpectedPrimitive { expected: "Dictionary or Stream", found: p.get_debug_name() })
+        }
+    }
+}
+impl ObjectWrite for Pattern {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            Pattern::Dict(d) => d.to_primitive(update),
+            Pattern::Stream(s) => Ok(Primitive::Stream(s.clone())),
+        }
+    }
+}
 
 #[derive(Object, ObjectWrite, Debug)]
 pub enum LineCap {
@@ -450,8 +469,103 @@ pub enum XObject {
 
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;
-/// A variant of XObject
-pub type ImageXObject = Stream<ImageDict>;
+
+#[derive(Debug)]
+pub struct ImageXObject {
+    pub info: ImageDict,
+    filters: Vec<StreamFilter>,
+    raw_data: Vec<u8>,
+}
+impl Object for ImageXObject {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let s = PdfStream::from_primitive(p, resolve)?;
+        Self::from_stream(s, resolve)
+    }
+}
+impl Deref for ImageXObject {
+    type Target = ImageDict;
+    fn deref(&self) -> &ImageDict {
+        &self.info
+    }
+}
+
+pub enum ImageFormat {
+    Raw,
+    Jpeg,
+    Jp2k,
+    Jbig2,
+    CittFax,
+}
+
+impl ImageXObject {
+    pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
+        let PdfStream {info, data} = s;
+        let StreamInfo { filters, info, .. } = StreamInfo::from_primitive(Primitive::Dictionary (info), resolve)?;
+        Ok(ImageXObject { info, raw_data: data, filters })
+    }
+
+    /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
+    pub fn raw_image_data(&self) -> Result<(Cow<[u8]>, Option<&StreamFilter>)> {
+        let mut data = Cow::Borrowed(&*self.raw_data);
+        let mut filters = self.filters.as_slice();
+        while let Some((filter, rest)) = filters.split_first() {
+            let decoded_data = match filter {
+                StreamFilter::ASCIIHexDecode => decode_hex(&data)?,
+                StreamFilter::ASCII85Decode => decode_85(&data)?,
+                StreamFilter::LZWDecode(ref params) => lzw_decode(&data, params)?,
+                StreamFilter::FlateDecode(ref params) => flate_decode(&data, params)?,
+
+                StreamFilter::Crypt => bail!("unimplemented StreamFilter::Crypt"),
+                _ => break
+            };
+            filters = rest;
+            data = Cow::Owned(decoded_data);
+        }
+        
+        match filters {
+            [] => Ok((data, None)),
+            [StreamFilter::DCTDecode(_)] |
+            [StreamFilter::CCITTFaxDecode(_)] |
+            [StreamFilter::JPXDecode] |
+            [StreamFilter::JBIG2Decode] => Ok((data, Some(&filters[0]))),
+            _ => bail!("??? filters={:?}", filters)
+        }
+    }
+
+    pub fn image_data(&self) -> Result<Cow<[u8]>> {
+        let (data, filter) = self.raw_image_data()?;
+        let filter = match filter {
+            Some(f) => f,
+            None => return Ok(data)
+        };
+        let data = match filter {
+            StreamFilter::CCITTFaxDecode(ref params) => {
+                if self.info.width != params.columns {
+                    bail!("image width mismatch {} != {}", self.info.width, params.columns);
+                }
+                let mut data = fax_decode(&data, params)?;
+                if params.rows == 0 {
+                    // adjust size
+                    data.truncate(self.info.height as usize * self.info.width as usize);
+                }
+                data
+            }
+            StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
+            StreamFilter::JPXDecode => jpx_decode(&data)?,
+            StreamFilter::JBIG2Decode => jbig2_decode(&data)?,
+            _ => unreachable!()
+        };
+        Ok(data.into())
+    }
+
+    /// If this is contains DCT encoded data, return the compressed data as is
+    pub fn as_jpeg(&self) -> Option<&[u8]> {
+        match *self.filters.as_slice() {
+            [StreamFilter::DCTDecode(_)] => Some(&self.raw_data),
+            _ => None
+        }
+    }
+}
 
 #[derive(Object, Debug)]
 #[pdf(Type="XObject", Subtype="PS")]
@@ -464,9 +578,9 @@ pub struct PostScriptDict {
 /// A variant of XObject
 pub struct ImageDict {
     #[pdf(key="Width")]
-    pub width: i32,
+    pub width: u32,
     #[pdf(key="Height")]
-    pub height: i32,
+    pub height: u32,
 
     #[pdf(key="ColorSpace")]
     pub color_space: Option<ColorSpace>,
@@ -794,8 +908,14 @@ pub enum DestView {
 }
 
 #[derive(Debug, Clone)]
+pub enum MaybeNamedDest {
+    Named(PdfString),
+    Direct(Dest),
+}
+
+#[derive(Debug, Clone)]
 pub struct Dest {
-    pub page: Ref<Page>,
+    pub page: Option<Ref<Page>>,
     pub view: DestView
 }
 impl Object for Dest {
@@ -808,8 +928,13 @@ impl Object for Dest {
             Primitive::Dictionary(mut dict) => dict.require("Dest", "D")?,
             p => p
         };
-        let array = p.as_array()?;
-        let page = Ref::from_primitive(try_opt!(array.get(0)).clone(), resolve)?;
+        let array = t!(p.as_array(), p);
+        Dest::from_array(array, resolve)
+    }
+}
+impl Dest {
+    fn from_array(array: &[Primitive], resolve: &impl Resolve) -> Result<Self> {
+        let page = Object::from_primitive(try_opt!(array.get(0)).clone(), resolve)?;
         let kind = try_opt!(array.get(1));
         let view = match kind.as_name()? {
             "XYZ" => DestView::XYZ {
@@ -856,6 +981,29 @@ impl Object for Dest {
             page,
             view
         })
+    }
+}
+impl Object for MaybeNamedDest {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let p = match p {
+            Primitive::Reference(r) => resolve.resolve(r)?,
+            p => p
+        };
+        let p = match p {
+            Primitive::Dictionary(mut dict) => dict.require("Dest", "D")?,
+            Primitive::String(s) => return Ok(MaybeNamedDest::Named(s)),
+            p => p
+        };
+        let array = t!(p.as_array(), p);
+        Dest::from_array(array, resolve).map(MaybeNamedDest::Direct)
+    }
+}
+impl ObjectWrite for MaybeNamedDest {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            MaybeNamedDest::Named(s) => Ok(Primitive::String(s.clone())),
+            MaybeNamedDest::Direct(d) => d.to_primitive(update)
+        }
     }
 }
 impl ObjectWrite for Dest {
@@ -1013,7 +1161,7 @@ pub struct OutlineItem {
     pub count:  i32,
 
     #[pdf(key="Dest")]
-    pub dest: Option<PdfString>,
+    pub dest: Option<Primitive>,
 
     #[pdf(key="A")]
     pub action: Option<Action>,
@@ -1030,7 +1178,7 @@ pub struct OutlineItem {
 
 #[derive(Clone, Debug)]
 pub enum Action {
-    Goto(Dest),
+    Goto(MaybeNamedDest),
     Other(Dictionary)
 }
 impl Object for Action {
@@ -1039,7 +1187,7 @@ impl Object for Action {
         let s = try_opt!(d.get("S")).as_name()?;
         match s {
             "GoTo" => {
-                let dest = t!(Dest::from_primitive(try_opt!(d.remove("D")), resolve));
+                let dest = t!(MaybeNamedDest::from_primitive(try_opt!(d.remove("D")), resolve));
                 Ok(Action::Goto(dest))
             }
             _ => Ok(Action::Other(d))
