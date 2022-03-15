@@ -20,6 +20,9 @@ use crate::parser::{parse_indirect_object, parse, ParseFlags};
 use crate::xref::{XRef, XRefTable, XRefInfo};
 use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
+use crate::enc::{StreamFilter, decode};
+use std::borrow::Cow;
+use std::ops::Range;
 
 #[must_use]
 pub struct PromisedRef<T> {
@@ -50,6 +53,8 @@ pub struct Storage<B: Backend> {
     #[cfg(feature="sync")]
     cache: RwLock<HashMap<PlainRef, AnySync>>,
 
+    stream_cache: RwLock<HashMap<PlainRef, Arc<[u8]>>>,
+
     #[cfg(feature="sync")]
     waiter: Waiter,
 
@@ -59,6 +64,7 @@ pub struct Storage<B: Backend> {
     refs:       XRefTable,
 
     decoder:    Option<Decoder>,
+    options:    ParseOptions,
 
     backend:    B,
 
@@ -66,18 +72,20 @@ pub struct Storage<B: Backend> {
     start_offset: usize,
 }
 impl<B: Backend> Storage<B> {
-    pub fn new(backend: B, refs: XRefTable, start_offset: usize) -> Storage<B> {
-        Storage {
+    fn new(backend: B, options: ParseOptions) -> Result<Storage<B>> {
+        Ok(Storage {
+            start_offset: backend.locate_start_offset()?,
             backend,
-            refs,
-            start_offset,
+            refs: XRefTable::new(0),
             cache: Default::default(),
+            stream_cache: Default::default(),
             changes: HashMap::new(),
             decoder: None,
+            options,
 
             #[cfg(feature="sync")]
             waiter: Default::default(),
-        }
+        })
     }
 }
 impl<B: Backend> Resolve for Storage<B> {
@@ -86,7 +94,7 @@ impl<B: Backend> Resolve for Storage<B> {
             Some(p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::new(t!(self.backend.read(self.start_offset + pos ..)));
+                    let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..)), self.start_offset + pos);
                     let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref(), flags)).1;
                     Ok(p)
                 }
@@ -97,8 +105,8 @@ impl<B: Backend> Resolve for Storage<B> {
                     }
                     let obj_stream = t!(self.resolve_flags(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}, flags, depth-1));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
-                    let slice = t!(obj_stream.get_object_slice(index));
-                    parse(slice, self, flags)
+                    let (data, range) = t!(obj_stream.get_object_slice(index, self));
+                    parse(&data[range], self, flags)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
                 XRef::Promised => unimplemented!(),
@@ -182,6 +190,26 @@ impl<B: Backend> Resolve for Storage<B> {
         cvar.notify_all();
         
         Ok(RcRef::new(key, rc))
+    }
+    fn options(&self) -> &ParseOptions {
+        &self.options
+    }
+    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        if let Some(data) = self.stream_cache.read().unwrap().get(&id) {
+            return Ok(data.clone());
+        }
+        let data = self.backend.read(range)?;
+
+        let mut data = Vec::from(data);
+        if let Some(ref decoder) = self.decoder {
+            decoder.decrypt(id, &mut data)?;
+        }
+        for filter in filters {
+            data = t!(decode(&data, filter), filter);
+        }
+        let arc: Arc<[u8]> = data.into();
+        self.stream_cache.write().unwrap().insert(id, arc.clone());
+        Ok(arc)
     }
 }
 impl<B: Backend> Updater for Storage<B> {
@@ -269,17 +297,16 @@ impl Storage<Vec<u8>> {
     }
 }
 
-pub fn load_storage_and_trailer<B: Backend>(backend: B) -> Result<(Storage<B>, Dictionary)> {
-    load_storage_and_trailer_password(backend, b"")
+pub fn load_storage_and_trailer<B: Backend>(storage: &mut Storage<B>) -> Result<Dictionary> {
+    load_storage_and_trailer_password(storage, b"")
 }
 
 pub fn load_storage_and_trailer_password<B: Backend>(
-    backend: B,
+    storage: &mut Storage<B>,
     password: &[u8],
-) -> Result<(Storage<B>, Dictionary)> {
-    let start_offset = t!(backend.locate_start_offset());
-    let (refs, trailer) = t!(backend.read_xref_table_and_trailer(start_offset));
-    let mut storage = Storage::new(backend, refs, start_offset);
+) -> Result<Dictionary> {
+    let (refs, trailer) = t!(storage.backend.read_xref_table_and_trailer(storage.start_offset, storage));
+    storage.refs = refs;
 
     if let Some(crypt) = trailer.get("Encrypt") {
         let key = trailer
@@ -291,19 +318,19 @@ pub fn load_storage_and_trailer_password<B: Backend>(
             .as_array()?[0]
             .as_string()?
             .as_bytes();
-        let dict = CryptDict::from_primitive(crypt.clone(), &storage)?;
+        let dict = CryptDict::from_primitive(crypt.clone(), storage)?;
         storage.decoder = Some(t!(Decoder::from_password(&dict, key, password)));
         if let Primitive::Reference(reference) = crypt {
             storage.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
         }
         if let Some(Primitive::Reference(catalog_ref)) = trailer.get("Root") {
-            let catalog = t!(t!(storage.resolve(*catalog_ref)).resolve(&storage)?.into_dictionary());
+            let catalog = t!(t!(storage.resolve(*catalog_ref)).resolve(storage)?.into_dictionary());
             if let Some(Primitive::Reference(metadata_ref)) = catalog.get("Metadata") {
                 storage.decoder.as_mut().unwrap().metadata_indirect_object = Some(*metadata_ref);
             }
         }
     }
-    Ok((storage, trailer))
+    Ok(trailer)
 }
 
 pub struct File<B: Backend> {
@@ -316,6 +343,12 @@ impl<B: Backend> Resolve for File<B> {
     }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.storage.get(r)
+    }
+    fn options(&self) -> &ParseOptions {
+        self.storage.options()
+    }
+    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        self.storage.get_data_or_decode(id, range, filters)
     }
 }
 impl<B: Backend> Updater for File<B> {
@@ -351,15 +384,22 @@ impl File<Vec<u8>> {
 }
 impl<B: Backend> File<B> {
     pub fn from_data_password(backend: B, password: &[u8]) -> Result<Self> {
-        Self::load_data(backend, password)
+        Self::load_data(backend, password, ParseOptions::strict())
+    }
+    pub fn from_data_password_with_options(backend: B, password: &[u8], options: ParseOptions) -> Result<Self> {
+        Self::load_data(backend, password, options)
     }
 
     pub fn from_data(backend: B) -> Result<Self> {
-        Self::from_data_password(backend, b"")
+        Self::load_data(backend, b"", ParseOptions::strict())
+    }
+    pub fn from_data_with_options(backend: B, options: ParseOptions) -> Result<Self> {
+        Self::load_data(backend, b"", options)
     }
 
-    fn load_data(backend: B, password: &[u8]) -> Result<Self> {
-        let (storage, trailer) = load_storage_and_trailer_password(backend, password)?;
+    fn load_data(backend: B, password: &[u8], options: ParseOptions) -> Result<Self> {
+        let mut storage = Storage::new(backend, options)?;
+        let trailer = load_storage_and_trailer_password(&mut storage, password)?;
         let trailer = t!(Trailer::from_primitive(
             Primitive::Dictionary(trailer),
             &storage,
@@ -385,6 +425,10 @@ impl<B: Backend> File<B> {
     pub fn update_catalog(&mut self, catalog: Catalog) -> Result<()> {
         self.trailer.root = self.create(catalog)?;
         Ok(())
+    }
+
+    pub fn set_options(&mut self, options: ParseOptions) {
+        self.storage.options = options;
     }
 }
 

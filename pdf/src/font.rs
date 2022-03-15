@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
 use std::borrow::Cow;
+use std::sync::Arc;
 
 #[allow(non_upper_case_globals, dead_code)]
 mod flags {
@@ -92,7 +93,7 @@ impl Object for Font {
                     let cid_map = match dict.remove("CIDToGIDMap") {
                         Some(p @ Primitive::Stream(_)) | Some(p @ Primitive::Reference(_)) => {
                             let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
-                            let data = stream.data()?;
+                            let data = stream.data(resolve)?;
                             Some(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect())
                         },
                         _ => None
@@ -179,11 +180,11 @@ impl Widths {
     }
 }
 impl Font {
-    pub fn embedded_data(&self) -> Option<Result<Cow<[u8]>>> {
+    pub fn embedded_data(&self, resolve: &impl Resolve) -> Option<Result<Arc<[u8]>>> {
         match self.data.as_ref().ok()? {
-            FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data()),
-            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(),
-            FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.as_ref().and_then(|d| d.data()),
+            FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data(resolve)),
+            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(resolve),
+            FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.as_ref().and_then(|d| d.data(resolve)),
             _ => None
         }
     }
@@ -257,8 +258,8 @@ impl Font {
             _ => Ok(None)
         }
     }
-    pub fn to_unicode(&self) -> Option<Result<ToUnicodeMap>> {
-        self.to_unicode.as_ref().map(|s| s.data().and_then(parse_cmap))
+    pub fn to_unicode(&self, resolve: &impl Resolve) -> Option<Result<ToUnicodeMap>> {
+        self.to_unicode.as_ref().map(|s| s.data(resolve).and_then(|d| parse_cmap(&d)))
     }
 }
 #[derive(Object, Debug)]
@@ -376,13 +377,13 @@ pub struct FontDescriptor {
     pub char_set: Option<PdfString>
 }
 impl FontDescriptor {
-    pub fn data(&self) -> Option<Result<Cow<[u8]>>> {
+    pub fn data(&self, resolve: &impl Resolve) -> Option<Result<Arc<[u8]>>> {
         if let Some(ref s) = self.font_file {
-            Some(s.decode())
+            Some(s.data(resolve))
         } else if let Some(ref s) = self.font_file2 {
-            Some(s.decode())
+            Some(s.data(resolve))
         } else if let Some(ref s) = self.font_file3 {
-            Some(s.decode())
+            Some(s.data(resolve))
         } else {
             None
         }
@@ -506,7 +507,12 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                                 Ok(unicode) => map.insert(cid, unicode),
                                 Err(e) => warn!("invalid unicode for cid {cid} {unicode_data:?}"),
                             }
-                            *unicode_data.last_mut().unwrap() += 1;
+                            let last = unicode_data.last_mut().unwrap();
+                            if *last < 255 {
+                                *last += 1;
+                            } else {
+                                break;
+                            }
                         }
                     }
                     (

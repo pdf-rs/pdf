@@ -13,34 +13,36 @@ use crate::crypt::Decoder;
 /// cannot dereference 
 
 pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Option<&Decoder>, flags: ParseFlags) -> Result<(PlainRef, Primitive)> {
-    let obj_nr = t!(lexer.next()).to::<ObjNr>()?;
-    let gen_nr = t!(lexer.next()).to::<GenNr>()?;
+    let id = PlainRef {
+        id: t!(lexer.next()).to::<ObjNr>()?,
+        gen: t!(lexer.next()).to::<GenNr>()?,
+    };
     lexer.next_expect("obj")?;
 
     let ctx = Context {
         decoder,
-        obj_nr,
-        gen_nr
+        id,
     };
     let obj = t!(parse_with_lexer_ctx(lexer, r, Some(&ctx), flags, MAX_DEPTH));
 
     t!(lexer.next_expect("endobj"));
 
-    Ok((PlainRef {id: obj_nr, gen: gen_nr}, obj))
+    Ok((id, obj))
 }
 pub fn parse_indirect_stream(lexer: &mut Lexer, r: &impl Resolve, decoder: Option<&Decoder>) -> Result<(PlainRef, PdfStream)> {
-    let obj_nr = t!(t!(lexer.next()).to::<ObjNr>());
-    let gen_nr = t!(t!(lexer.next()).to::<GenNr>());
+    let id = PlainRef {
+        id: t!(lexer.next()).to::<ObjNr>()?,
+        gen: t!(lexer.next()).to::<GenNr>()?,
+    };
     lexer.next_expect("obj")?;
 
     let ctx = Context {
         decoder,
-        obj_nr,
-        gen_nr
+        id,
     };
-    let stm = t!(parse_stream_with_lexer(lexer, r, Some(&ctx)), obj_nr, gen_nr);
+    let stm = t!(parse_stream_with_lexer(lexer, r, &ctx));
 
     t!(lexer.next_expect("endobj"));
 
-    Ok((PlainRef {id: obj_nr, gen: gen_nr}, stm))
+    Ok((id, stm))
 }

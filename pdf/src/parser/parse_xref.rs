@@ -9,16 +9,25 @@ use std::convert::TryInto;
 
 // Just the part of Parser which reads xref sections from xref stream.
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
-fn parse_xref_section_from_stream(first_id: u32, num_entries: u32, width: &[usize], data: &mut &[u8]) -> Result<XRefSection> {
+fn parse_xref_section_from_stream(first_id: u32, mut num_entries: usize, width: &[usize], data: &mut &[u8], resolve: &impl Resolve) -> Result<XRefSection> {
     let mut entries = Vec::new();
     let [w0, w1, w2]: [usize; 3] = width.try_into().map_err(|e| other!("invalid xref length array"))?;
-    if num_entries as usize * (w0 + w1 + w2) > data.len() {
-        bail!("not enough xref data");
+    if num_entries * (w0 + w1 + w2) > data.len() {
+        if resolve.options().allow_xref_error {
+            warn!("not enough xref data. truncating.");
+            num_entries = data.len() / (w0 + w1 + w2);
+        } else {
+            bail!("not enough xref data");
+        }
     }
     for _ in 0..num_entries {
         // println!("{:?}", &data[.. width.iter().map(|&i| i as usize).sum()]);
          // TODO Check if width[i] are 0. Use default values from the PDF references.
-        let _type = read_u64_from_stream(w0, data);
+        let _type = if w0 == 0 {
+            1
+        } else {
+            read_u64_from_stream(w0, data)
+        };
         let field1 = read_u64_from_stream(w1, data);
         let field2 = read_u64_from_stream(w2, data);
 
@@ -60,8 +69,8 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
     };
 
     let xref_stream = t!(Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve));
-    let mut data_left = t!(xref_stream.data());
-
+    let mut data_left = &*t!(xref_stream.data(resolve));
+    
     let width = &xref_stream.w;
 
     let index = &xref_stream.index;
@@ -71,8 +80,8 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
     }
 
     let mut sections = Vec::new();
-    for (first_id, num_objects) in index.chunks(2).map(|c| (c[0], c[1])) {
-        let section = t!(parse_xref_section_from_stream(first_id, num_objects, width, &mut data_left));
+    for (i, (first_id, num_objects)) in index.chunks_exact(2).map(|c| (c[0], c[1])).enumerate() {
+        let section = t!(parse_xref_section_from_stream(first_id, num_objects as usize, width, &mut data_left, resolve));
         sections.push(section);
     }
 

@@ -50,16 +50,16 @@ pub trait Backend: Sized {
     }
 
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
-    fn read_xref_table_and_trailer(&self, start_offset: usize) -> Result<(XRefTable, Dictionary)> {
+    fn read_xref_table_and_trailer(&self, start_offset: usize, resolve: &impl Resolve) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
         let pos = t!(start_offset.checked_add(xref_offset).ok_or(PdfError::Invalid));
         if pos >= self.len() {
             bail!("XRef offset outside file bounds");
         }
 
-        let mut lexer = Lexer::new(t!(self.read(pos ..)));
+        let mut lexer = Lexer::with_offset(t!(self.read(pos ..)), pos);
         
-        let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
+        let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
         
         let highest_id = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
@@ -88,8 +88,8 @@ pub trait Backend: Sized {
             seen.push(prev_xref_offset);
 
             let pos = t!(start_offset.checked_add(prev_xref_offset as usize).ok_or(PdfError::Invalid));
-            let mut lexer = Lexer::new(t!(self.read(pos..)));
-            let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, &NoResolve));
+            let mut lexer = Lexer::with_offset(t!(self.read(pos..)), pos);
+            let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
             
             for section in xref_sections {
                 refs.add_entries_from(section);

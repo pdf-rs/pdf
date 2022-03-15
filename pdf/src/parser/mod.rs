@@ -37,15 +37,20 @@ bitflags! {
 
 pub struct Context<'a> {
     pub decoder: Option<&'a Decoder>,
-    pub obj_nr: u64,
-    pub gen_nr: u16
+    pub id: PlainRef,
 }
 impl<'a> Context<'a> {
     pub fn decrypt<'buf>(&self, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
         if let Some(decoder) = self.decoder {
-            decoder.decrypt(self.obj_nr, self.gen_nr, data)
+            decoder.decrypt(self.id, data)
         } else {
             Ok(data)
+        }
+    }
+    fn fake() -> Self {
+        Context {
+            decoder: None,
+            id: PlainRef { id: 0, gen: 0 }
         }
     }
 }
@@ -80,7 +85,7 @@ fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
     Ok(dict)
 }
 
-fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>) -> Result<PdfStream> {
+fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ctx: &Context) -> Result<PdfStream> {
     t!(lexer.next_stream());
 
     let length = match dict.get("Length") {
@@ -91,19 +96,15 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     };
 
     let stream_substr = lexer.read_n(length as usize);
+    assert_eq!(stream_substr.len(), length as usize);
 
     // Finish
     t!(lexer.next_expect("endstream"));
-    let mut data = stream_substr.to_vec();
-
-    // decrypt it
-    if let Some(ctx) = ctx {
-        data = t!(ctx.decrypt(&mut data)).to_vec();
-    }
 
     Ok(PdfStream {
+        file_range: stream_substr.file_range(),
         info: dict,
-        data,
+        id: ctx.id,
     })
 }
 
@@ -130,7 +131,7 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         let dict = t!(parse_dictionary_object(lexer, r, ctx, max_depth-1));
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
-            Primitive::Stream(t!(parse_stream_object(dict, lexer, r, ctx)))
+            Primitive::Stream(t!(parse_stream_object(dict, lexer, r, ctx.unwrap())))
         } else {
             Primitive::Dictionary(dict)
         }
@@ -247,19 +248,23 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
 }
 
 
-pub fn parse_stream(data: &[u8], resolve: &impl Resolve, ctx: Option<&Context>) -> Result<PdfStream> {
+pub fn parse_stream(data: &[u8], resolve: &impl Resolve, ctx: &Context) -> Result<PdfStream> {
     parse_stream_with_lexer(&mut Lexer::new(data), resolve, ctx)
 }
 
 
-fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, _ctx: Option<&Context>) -> Result<PdfStream> {
+fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, ctx: &Context) -> Result<PdfStream> {
     let first_lexeme = t!(lexer.next());
 
     let obj = if first_lexeme.equals(b"<<") {
         let dict = parse_dictionary_object(lexer, r, None, MAX_DEPTH)?;
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
-            t!(parse_stream_object(dict, lexer, r, None))
+            let ctx = Context {
+                decoder: None,
+                id: ctx.id
+            };
+            t!(parse_stream_object(dict, lexer, r, &ctx))
         } else {
             err!(PdfError::UnexpectedPrimitive { expected: "Stream", found: "Dictionary" });
         }
@@ -275,7 +280,7 @@ mod tests {
     #[test]
     fn dict_with_empty_name_as_value() {
         use crate::object::NoResolve;
-        use super::ParseFlags;
+        use super::{ParseFlags, Context};
         {
             let data = b"<</App<</Name/>>>>";
             let primitive = super::parse(data, &NoResolve, ParseFlags::DICT).unwrap();
@@ -290,7 +295,7 @@ mod tests {
 
         {
             let data = b"<</Length 0/App<</Name/>>>>stream\nendstream\n";
-            let stream = super::parse_stream(data, &NoResolve,None).unwrap();
+            let stream = super::parse_stream(data, &NoResolve, &Context::fake()).unwrap();
             let dict = stream.info;
 
             assert_eq!(dict.len(), 2);
@@ -304,7 +309,7 @@ mod tests {
     #[test]
     fn dict_with_empty_name_as_key() {
         use crate::object::NoResolve;
-        use super::ParseFlags;
+        use super::{ParseFlags, Context};
 
         {
             let data = b"<</ true>>";
@@ -317,7 +322,7 @@ mod tests {
 
         {
             let data = b"<</Length 0/ true>>stream\nendstream\n";
-            let stream = super::parse_stream(data, &NoResolve, None).unwrap();
+            let stream = super::parse_stream(data, &NoResolve, &Context::fake()).unwrap();
             let dict = stream.info;
 
             assert_eq!(dict.len(), 2);

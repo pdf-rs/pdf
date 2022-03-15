@@ -227,7 +227,8 @@ impl<'a> IntoIterator for &'a Dictionary {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PdfStream {
     pub info: Dictionary,
-    pub data: Vec<u8>,
+    pub (crate) id: PlainRef,
+    pub (crate) file_range: Range<usize>,
 }
 impl Object for PdfStream {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -243,7 +244,8 @@ impl PdfStream {
         self.info.serialize(out, 0)?;
 
         writeln!(out, "stream")?;
-        out.write_all(&self.data)?;
+        unimplemented!();
+        //out.write_all(&self.data)?;
         writeln!(out, "\nendstream")?;
         Ok(())
     }

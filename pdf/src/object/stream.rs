@@ -11,23 +11,26 @@ use once_cell::unsync::OnceCell;
 use once_cell::sync::OnceCell;
 
 use std::borrow::Cow;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::fmt;
 
-
+#[derive(Clone)]
+pub (crate) enum StreamData {
+    Generated(Arc<[u8]>),
+    Original(Range<usize>, PlainRef),
+}
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
 #[derive(Clone)]
 pub struct Stream<I=()> {
     pub info: StreamInfo<I>,
-    raw_data: Vec<u8>,
-    decoded: OnceCell<Vec<u8>>
+    pub (crate) data: StreamData,
 }
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, data} = s;
+        let PdfStream {info, id, file_range} = s;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream { info, raw_data: data, decoded: OnceCell::new() })
+        Ok(Stream { info, data: StreamData::Original(file_range, id) })
     }
 
     pub fn new_with_filters(i: I, data: Vec<u8>, filters: Vec<StreamFilter>) -> Stream<I> {
@@ -38,8 +41,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            raw_data: data,
-            decoded: OnceCell::new()
+            data: StreamData::Generated(data.into()),
         }
     }
     pub fn new(i: I, data: Vec<u8>) -> Stream<I> {
@@ -50,43 +52,17 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            raw_data: data,
-            decoded: OnceCell::new()
+            data: StreamData::Generated(data.into()),
         }
     }
 
-    /// decode the data.
-    /// does not store the result.
-    /// The caller is responsible for caching the result
-    pub fn decode(&self) -> Result<Cow<[u8]>> {
-        let mut data = Cow::Borrowed(&*self.raw_data);
-        for filter in &self.info.filters {
-            data = match decode(&*data, filter) {
-                Ok(data) => data.into(),
-                Err(e) => {
-                    info!("Stream Info: {:?}", &self.info);
-                    dump_data(&data);
-                    return Err(e);
-                }
-            };
+    pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
+        match self.data {
+            StreamData::Generated(ref data) => Ok(data.clone()),
+            StreamData::Original(ref file_range, id) => {
+                resolve.get_data_or_decode(id, file_range.clone(), &self.info.filters)
+            }
         }
-        Ok(data)
-    }
-    pub fn data(&self) -> Result<&[u8]> {
-        self.decoded.get_or_try_init(|| {
-            let data = self.decode()?;
-            Ok(data.into_owned())
-        }).map(|v| v.as_slice())
-    }
-
-    pub fn hexencode(mut self) -> Self {
-        self.raw_data = enc::encode_hex(&self.raw_data);
-        self.info.filters.push(StreamFilter::ASCIIHexDecode);
-        self
-    }
-
-    pub fn raw_data(&self) -> &[u8] {
-        &self.raw_data
     }
 }
 
@@ -148,12 +124,14 @@ impl<I: ObjectWrite> Stream<I> {
         if let Some(para) = params {
             info.insert("DecodeParms", para);
         }
-        info.insert("Length", Primitive::Integer(self.raw_data.len() as _));
 
-        Ok(PdfStream {
-            info,
-            data: self.raw_data.clone()
-        })
+        match self.data {
+            StreamData::Generated(ref data) => unimplemented!(),
+            StreamData::Original(ref file_range, id) => {
+                info.insert("Length", Primitive::Integer(file_range.len() as _));
+                Ok(PdfStream { info, id, file_range: file_range.clone() })
+            }
+        }
     }
 }
 impl<I: ObjectWrite> ObjectWrite for Stream<I> {
@@ -320,7 +298,8 @@ impl Object for ObjectStream {
         let mut offsets = Vec::new();
         {
             debug!("parsing stream");
-            let mut lexer = Lexer::new(stream.data()?);
+            let data = stream.data(resolve)?;
+            let mut lexer = Lexer::new(&data);
             for _ in 0..(stream.info.num_objects as ObjNr) {
                 let _obj_nr = lexer.next()?.to::<ObjNr>()?;
                 let offset = lexer.next()?.to::<usize>()?;
@@ -337,25 +316,25 @@ impl Object for ObjectStream {
 }
 
 impl ObjectStream {
-    pub fn get_object_slice(&self, index: usize) -> Result<&[u8]> {
+    pub fn get_object_slice(&self, index: usize, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Range<usize>)> {
         if index >= self.offsets.len() {
             err!(PdfError::ObjStmOutOfBounds {index, max: self.offsets.len()});
         }
         let start = self.inner.info.first + self.offsets[index];
-        let data = self.inner.data()?;
+        let data = self.inner.data(resolve)?;
         let end = if index == self.offsets.len() - 1 {
             data.len()
         } else {
             self.inner.info.first + self.offsets[index + 1]
         };
 
-        Ok(&data[start..end])
+        Ok((data, start..end))
     }
     /// Returns the number of contained objects
     pub fn n_objects(&self) -> usize {
         self.offsets.len()
     }
-    pub fn _data(&self) -> Result<&[u8]> {
-        self.inner.data()
+    pub fn _data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
+        self.inner.data(resolve)
     }
 }

@@ -130,10 +130,10 @@ impl Object for Function {
             Primitive::Dictionary(dict) => Self::from_dict(dict, resolve),
             Primitive::Stream(s) => {
                 let stream = Stream::<RawFunction>::from_stream(s, resolve)?;
-                let data = stream.decode()?.into_owned();
+                let data = stream.data(resolve)?;
                 match stream.info.function_type {
                     4 => {
-                        let s = std::str::from_utf8(&*data)?;
+                        let s = std::str::from_utf8(&data)?;
                         let func = PsFunc::parse(s)?;
                         let info = stream.info.info;
                         Ok(Function::PostScript { func, domain: info.domain, range: info.range.unwrap() })
@@ -216,7 +216,7 @@ enum Interpolation {
 pub struct SampledFunction {
     input: Vec<SampledFunctionInput>,
     output: Vec<SampledFunctionOutput>,
-    data: Vec<u8>,
+    data: Arc<[u8]>,
     order: Interpolation,
     range: Vec<f32>,
 }

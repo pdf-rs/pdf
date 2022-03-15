@@ -472,9 +472,7 @@ pub type PostScriptXObject = Stream<PostScriptDict>;
 
 #[derive(Debug)]
 pub struct ImageXObject {
-    pub info: ImageDict,
-    filters: Vec<StreamFilter>,
-    raw_data: Vec<u8>,
+    inner: Stream<ImageDict>
 }
 impl Object for ImageXObject {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -485,7 +483,7 @@ impl Object for ImageXObject {
 impl Deref for ImageXObject {
     type Target = ImageDict;
     fn deref(&self) -> &ImageDict {
-        &self.info
+        &self.inner.info
     }
 }
 
@@ -499,54 +497,57 @@ pub enum ImageFormat {
 
 impl ImageXObject {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, data} = s;
-        let StreamInfo { filters, info, .. } = StreamInfo::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(ImageXObject { info, raw_data: data, filters })
+        let inner = Stream::from_stream(s, resolve)?;
+        Ok(ImageXObject { inner })
     }
 
     /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
-    pub fn raw_image_data(&self) -> Result<(Cow<[u8]>, Option<&StreamFilter>)> {
-        let mut data = Cow::Borrowed(&*self.raw_data);
-        let mut filters = self.filters.as_slice();
-        while let Some((filter, rest)) = filters.split_first() {
-            let decoded_data = match filter {
-                StreamFilter::ASCIIHexDecode => decode_hex(&data)?,
-                StreamFilter::ASCII85Decode => decode_85(&data)?,
-                StreamFilter::LZWDecode(ref params) => lzw_decode(&data, params)?,
-                StreamFilter::FlateDecode(ref params) => flate_decode(&data, params)?,
-
-                StreamFilter::Crypt => bail!("unimplemented StreamFilter::Crypt"),
-                _ => break
-            };
-            filters = rest;
-            data = Cow::Owned(decoded_data);
-        }
+    pub fn raw_image_data(&self, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Option<&StreamFilter>)> {
+        match self.inner.data {
+            StreamData::Generated(ref data) => Ok((data.clone(), None)),
+            StreamData::Original(ref file_range, id) => {
+                let filters = self.inner.filters.as_slice();
+                // decode all non image filters
+                let end = filters.iter().position(|f| match f {
+                    StreamFilter::ASCIIHexDecode => false,
+                    StreamFilter::ASCII85Decode => false,
+                    StreamFilter::LZWDecode(_) => false,
+                    StreamFilter::FlateDecode(_) => false,
         
-        match filters {
-            [] => Ok((data, None)),
-            [StreamFilter::DCTDecode(_)] |
-            [StreamFilter::CCITTFaxDecode(_)] |
-            [StreamFilter::JPXDecode] |
-            [StreamFilter::JBIG2Decode] => Ok((data, Some(&filters[0]))),
-            _ => bail!("??? filters={:?}", filters)
+                    StreamFilter::Crypt => true,
+                    _ => true
+                }).unwrap_or(filters.len());
+                
+                let (normal_filters, image_filters) = filters.split_at(end);
+                let data = resolve.get_data_or_decode(id, file_range.clone(), normal_filters)?;
+        
+                match image_filters {
+                    [] => Ok((data, None)),
+                    [StreamFilter::DCTDecode(_)] |
+                    [StreamFilter::CCITTFaxDecode(_)] |
+                    [StreamFilter::JPXDecode] |
+                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&filters[0]))),
+                    _ => bail!("??? filters={:?}", image_filters)
+                }
+            }
         }
     }
 
-    pub fn image_data(&self) -> Result<Cow<[u8]>> {
-        let (data, filter) = self.raw_image_data()?;
+    pub fn image_data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
+        let (data, filter) = self.raw_image_data(resolve)?;
         let filter = match filter {
             Some(f) => f,
             None => return Ok(data)
         };
         let data = match filter {
             StreamFilter::CCITTFaxDecode(ref params) => {
-                if self.info.width != params.columns {
-                    bail!("image width mismatch {} != {}", self.info.width, params.columns);
+                if self.inner.info.width != params.columns {
+                    bail!("image width mismatch {} != {}", self.inner.info.width, params.columns);
                 }
                 let mut data = fax_decode(&data, params)?;
                 if params.rows == 0 {
                     // adjust size
-                    data.truncate(self.info.height as usize * self.info.width as usize);
+                    data.truncate(self.inner.info.height as usize * self.inner.info.width as usize);
                 }
                 data
             }
@@ -556,14 +557,6 @@ impl ImageXObject {
             _ => unreachable!()
         };
         Ok(data.into())
-    }
-
-    /// If this is contains DCT encoded data, return the compressed data as is
-    pub fn as_jpeg(&self) -> Option<&[u8]> {
-        match *self.filters.as_slice() {
-            [StreamFilter::DCTDecode(_)] => Some(&self.raw_data),
-            _ => None
-        }
     }
 }
 
@@ -1232,7 +1225,7 @@ impl Object for Rect {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         let arr = p.resolve(r)?.into_array()?;
         if arr.len() != 4 {
-            bail!("len != 4");
+            bail!("len != 4 {:?}", arr);
         }
         Ok(Rect {
             left:   arr[0].as_number()?,

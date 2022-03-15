@@ -21,7 +21,7 @@ impl Content {
         let mut data = vec![];
         let mut ops = OpBuilder::new();
         for part in self.parts.iter() {
-            data.extend_from_slice(&t!(part.decode()));
+            data.extend_from_slice(&t!(part.data(resolve)));
         }
         ops.parse(&data, resolve)?;
         Ok(ops.ops)
@@ -519,7 +519,7 @@ impl FormXObject {
     }
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
         let mut ops = OpBuilder::new();
-        let data = self.stream.decode()?;
+        let data = self.stream.data(resolve)?;
         ops.parse(&data, resolve)?;
         Ok(ops.ops)
     }
@@ -529,7 +529,7 @@ impl Object for FormXObject {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let stream = t!(Stream::<FormDict>::from_primitive(p, resolve));
         let mut ops = OpBuilder::new();
-        ops.parse(stream.data()?, resolve)?;
+        ops.parse(&stream.data(resolve)?, resolve)?;
         Ok(FormXObject {
             stream,
         })

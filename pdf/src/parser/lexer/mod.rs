@@ -2,9 +2,8 @@
 /// whitespace.
 
 use std::str::FromStr;
-use std::ops::{Range, Deref};
+use std::ops::{Range, Deref, RangeFrom};
 use std::io::SeekFrom;
-use std::slice::SliceIndex;
 
 use crate::error::*;
 
@@ -18,6 +17,7 @@ pub use self::str::{StringLexer, HexStringLexer};
 pub struct Lexer<'a> {
     pos: usize,
     buf: &'a [u8],
+    file_offset: usize,
 }
 
 // find the position where condition(data[pos-1]) == false and condition(data[pos]) == true
@@ -51,6 +51,14 @@ impl<'a> Lexer<'a> {
         Lexer {
             pos: 0,
             buf,
+            file_offset: 0
+        }
+    }
+    pub fn with_offset(buf: &'a [u8], file_offset: usize) -> Lexer<'a> {
+        Lexer {
+            pos: 0,
+            buf,
+            file_offset
         }
     }
 
@@ -225,6 +233,7 @@ impl<'a> Lexer<'a> {
         }
 
         Substr {
+            file_offset: self.file_offset + range.start,
             slice: &self.buf[range],
         }
     }
@@ -356,6 +365,7 @@ impl<'a> Lexer<'a> {
     fn is_delimiter(&self, pos: usize) -> bool {
         self.buf.get(pos).map(|b| b"()<>[]{}/%".contains(b)).unwrap_or(false)
     }
+
 }
 
 
@@ -364,10 +374,11 @@ impl<'a> Lexer<'a> {
 #[derive(Debug)]
 pub struct Substr<'a> {
     slice: &'a [u8],
+    file_offset: usize,
 }
 impl<'a> Substr<'a> {
-    pub fn new<T: AsRef<[u8]> + ?Sized>(data: &'a T) -> Self {
-        Substr { slice: data.as_ref() }
+    pub fn new<T: AsRef<[u8]> + ?Sized>(data: &'a T, file_offset: usize) -> Self {
+        Substr { slice: data.as_ref(), file_offset }
     }
     // to: &S -> U. Possibly expensive conversion.
     // as: &S -> &U. Cheap borrow conversion
@@ -427,8 +438,15 @@ impl<'a> Substr<'a> {
         self.slice == other.as_ref()
     }
 
-    pub fn reslice<R: SliceIndex<[u8], Output = [u8]>>(&self, range: R) -> Substr<'a> {
-        Substr { slice: &self.slice[range] }
+    pub fn reslice(&self, range: RangeFrom<usize>) -> Substr<'a> {
+        Substr {
+            file_offset: self.file_offset + range.start,
+            slice: &self.slice[range],
+        }
+    }
+
+    pub fn file_range(&self) -> Range<usize> {
+        self.file_offset .. self.file_offset + self.slice.len()
     }
 }
 
@@ -475,12 +493,12 @@ mod tests {
 
     #[test]
     fn test_substr() {
-        assert!(Substr::new("123").is_real_number());
-        assert!(Substr::new("123.").is_real_number());
-        assert!(Substr::new("123.45").is_real_number());
-        assert!(Substr::new(".45").is_real_number());
-        assert!(Substr::new("-.45").is_real_number());
-        assert!(!Substr::new("123.45").is_integer());
-        assert!(Substr::new("123").is_integer());
+        assert!(Substr::new("123", 0).is_real_number());
+        assert!(Substr::new("123.", 0).is_real_number());
+        assert!(Substr::new("123.45", 0).is_real_number());
+        assert!(Substr::new(".45", 0).is_real_number());
+        assert!(Substr::new("-.45", 0).is_real_number());
+        assert!(!Substr::new("123.45", 0).is_integer());
+        assert!(Substr::new("123", 0).is_integer());
     }
 }

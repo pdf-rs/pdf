@@ -26,7 +26,7 @@ pub enum ColorSpace {
     CalGray(Dictionary),
     CalRGB(Dictionary),
     CalCMYK(Dictionary),
-    Indexed(Box<ColorSpace>, Vec<u8>),
+    Indexed(Box<ColorSpace>, Arc<[u8]>),
     Separation(String, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
     Pattern,
@@ -70,10 +70,10 @@ impl ColorSpace {
                     p => p.clone()
                 };
                 let lookup = match lookup {
-                    Primitive::String(string) => string.into_bytes(),
+                    Primitive::String(string) => string.into_bytes().into(),
                     Primitive::Stream(stream) => {
                         let s: Stream::<()> = Stream::from_stream(stream, resolve)?;
-                        t!(s.decode()).into_owned()
+                        t!(s.data(resolve))
                     },
                     p => return Err(PdfError::UnexpectedPrimitive {
                         expected: "String or Stream",

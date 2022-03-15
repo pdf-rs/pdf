@@ -529,13 +529,13 @@ impl Decoder {
         hash
     }
 
-    pub fn decrypt<'buf>(&self, id: u64, gen: u16, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
-        if self.encrypt_indirect_object == Some(PlainRef { id, gen }) {
+    pub fn decrypt<'buf>(&self, id: PlainRef, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
+        if self.encrypt_indirect_object == Some(id) {
             // Strings inside the /Encrypt dictionary are not encrypted
             return Ok(data);
         }
 
-        if !self.encrypt_metadata && self.metadata_indirect_object == Some(PlainRef { id, gen }) {
+        if !self.encrypt_metadata && self.metadata_indirect_object == Some(id) {
             // Strings inside the /Metadata dictionary are not encrypted when /EncryptMetadata is
             // false
             return Ok(data);
@@ -555,8 +555,8 @@ impl Decoder {
                 let mut key = [0; 16 + 5];
                 let n = self.key_size;
                 key[..n].copy_from_slice(self.key());
-                key[n..n + 3].copy_from_slice(&id.to_le_bytes()[..3]);
-                key[n + 3..n + 5].copy_from_slice(&gen.to_le_bytes()[..2]);
+                key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
+                key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
 
                 // c)
                 let key = *md5::compute(&key[..n + 5]);
@@ -570,8 +570,8 @@ impl Decoder {
                 let mut key = [0; 32 + 5 + 4];
                 let n = self.key_size;
                 key[..n].copy_from_slice(self.key());
-                key[n..n + 3].copy_from_slice(&id.to_le_bytes()[..3]);
-                key[n + 3..n + 5].copy_from_slice(&gen.to_le_bytes()[..2]);
+                key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
+                key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
                 key[n + 5..n + 9].copy_from_slice(b"sAlT");
 
                 // c)

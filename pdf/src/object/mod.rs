@@ -23,12 +23,31 @@ use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
+
+pub struct ParseOptions {
+    pub allow_error_in_option: bool,
+    pub allow_xref_error: bool,
+}
+impl ParseOptions {
+    pub const fn tolerant() -> Self {
+        ParseOptions {
+            allow_error_in_option: true,
+            allow_xref_error: true,
+        }
+    }
+    pub const fn strict() -> Self {
+        ParseOptions {
+            allow_error_in_option: false,
+            allow_xref_error: false,
+        }
+    }
+}
 
 pub trait Resolve: {
     fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive>;
@@ -36,6 +55,8 @@ pub trait Resolve: {
         self.resolve_flags(r, ParseFlags::ANY, 16)
     }
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>>;
+    fn options(&self) -> &ParseOptions;
+    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>>;
 }
 
 pub struct NoResolve;
@@ -45,6 +66,13 @@ impl Resolve for NoResolve {
     }
     fn get<T: Object>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
         Err(PdfError::Reference)
+    }
+    fn options(&self) -> &ParseOptions {
+        static STRICT: ParseOptions = ParseOptions::strict();
+        &STRICT
+    }
+    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        unimplemented!()
     }
 }
 
@@ -555,6 +583,10 @@ impl<T: Object> Object for Option<T> {
                 // References to non-existing objects ought not to be an error
                 Err(PdfError::NullRef {..}) => Ok(None),
                 Err(PdfError::FreeObject {..}) => Ok(None),
+                Err(e) if resolve.options().allow_error_in_option => {
+                    warn!("ignoring {:?}", e);
+                    Ok(None)
+                }
                 Err(e) => Err(e)
             }
         }

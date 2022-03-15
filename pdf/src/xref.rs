@@ -145,7 +145,8 @@ impl XRefTable {
             prev: None,
             w: vec![1, a_w, b_w],
         };
-        Ok(Stream::new(info, data).hexencode())
+        unimplemented!()
+        //Ok(Stream::new(info, data).hexencode())
     }
 }
 
