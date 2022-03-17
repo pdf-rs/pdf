@@ -242,12 +242,11 @@ impl<'a> Lexer<'a> {
     /// Just a helper function for set_pos, set_pos_from_end and offset_pos.
     #[inline]
     fn seek(&mut self, new_pos: SeekFrom) -> Substr<'a> {
-        let wanted_pos;
-        match new_pos {
-            SeekFrom::Start(offset) => wanted_pos = offset as usize,
-            SeekFrom::End(offset) => wanted_pos = self.buf.len() - offset as usize - 1,
-            SeekFrom::Current(offset) => wanted_pos = self.pos + offset as usize,
-        }
+        let wanted_pos = match new_pos {
+            SeekFrom::Start(offset) => offset as usize,
+            SeekFrom::End(offset) => self.buf.len() - offset as usize - 1,
+            SeekFrom::Current(offset) => self.pos + offset as usize,
+        };
 
         let range = if self.pos < wanted_pos {
             self.pos..wanted_pos

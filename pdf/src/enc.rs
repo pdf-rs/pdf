@@ -108,7 +108,7 @@ impl StreamFilter {
 }
 
 #[inline]
-fn decode_nibble(c: u8) -> Option<u8> {
+pub fn decode_nibble(c: u8) -> Option<u8> {
     match c {
         n @ b'0' ..= b'9' => Some(n - b'0'),
         a @ b'a' ..= b'h' => Some(a - b'a' + 0xa),

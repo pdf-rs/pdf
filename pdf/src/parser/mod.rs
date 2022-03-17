@@ -171,8 +171,23 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
     } else if first_lexeme.starts_with(b"/") {
         check(flags, ParseFlags::NAME)?;
         // Name
-        let s = first_lexeme.reslice(1..).to_string();
-        Primitive::Name(s)
+        let mut s = Vec::new();
+        let mut rest: &[u8] = &*first_lexeme.reslice(1..);
+        while let Some(idx) = rest.iter().position(|&b| b == b'#') {
+            use crate::enc::decode_nibble;
+            use std::convert::TryInto;
+            let [hi, lo]: [u8; 2] = rest.get(idx+1 .. idx+3).ok_or(PdfError::EOF)?.try_into().unwrap();
+            let byte = match (decode_nibble(lo), decode_nibble(hi)) {
+                (Some(low), Some(high)) => low | high << 4,
+                _ => return Err(PdfError::HexDecode { pos: idx, bytes: [hi, lo] }),
+            };
+            s.extend_from_slice(&rest[..idx]);
+            s.push(byte);
+            rest = &rest[idx+3..];
+        }
+        s.extend_from_slice(rest);
+        
+        Primitive::Name(String::from_utf8(s)?)
     } else if first_lexeme.equals(b"[") {
         check(flags, ParseFlags::ARRAY)?;
         if max_depth == 0 {
