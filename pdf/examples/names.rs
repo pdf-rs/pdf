@@ -28,7 +28,7 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
             let page_nr = name_map(&name);
             println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
         }
-        if let Some(Action::Goto(Dest { page: Some(page), ..})) = node.action {
+        if let Some(Action::Goto(MaybeNamedDest::Direct(Dest { page: Some(page), ..}))) = node.action {
             let page_nr = page_map(page.get_inner());
             println!("{}action -> page nr. {:?}", indent, page_nr);
         }

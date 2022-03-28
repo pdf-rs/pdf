@@ -29,7 +29,7 @@ fn main() -> Result<(), PdfError> {
         ]);
         let mut new_page = PageBuilder::from_page(&page)?;
         for s in new_page.content.as_mut().iter_mut().flat_map(|c| c.parts.iter_mut()) {
-            *s = Stream::new((), s.decode()?.into());
+            *s = Stream::new((), s.data(&file)?);
         }
         pages.push(new_page);
     }

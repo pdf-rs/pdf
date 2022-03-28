@@ -33,7 +33,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
         Ok(Stream { info, data: StreamData::Original(file_range, id) })
     }
 
-    pub fn new_with_filters(i: I, data: Vec<u8>, filters: Vec<StreamFilter>) -> Stream<I> {
+    pub fn new_with_filters(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
         Stream {
             info: StreamInfo {
                 filters,
@@ -44,7 +44,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
             data: StreamData::Generated(data.into()),
         }
     }
-    pub fn new(i: I, data: Vec<u8>) -> Stream<I> {
+    pub fn new(i: I, data: impl Into<Arc<[u8]>>) -> Stream<I> {
         Stream {
             info: StreamInfo {
                 filters: Vec::new(),

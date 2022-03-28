@@ -9,6 +9,7 @@ use pdf::file::File;
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::error::PdfError;
+use pdf::enc::StreamFilter;
 
 
 fn main() -> Result<(), PdfError> {
@@ -54,18 +55,25 @@ fn main() -> Result<(), PdfError> {
             XObject::Image(ref im) => im,
             _ => continue
         };
-        let fname = format!("extracted_image_{}.jpeg", i);
-        if let Some(data) = img.as_jpeg() {
-            fs::write(fname.as_str(), data).unwrap();
-            println!("Wrote file {}", fname);
-        }
+        let (data, filter) = img.raw_image_data(&file)?;
+        let ext = match filter {
+            Some(StreamFilter::DCTDecode(_)) => "jpeg",
+            Some(StreamFilter::JBIG2Decode) => "jbig2",
+            Some(StreamFilter::JPXDecode) => "jp2k",
+            _ => continue,
+        };
+
+        let fname = format!("extracted_image_{}.{}", i, ext);
+        
+        fs::write(fname.as_str(), data).unwrap();
+        println!("Wrote file {}", fname);
     }
     println!("Found {} image(s).", images.len());
 
 
     for (name, font) in fonts.iter() {
         let fname = format!("font_{}", name);
-        if let Some(Ok(data)) = font.embedded_data() {
+        if let Some(Ok(data)) = font.embedded_data(&file) {
             fs::write(fname.as_str(), data).unwrap();
             println!("Wrote file {}", fname);
         }
