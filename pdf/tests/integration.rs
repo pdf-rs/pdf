@@ -127,7 +127,8 @@ fn parse_objects_from_stream() {
     // .. we know that object 13 of that file is an ObjectStream
     let obj_stream: RcRef<ObjectStream> = run!(file.get(Ref::new(PlainRef {id: 13, gen: 0})));
     for i in 0..obj_stream.n_objects() {
-        let slice = run!(obj_stream.get_object_slice(i));
+        let (data, range) = run!(obj_stream.get_object_slice(i, &file));
+        let slice = &data[range];
         println!("Object slice #{}: {}\n", i, str::from_utf8(slice).unwrap());
         run!(parse(slice, &NoResolve, ParseFlags::ANY));
     }

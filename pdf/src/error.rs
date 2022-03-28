@@ -2,12 +2,16 @@ use crate::object::ObjNr;
 use std::io;
 use std::error::Error;
 use crate::parser::ParseFlags;
+use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
     // Syntax / parsing
     #[snafu(display("Unexpected end of file"))]
     EOF,
+
+    #[snafu(display("Shared"))]
+    Shared { source: Arc<PdfError> },
 
     #[snafu(display("Not enough Operator arguments"))]
     NoOpArg,
@@ -181,6 +185,11 @@ impl From<io::Error> for PdfError {
 impl From<String> for PdfError {
     fn from(msg: String) -> PdfError {
         PdfError::Other { msg }
+    }
+}
+impl From<Arc<PdfError>> for PdfError {
+    fn from(source: Arc<PdfError>) -> PdfError {
+        PdfError::Shared { source }
     }
 }
 

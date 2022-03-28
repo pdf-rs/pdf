@@ -21,7 +21,6 @@ use crate::enc::*;
 use std::fmt;
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
@@ -77,13 +76,7 @@ impl Resolve for NoResolve {
 }
 
 /// A PDF Object
-#[cfg(feature="sync")]
 pub trait Object: Sized + Sync + Send + 'static {
-    /// Convert primitive to Self
-    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
-}
-#[cfg(not(feature="sync"))]
-pub trait Object: Sized + 'static {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
 }
@@ -209,10 +202,6 @@ impl<T> PartialEq for Ref<T> {
 }
 impl<T> Eq for Ref<T> {}
 
-#[cfg(not(feature="sync"))]
-pub type Shared<T> = Rc<T>;
-
-#[cfg(feature="sync")]
 pub type Shared<T> = Arc<T>;
 
 

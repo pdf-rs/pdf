@@ -265,7 +265,6 @@ fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
 {
     loop {
-        debug!("parent: {:?}", parent);
         match (&parent.parent, f(parent)) {
             (_, Some(t)) => return Ok(Some(t)),
             (Some(ref p), None) => parent = p,

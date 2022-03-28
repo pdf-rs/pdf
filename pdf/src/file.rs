@@ -6,9 +6,6 @@ use std::sync::{Arc, RwLock, Mutex, Condvar};
 use std::path::Path;
 use std::io::Write;
 
-#[cfg(not(feature="sync"))]
-use std::cell::RefCell;
-
 use crate as pdf;
 use crate::error::*;
 use crate::object::*;
@@ -21,8 +18,8 @@ use crate::xref::{XRef, XRefTable, XRefInfo};
 use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
-use std::borrow::Cow;
 use std::ops::Range;
+use moka::sync::Cache;
 
 #[must_use]
 pub struct PromisedRef<T> {
@@ -47,16 +44,9 @@ struct Waiter {
 
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
-    #[cfg(not(feature="sync"))]
-    cache: RefCell<HashMap<PlainRef, Option<Any>>>,
+    cache: Cache<PlainRef, Result<AnySync, Arc<PdfError>>>,
 
-    #[cfg(feature="sync")]
-    cache: RwLock<HashMap<PlainRef, AnySync>>,
-
-    stream_cache: RwLock<HashMap<PlainRef, Arc<[u8]>>>,
-
-    #[cfg(feature="sync")]
-    waiter: Waiter,
+    stream_cache: Cache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>,
 
     // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
@@ -77,15 +67,24 @@ impl<B: Backend> Storage<B> {
             start_offset: backend.locate_start_offset()?,
             backend,
             refs: XRefTable::new(0),
-            cache: Default::default(),
-            stream_cache: Default::default(),
+            cache: Cache::new(1024 * 1024),
+            stream_cache: Cache::new(1024 * 1024),
             changes: HashMap::new(),
             decoder: None,
             options,
-
-            #[cfg(feature="sync")]
-            waiter: Default::default(),
         })
+    }
+    fn decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        let data = self.backend.read(range)?;
+
+        let mut data = Vec::from(data);
+        if let Some(ref decoder) = self.decoder {
+            decoder.decrypt(id, &mut data)?;
+        }
+        for filter in filters {
+            data = t!(decode(&data, filter), filter);
+        }
+        Ok(data.into())
     }
 }
 impl<B: Backend> Resolve for Storage<B> {
@@ -115,101 +114,26 @@ impl<B: Backend> Resolve for Storage<B> {
         }
     }
 
-    #[cfg(not(feature="sync"))]
     fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
-        if let Some(opt) = self.cache.borrow().get(&key) {
-            match opt {
-                Some(any) => return Ok(RcRef::new(key, any.clone().downcast()?)),
-                None => bail!("recursion")
+        let res = self.cache.get_or_insert_with(key, || {
+            match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
+                Ok(obj) => Ok(Shared::new(obj).into()),
+                Err(e) => Err(Arc::new(e)),
             }
+        });
+        match res {
+            Ok(any) => Ok(RcRef::new(key, any.downcast()?)),
+            Err(e) => Err(PdfError::Shared { source: e.clone()}),
         }
-
-        let primitive = t!(self.resolve(key));
-
-        self.cache.borrow_mut().insert(key, None);
-
-        let name = std::any::type_name::<T>();
-        let obj = t!(T::from_primitive(primitive, self), name);
-        let rc = Shared::new(obj);
-        self.cache.borrow_mut().insert(key, Some(rc.clone().into()));
-        
-        Ok(RcRef::new(key, rc))
-    }
-    #[cfg(feature="sync")]
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
-        use std::collections::hash_map::Entry;
-        let key = r.get_inner();
-        
-        if let Some(any) = self.cache.read().unwrap().get(&key).cloned() {
-            return Ok(RcRef::new(key, any.downcast()?));
-        }
-        let current_thread = std::thread::current().id();
-        let mut guard = self.waiter.mutex.lock().unwrap();
-        
-        let wait;
-        let cvar;
-        match guard.entry(key) {
-            Entry::Vacant(e) => {
-                cvar = Arc::new(Condvar::new());
-                e.insert((current_thread, cvar.clone()));
-                wait = false;
-            }
-            Entry::Occupied(e) => {
-                let &(other_thread, ref cvar2) = e.get();
-                if other_thread == current_thread {
-                    bail!("cyclic");
-                }
-                wait = true;
-                cvar = cvar2.clone();
-            }
-        }
-
-        if wait {
-            loop {
-                guard = cvar.wait(guard).unwrap();
-                if !guard.contains_key(&key) {
-                    break;
-                }
-            }
-            drop(guard);
-            let any = self.cache.read().unwrap().get(&key).cloned().unwrap();
-            return Ok(RcRef::new(key, any.downcast()?));
-        }
-        drop(guard);
-
-        let primitive = t!(self.resolve(key));
-
-        let name = std::any::type_name::<T>();
-        let obj = t!(T::from_primitive(primitive, self), name);
-        let rc = Shared::new(obj);
-        self.cache.write().unwrap().insert(key, rc.clone().into());
-
-        self.waiter.mutex.lock().unwrap().remove(&key);
-        cvar.notify_all();
-        
-        Ok(RcRef::new(key, rc))
     }
     fn options(&self) -> &ParseOptions {
         &self.options
     }
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        if let Some(data) = self.stream_cache.read().unwrap().get(&id) {
-            return Ok(data.clone());
-        }
-        let data = self.backend.read(range)?;
-
-        let mut data = Vec::from(data);
-        if let Some(ref decoder) = self.decoder {
-            decoder.decrypt(id, &mut data)?;
-        }
-        for filter in filters {
-            data = t!(decode(&data, filter), filter);
-        }
-        let arc: Arc<[u8]> = data.into();
-        self.stream_cache.write().unwrap().insert(id, arc.clone());
-        Ok(arc)
+        self.stream_cache.get_or_insert_with(id, || self.decode(id, range, filters).map_err(Arc::new))
+        .map_err(|e| e.into())
     }
 }
 impl<B: Backend> Updater for Storage<B> {
