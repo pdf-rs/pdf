@@ -439,6 +439,9 @@ impl ToUnicodeMap {
     pub fn insert(&mut self, gid: u16, unicode: String) {
         self.inner.insert(gid, unicode);
     }
+    pub fn iter(&self) -> impl Iterator<Item=(u16, &str)> {
+        self.inner.iter().map(|(&gid, unicode)| (gid, unicode.as_str()))
+    }
 }
 
 /// helper function to decode UTF-16-BE data
