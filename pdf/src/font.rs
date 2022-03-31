@@ -53,9 +53,15 @@ pub enum FontData {
     Type0(Type0Font),
     TrueType(TFont),
     CIDFontType0(CIDFont),
-    CIDFontType2(CIDFont, Option<Vec<u16>>),
+    CIDFontType2(CIDFont, Option<CidToGidMap>),
     Other(Dictionary),
     None,
+}
+
+#[derive(Debug)]
+pub enum CidToGidMap {
+    Identity,
+    Table(Vec<u16>)
 }
 
 impl Object for Font {
@@ -79,7 +85,7 @@ impl Object for Font {
         let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
 
         let to_unicode = match dict.remove("ToUnicode") {
-            Some(p) => Some(Stream::from_primitive(p, resolve)?),
+            Some(p) => Some(Stream::<()>::from_primitive(p, resolve)?),
             None => None
         };
         let _other = dict.clone();
@@ -91,10 +97,13 @@ impl Object for Font {
                 FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
                 FontType::CIDFontType2 => {
                     let cid_map = match dict.remove("CIDToGIDMap") {
+                        Some(Primitive::Name(name)) if name == "/Identity" => {
+                            Some(CidToGidMap::Identity)
+                        }
                         Some(p @ Primitive::Stream(_)) | Some(p @ Primitive::Reference(_)) => {
                             let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
                             let data = stream.data(resolve)?;
-                            Some(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect())
+                            Some(CidToGidMap::Table(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
                         },
                         _ => None
                     };
@@ -115,6 +124,7 @@ impl Object for Font {
         })
     }
 }
+
 
 #[derive(Debug)]
 pub struct Widths {
@@ -191,10 +201,10 @@ impl Font {
     pub fn is_cid(&self) -> bool {
         matches!(self.data, Ok(FontData::CIDFontType0(_)) | Ok(FontData::CIDFontType2(_, _)))
     }
-    pub fn cid_to_gid_map(&self) -> Option<&[u16]> {
+    pub fn cid_to_gid_map(&self) -> Option<&CidToGidMap> {
         match self.data.as_ref().ok()? {
             FontData::Type0(ref inner) => inner.descendant_fonts.get(0).and_then(|f| f.cid_to_gid_map()),
-            FontData::CIDFontType2(_, ref data) => data.as_ref().map(|v| &**v),
+            FontData::CIDFontType2(_, ref data) => data.as_ref(),
             _ => None
         }
     }
@@ -478,6 +488,9 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
         match substr.as_slice() {
             b"beginbfchar" => loop {
                 let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
+                if let Err(_) = a {
+                    break;
+                }
                 let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
                 match (a, b) {
                     (Ok(Primitive::String(cid_data)), Ok(Primitive::String(unicode_data))) => {
@@ -493,6 +506,9 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
             },
             b"beginbfrange" => loop {
                 let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
+                if let Err(_) = a {
+                    break;
+                }
                 let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
                 let c = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING | ParseFlags::ARRAY);
                 match (a, b, c) {

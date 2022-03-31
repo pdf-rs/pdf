@@ -24,13 +24,13 @@ pub (crate) enum StreamData {
 #[derive(Clone)]
 pub struct Stream<I=()> {
     pub info: StreamInfo<I>,
-    pub (crate) data: StreamData,
+    pub (crate) inner_data: StreamData,
 }
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
         let PdfStream {info, id, file_range} = s;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream { info, data: StreamData::Original(file_range, id) })
+        Ok(Stream { info, inner_data: StreamData::Original(file_range, id) })
     }
 
     pub fn new_with_filters(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
@@ -41,7 +41,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            data: StreamData::Generated(data.into()),
+            inner_data: StreamData::Generated(data.into()),
         }
     }
     pub fn new(i: I, data: impl Into<Arc<[u8]>>) -> Stream<I> {
@@ -52,12 +52,12 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            data: StreamData::Generated(data.into()),
+            inner_data: StreamData::Generated(data.into()),
         }
     }
 
     pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
-        match self.data {
+        match self.inner_data {
             StreamData::Generated(ref data) => Ok(data.clone()),
             StreamData::Original(ref file_range, id) => {
                 resolve.get_data_or_decode(id, file_range.clone(), &self.info.filters)
@@ -125,7 +125,7 @@ impl<I: ObjectWrite> Stream<I> {
             info.insert("DecodeParms", para);
         }
 
-        match self.data {
+        match self.inner_data {
             StreamData::Generated(ref data) => unimplemented!(),
             StreamData::Original(ref file_range, id) => {
                 info.insert("Length", Primitive::Integer(file_range.len() as _));

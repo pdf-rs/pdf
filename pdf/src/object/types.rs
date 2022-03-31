@@ -502,7 +502,7 @@ impl ImageXObject {
 
     /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
     pub fn raw_image_data(&self, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Option<&StreamFilter>)> {
-        match self.inner.data {
+        match self.inner.inner_data {
             StreamData::Generated(ref data) => Ok((data.clone(), None)),
             StreamData::Original(ref file_range, id) => {
                 let filters = self.inner.filters.as_slice();
