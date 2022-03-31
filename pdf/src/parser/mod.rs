@@ -119,6 +119,17 @@ fn check(flags: ParseFlags, allowed: ParseFlags) -> Result<(), PdfError> {
 /// Recursive. Can parse stream but only if its dictionary does not contain indirect references.
 /// Use `parse_stream` if this is not sufficient.
 pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, flags: ParseFlags, max_depth: usize) -> Result<Primitive> {
+    let pos = lexer.get_pos();
+    match _parse_with_lexer_ctx(lexer, r, ctx, flags, max_depth) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            lexer.set_pos(pos);
+            Err(e)
+        }
+    }
+}
+fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, flags: ParseFlags, max_depth: usize) -> Result<Primitive> {
+
     let input = lexer.get_remaining_slice();
     let first_lexeme = t!(lexer.next(), std::str::from_utf8(input));
 
