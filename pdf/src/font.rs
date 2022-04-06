@@ -68,13 +68,13 @@ impl Object for Font {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = p.resolve(resolve)?.into_dictionary()?;
 
-        let subtype = FontType::from_primitive(dict.require("Font", "Subtype")?, resolve)?;
+        let subtype = t!(FontType::from_primitive(dict.require("Font", "Subtype")?, resolve));
 
         // BaseFont is required for all FontTypes except Type3
         dict.expect("Font", "Type", "Font", true)?;
         let base_font_primitive = dict.get("BaseFont");
         let base_font = match (base_font_primitive, subtype) {
-            (Some(name), _) => Some(name.clone().into_name()?),
+            (Some(name), _) => Some(t!(t!(name.clone().resolve(resolve)).into_name(), name)),
             (None, FontType::Type3) => None,
             (_, _) => return Err(PdfError::MissingEntry {
                 typ: "Font",
