@@ -664,7 +664,7 @@ pub struct FormDict {
     pub name: Option<String>,
 
     #[pdf(key="LastModified")]
-    pub last_modified: Option<String>,
+    pub last_modified: Option<PdfString>,
 
     #[pdf(key="BBox")]
     pub bbox: Rect,
