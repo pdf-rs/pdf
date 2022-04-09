@@ -254,7 +254,7 @@ impl OpBuilder {
                     lexer.set_pos(backup_pos);
                     let op = t!(lexer.next());
                     let operator = t!(op.as_str());
-                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), operator);
+                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), operator, lexer.ctx());
                 }
             }
             match lexer.get_pos().cmp(&data.len()) {

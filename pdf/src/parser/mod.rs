@@ -175,10 +175,10 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
             lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
             Primitive::Integer(t!(first_lexeme.to::<i32>()))
         }
-    } else if first_lexeme.is_real_number() {
+    } else if let Some(s) = first_lexeme.real_number() {
         check(flags, ParseFlags::NUMBER)?;
         // Real Number
-        Primitive::Number (t!(first_lexeme.to::<f32>()))
+        Primitive::Number (t!(s.to::<f32>(), s.to_string()))
     } else if first_lexeme.starts_with(b"/") {
         check(flags, ParseFlags::NAME)?;
         // Name

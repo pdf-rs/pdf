@@ -128,11 +128,11 @@ pub enum PdfError {
     #[snafu(display("{}", msg))]
     Other { msg: String },
 
-    #[snafu(display("NoneError at {}:{}:{}: {:?}", file, line, column, context))]
-    NoneError { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)> },
+    #[snafu(display("NoneError at {}:{}:{}:{}", file, line, column, context))]
+    NoneError { file: &'static str, line: u32, column: u32, context: Context },
 
-    #[snafu(display("Try at {}:{}:{}: {:?}", file, line, column, context))]
-    Try { file: &'static str, line: u32, column: u32, context: Vec<(&'static str, String)>, source: Box<PdfError> },
+    #[snafu(display("Try at {}:{}:{}:{}", file, line, column, context))]
+    Try { file: &'static str, line: u32, column: u32, context: Context, source: Box<PdfError> },
 
     #[snafu(display("PostScriptParseError"))]
     PostScriptParse,
@@ -174,6 +174,19 @@ fn trace(err: &dyn Error, depth: usize) {
     }
 }
 
+#[derive(Debug)]
+pub struct Context(pub Vec<(&'static str, String)>);
+impl std::fmt::Display for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        for (i, &(key, ref val)) in self.0.iter().enumerate() {
+            if i == 0 {
+                writeln!(f)?;
+            }
+            writeln!(f, "    {} = {}", key, val)?;
+        }
+        Ok(())
+    }
+}
 
 pub type Result<T, E=PdfError> = std::result::Result<T, E>;
 
@@ -199,7 +212,7 @@ macro_rules! try_opt {
         match $e {
             Some(v) => v,
             None => {
-                let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
+                let context = $crate::error::Context(vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ]);
                 return Err($crate::PdfError::NoneError {
                     file: file!(),
                     line: line!(),
@@ -217,7 +230,7 @@ macro_rules! t {
         match $e {
             Ok(v) => v,
             Err(e) => {
-                let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
+                let context = $crate::error::Context(vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ]);
                 return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), context, source: e.into() })
             }
         }
@@ -230,7 +243,7 @@ macro_rules! ctx {
         match $e {
             Ok(v) => Ok(v),
             Err(e) => {
-                let context = vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ];
+                let context = $crate::error::Context(vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ]);
                 Err($crate::PdfError::TryContext { file: file!(), line: line!(), column: column!(), context, source: e.into() })
             }
         }

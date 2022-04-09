@@ -4,6 +4,7 @@
 use std::str::FromStr;
 use std::ops::{Range, Deref, RangeFrom};
 use std::io::SeekFrom;
+use std::borrow::Cow;
 
 use crate::error::*;
 
@@ -346,6 +347,11 @@ impl<'a> Lexer<'a> {
         &self.buf[self.pos..]
     }
 
+    /// for debugging
+    pub fn ctx(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.buf[self.pos.saturating_sub(40)..self.buf.len().min(self.pos+40)])
+    }
+
     #[inline]
     fn incr_pos(&mut self) -> bool {
         if self.pos >= self.buf.len() - 1 {
@@ -370,7 +376,7 @@ impl<'a> Lexer<'a> {
 
 
 /// A slice from some original string - a lexeme.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Substr<'a> {
     slice: &'a [u8],
     file_offset: usize,
@@ -409,20 +415,36 @@ impl<'a> Substr<'a> {
         is_int(slice)
     }
     pub fn is_real_number(&self) -> bool {
+        self.real_number().is_some()
+    }
+    pub fn real_number(&self) -> Option<Self> {
         if self.slice.len() == 0 {
-            return false;
+            return None;
         }
         let mut slice = self.slice;
         if slice[0] == b'-' {
             if slice.len() < 2 {
-                return false;
+                return None;
             }
             slice = &slice[1..];
         }
         if let Some(i) = slice.iter().position(|&b| b == b'.') {
-            is_int(&slice[..i]) && is_int(&slice[i+1..])
+            if !is_int(&slice[..i]) {
+                return None;
+            }
+            slice = &slice[i+1..];
+        }
+        if let Some(len) = slice.iter().position(|&b| !matches!(b, b'0'..=b'9')) {
+            if len == 0 {
+                return None;
+            }
+            let end = self.slice.len() - slice.len() + len;
+            Some(Substr {
+                file_offset: self.file_offset,
+                slice: &self.slice[..end]
+            })
         } else {
-            is_int(slice)
+            Some(*self)
         }
     }
 
