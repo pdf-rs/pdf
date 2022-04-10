@@ -742,7 +742,7 @@ pub enum FieldType {
 #[derive(Object, ObjectWrite, Debug)]
 pub struct FieldDictionary {
     #[pdf(key="FT")]
-    pub typ: FieldType,
+    pub typ: Option<FieldType>,
     
     #[pdf(key="Parent")]
     pub parent: Option<MaybeRef<FieldDictionary>>,
