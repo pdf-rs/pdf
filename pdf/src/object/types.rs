@@ -752,6 +752,7 @@ pub struct SeedValueDictionary {
 }
 
 #[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="Sig")]
 pub struct SignatureDictionary {
     #[pdf(key="Type")]
     pub typ: FieldType,
@@ -790,6 +791,7 @@ pub struct SignatureDictionary {
 }
 
 #[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="SigRef")]
 pub struct SignatureReferenceDictionary {
     #[pdf(key="Type")]
     pub typ: Option<FieldType>,
