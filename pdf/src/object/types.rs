@@ -737,6 +737,70 @@ pub enum FieldType {
     Choice,
     #[pdf(name="Sig")]
     Signature,
+    #[pdf(name="SigRef")]
+    SignatureReference,
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+pub struct SeedValueDictionary {
+    #[pdf(key="Ff", default="0")]
+    pub flags: u32,
+    #[pdf(key="V")]
+    pub value: Primitive,
+    #[pdf(key="DigestMethod")]
+    pub digest_method: Primitive,
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+pub struct SignatureDictionary {
+    #[pdf(key="Type")]
+    pub typ: FieldType,
+    #[pdf(key="Filter")]
+    pub filter: Primitive,
+    #[pdf(key="SubFilter")]
+    pub sub_filter: Primitive,
+    #[pdf(key="ByteRange")]
+    pub byte_range: Primitive,
+    #[pdf(key="Contents")]
+    pub contents: Primitive,
+    #[pdf(key="Cert")]
+    pub cert: Vec<Primitive>,
+    #[pdf(key="Reference")]
+    pub reference: Option<Primitive>,
+    #[pdf(key="Name")]
+    pub name: Option<Primitive>,
+    #[pdf(key="M")]
+    pub m: Option<Primitive>,
+    #[pdf(key="Location")]
+    pub location: Option<Primitive>,
+    #[pdf(key="Reason")]
+    pub reason: Option<Primitive>,
+    #[pdf(key="ContactInfo")]
+    pub contact_info: Option<Primitive>,
+    #[pdf(key="V")]
+    pub v: Primitive,
+    #[pdf(key="R")]
+    pub r: Primitive,
+    #[pdf(key="Prop_Build")]
+    pub prop_build: Primitive,
+    #[pdf(key="Prop_AuthTime")]
+    pub prop_auth_time: Primitive,
+    #[pdf(key="Prop_AuthType")]
+    pub prop_auth_type: Primitive,
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+pub struct SignatureReferenceDictionary {
+    #[pdf(key="Type")]
+    pub typ: Option<FieldType>,
+    #[pdf(key="TransformMethod")]
+    pub transform_method: Primitive,
+    #[pdf(key="TransformParams")]
+    pub transform_params: Option<Vec<Primitive>>,
+    #[pdf(key="Data")]
+    pub data: Option<Primitive>,
+    #[pdf(key="DigestMethod")]
+    pub digest_method: Option<Primitive>,
 }
 
 #[derive(Object, ObjectWrite, Debug)]
@@ -761,6 +825,12 @@ pub struct FieldDictionary {
     
     #[pdf(key="Ff", default="0")]
     pub flags: u32,
+
+     #[pdf(key="SV")]
+    pub seed_value: Option<SeedValueDictionary>,
+
+    #[pdf(key="SigFlags", default="0")]
+    pub sig_flags: u32,
 
     #[pdf(key="V")]
     pub value: Primitive,
