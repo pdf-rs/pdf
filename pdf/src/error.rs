@@ -261,7 +261,8 @@ macro_rules! err_from {
         )*
     )
 }
-err_from!(std::str::Utf8Error, std::string::FromUtf8Error, std::string::FromUtf16Error => Encoding);
+err_from!(std::str::Utf8Error, std::string::FromUtf8Error, std::string::FromUtf16Error,
+    istring::FromUtf8Error<istring::IBytes>, istring::FromUtf8Error<istring::SmallBytes> => Encoding);
 err_from!(std::num::ParseIntError, std::string::ParseError => Parse);
 err_from!(jpeg_decoder::Error => Jpeg);
 

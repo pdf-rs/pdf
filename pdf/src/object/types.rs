@@ -326,23 +326,23 @@ pub struct PageLabel {
 #[derive(Object, ObjectWrite, Debug)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
-    pub graphics_states: HashMap<String, GraphicsStateParameters>,
+    pub graphics_states: HashMap<Name, GraphicsStateParameters>,
 
     #[pdf(key="ColorSpace")]
-    pub color_spaces: HashMap<String, ColorSpace>,
+    pub color_spaces: HashMap<Name, ColorSpace>,
 
     #[pdf(key="Pattern")]
-    pub pattern: HashMap<String, RcRef<Pattern>>,
+    pub pattern: HashMap<Name, RcRef<Pattern>>,
 
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
-    pub xobjects: HashMap<String, Ref<XObject>>,
+    pub xobjects: HashMap<Name, Ref<XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: HashMap<String, Ref<Font>>,
+    pub fonts: HashMap<Name, Ref<Font>>,
 
     #[pdf(key="Properties")]
-    pub properties: HashMap<String, MaybeRef<Dictionary>>,
+    pub properties: HashMap<Name, MaybeRef<Dictionary>>,
 }
 impl Resources {
     pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {
@@ -409,7 +409,7 @@ pub struct GraphicsStateParameters {
     pub dash_pattern: Option<Vec<Primitive>>,
     
     #[pdf(key="RI")]
-    pub rendering_intent: Option<String>,
+    pub rendering_intent: Option<Name>,
 
     #[pdf(key="OP")]
     pub overprint: Option<bool>,
@@ -661,7 +661,7 @@ pub struct FormDict {
     pub form_type: i32,
 
     #[pdf(key="Name")]
-    pub name: Option<String>,
+    pub name: Option<Name>,
 
     #[pdf(key="LastModified")]
     pub last_modified: Option<PdfString>,
@@ -1341,12 +1341,12 @@ mod tests {
     #[test]
     fn parse_struct_type() {
         assert!(matches!(
-            StructType::from_primitive(Primitive::Name("BibEntry".to_string()), &NoResolve),
+            StructType::from_primitive(Primitive::Name("BibEntry".into()), &NoResolve),
             Ok(StructType::BibEntry)
         ));
 
         let result =
-            StructType::from_primitive(Primitive::Name("CustomStructType".to_string()), &NoResolve);
+            StructType::from_primitive(Primitive::Name("CustomStructType".into()), &NoResolve);
         if let Ok(StructType::Other(name)) = &result {
             assert_eq!(name, "CustomStructType");
         } else {

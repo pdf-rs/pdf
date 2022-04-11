@@ -8,6 +8,7 @@ use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
 use std::borrow::Cow;
 use std::sync::Arc;
+use istring::SmallString;
 
 #[allow(non_upper_case_globals, dead_code)]
 mod flags {
@@ -36,7 +37,7 @@ pub enum FontType {
 #[derive(Debug)]
 pub struct Font {
     pub subtype: FontType,
-    pub name: Option<String>,
+    pub name: Option<Name>,
     pub data: Result<FontData>,
 
     encoding: Option<Encoding>,
@@ -275,7 +276,7 @@ impl Font {
 #[derive(Object, Debug)]
 pub struct TFont {
     #[pdf(key="BaseFont")]
-    pub base_font: Option<String>,
+    pub base_font: Option<Name>,
 
     /// per spec required, but some files lack it.
     #[pdf(key="FirstChar")]
@@ -323,7 +324,7 @@ pub struct CIDFont {
 #[derive(Object, Debug)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
-    pub font_name: String,
+    pub font_name: Name,
 
     #[pdf(key="FontFamily")]
     pub font_family: Option<PdfString>,
@@ -429,7 +430,7 @@ pub enum FontStretch {
 #[derive(Clone, Debug)]
 pub struct ToUnicodeMap {
     // todo: reduce allocations
-    inner: HashMap<u16, String>
+    inner: HashMap<u16, SmallString>
 }
 impl ToUnicodeMap {
     pub fn new() -> Self {
@@ -440,13 +441,13 @@ impl ToUnicodeMap {
     /// Create a new ToUnicodeMap from key/value pairs.
     ///
     /// subject to change
-    pub fn create(iter: impl Iterator<Item=(u16, String)>) -> Self {
+    pub fn create(iter: impl Iterator<Item=(u16, SmallString)>) -> Self {
         ToUnicodeMap { inner: iter.collect() }
     }
     pub fn get(&self, gid: u16) -> Option<&str> {
         self.inner.get(&gid).map(|s| s.as_str())
     }
-    pub fn insert(&mut self, gid: u16, unicode: String) {
+    pub fn insert(&mut self, gid: u16, unicode: SmallString) {
         self.inner.insert(gid, unicode);
     }
     pub fn iter(&self) -> impl Iterator<Item=(u16, &str)> {
@@ -468,7 +469,7 @@ pub fn utf16be_to_string_lossy(data: &[u8]) -> pdf::error::Result<String> {
         .collect())
 }
 /// converts UTF16-BE to a string errors out in illegal/unknonw characters
-pub fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<String> {
+pub fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<SmallString> {
     utf16be_to_char(data)
         .map(|r| r.map_err(|_| PdfError::Utf16Decode))
         .collect()

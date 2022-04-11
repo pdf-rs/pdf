@@ -7,6 +7,7 @@ use std::io::SeekFrom;
 use std::borrow::Cow;
 
 use crate::error::*;
+use crate::primitive::Name;
 
 mod str;
 pub use self::str::{StringLexer, HexStringLexer};
@@ -392,6 +393,9 @@ impl<'a> Substr<'a> {
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         String::from_utf8_lossy(self.as_slice()).into()
+    }
+    pub fn to_name(&self) -> Result<Name> {
+        Ok(Name(std::str::from_utf8(self.as_slice())?.into()))
     }
     pub fn to_vec(&self) -> Vec<u8> {
         self.slice.to_vec()

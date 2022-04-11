@@ -14,6 +14,7 @@ use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use self::lexer::{HexStringLexer, StringLexer};
 use crate::crypt::Decoder;
 use bitflags::bitflags;
+use istring::{SmallBytes, SmallString, IBytes};
 
 const MAX_DEPTH: usize = 20;
 
@@ -73,7 +74,7 @@ fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
         // Expect a Name (and Object) or the '>>' delimiter
         let token = t!(lexer.next());
         if token.starts_with(b"/") {
-            let key = token.reslice(1..).to_string();
+            let key = token.reslice(1..).to_name()?;
             let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, ParseFlags::ANY, max_depth));
             dict.insert(key, obj);
         } else if token.equals(b">>") {
@@ -182,23 +183,29 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
     } else if first_lexeme.starts_with(b"/") {
         check(flags, ParseFlags::NAME)?;
         // Name
-        let mut s = Vec::new();
+
         let mut rest: &[u8] = &*first_lexeme.reslice(1..);
-        while let Some(idx) = rest.iter().position(|&b| b == b'#') {
-            use crate::enc::decode_nibble;
-            use std::convert::TryInto;
-            let [hi, lo]: [u8; 2] = rest.get(idx+1 .. idx+3).ok_or(PdfError::EOF)?.try_into().unwrap();
-            let byte = match (decode_nibble(lo), decode_nibble(hi)) {
-                (Some(low), Some(high)) => low | high << 4,
-                _ => return Err(PdfError::HexDecode { pos: idx, bytes: [hi, lo] }),
-            };
-            s.extend_from_slice(&rest[..idx]);
-            s.push(byte);
-            rest = &rest[idx+3..];
-        }
-        s.extend_from_slice(rest);
+        let s = if rest.contains(&b'#') {
+            let mut s = IBytes::new();
+            while let Some(idx) = rest.iter().position(|&b| b == b'#') {
+                use crate::enc::decode_nibble;
+                use std::convert::TryInto;
+                let [hi, lo]: [u8; 2] = rest.get(idx+1 .. idx+3).ok_or(PdfError::EOF)?.try_into().unwrap();
+                let byte = match (decode_nibble(lo), decode_nibble(hi)) {
+                    (Some(low), Some(high)) => low | high << 4,
+                    _ => return Err(PdfError::HexDecode { pos: idx, bytes: [hi, lo] }),
+                };
+                s.extend_from_slice(&rest[..idx]);
+                s.push(byte);
+                rest = &rest[idx+3..];
+            }
+            s.extend_from_slice(rest);
+            SmallBytes::from(s.as_slice())
+        } else {
+            SmallBytes::from(rest)
+        };
         
-        Primitive::Name(String::from_utf8(s)?)
+        Primitive::Name(SmallString::from_utf8(s)?)
     } else if first_lexeme.equals(b"[") {
         check(flags, ParseFlags::ARRAY)?;
         if max_depth == 0 {
@@ -220,7 +227,7 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
         Primitive::Array (array)
     } else if first_lexeme.equals(b"(") {
         check(flags, ParseFlags::STRING)?;
-        let mut string: Vec<u8> = Vec::new();
+        let mut string = IBytes::new();
 
         let bytes_traversed = {
             let mut string_lexer = StringLexer::new(lexer.get_remaining_slice());
@@ -233,12 +240,12 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
         lexer.offset_pos(bytes_traversed as usize);
         // decrypt it
         if let Some(ctx) = ctx {
-            string = t!(ctx.decrypt(&mut string)).to_vec();
+            string = t!(ctx.decrypt(&mut string)).into();
         }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"<") {
         check(flags, ParseFlags::STRING)?;
-        let mut string: Vec<u8> = Vec::new();
+        let mut string = IBytes::new();
 
         let bytes_traversed = {
             let mut hex_string_lexer = HexStringLexer::new(lexer.get_remaining_slice());
@@ -252,7 +259,7 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
 
         // decrypt it
         if let Some(ctx) = ctx {
-            string = t!(ctx.decrypt(&mut string)).to_vec();
+            string = t!(ctx.decrypt(&mut string)).into();
         }
         Primitive::String (PdfString::new(string))
     } else if first_lexeme.equals(b"true") {

@@ -9,6 +9,7 @@ use std::ops::Deref;
 use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
 use itertools::Itertools;
+use istring::{IString, SmallString, IBytes};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
@@ -21,7 +22,7 @@ pub enum Primitive {
     Dictionary (Dictionary),
     Array (Vec<Primitive>),
     Reference (PlainRef),
-    Name (String),
+    Name (SmallString),
 }
 
 impl fmt::Display for Primitive {
@@ -62,7 +63,7 @@ impl Primitive {
     {
         i.map(|t| t.borrow().to_primitive(update)).collect::<Result<_>>().map(Primitive::Array)
     }
-    pub fn name(name: impl Into<String>) -> Primitive {
+    pub fn name(name: impl Into<SmallString>) -> Primitive {
         Primitive::Name(name.into())
     }
 }
@@ -94,24 +95,10 @@ pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
-pub struct Name<'a>(&'a str);
-impl<'a> Deref for Name<'a> {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.0
-    }
-}
-impl<'a> fmt::Display for Name<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "/{}", self.0)
-    }
-}
-
 /// Primitive Dictionary type.
 #[derive(Default, Clone, PartialEq)]
 pub struct Dictionary {
-    dict: BTreeMap<String, Primitive>
+    dict: BTreeMap<Name, Primitive>
 }
 impl Dictionary {
     pub fn new() -> Dictionary {
@@ -126,10 +113,10 @@ impl Dictionary {
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }
-    pub fn insert(&mut self, key: impl Into<String>, val: Primitive) -> Option<Primitive> {
+    pub fn insert(&mut self, key: impl Into<Name>, val: Primitive) -> Option<Primitive> {
         self.dict.insert(key.into(), val)
     }
-    pub fn iter(&self) -> btree_map::Iter<String, Primitive> {
+    pub fn iter(&self) -> btree_map::Iter<Name, Primitive> {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
@@ -171,8 +158,8 @@ impl ObjectWrite for Dictionary {
     }
 }
 impl Deref for Dictionary {
-    type Target = BTreeMap<String, Primitive>;
-    fn deref(&self) -> &BTreeMap<String, Primitive> {
+    type Target = BTreeMap<Name, Primitive>;
+    fn deref(&self) -> &BTreeMap<Name, Primitive> {
         &self.dict
     }
 }
@@ -209,15 +196,15 @@ impl<'a> Index<&'a str> for Dictionary {
     }
 }
 impl IntoIterator for Dictionary {
-    type Item = (String, Primitive);
-    type IntoIter = btree_map::IntoIter<String, Primitive>;
+    type Item = (Name, Primitive);
+    type IntoIter = btree_map::IntoIter<Name, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         self.dict.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a Dictionary {
-    type Item = (&'a String, &'a Primitive);
-    type IntoIter = btree_map::Iter<'a, String, Primitive>;
+    type Item = (&'a Name, &'a Primitive);
+    type IntoIter = btree_map::Iter<'a, Name, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         self.dict.iter()
     }
@@ -261,15 +248,75 @@ macro_rules! unexpected_primitive {
     )
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Ord, PartialOrd)]
+pub struct Name(pub SmallString);
+impl Name {
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl Deref for Name {
+    type Target = str;
+    #[inline]
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+impl From<SmallString> for Name {
+    #[inline]
+    fn from(s: SmallString) -> Name {
+        Name(s)
+    }
+}
+impl<'a> From<&'a str> for Name {
+    #[inline]
+    fn from(s: &'a str) -> Name {
+        Name(s.into())
+    }
+}
+impl PartialEq<str> for Name {
+    #[inline]
+    fn eq(&self, rhs: &str) -> bool {
+        self.as_str() == rhs
+    }
+}
+impl fmt::Display for Name {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "/{}", self.0)
+    }
+}
+impl std::borrow::Borrow<str> for Name {
+    #[inline]
+    fn borrow(&self) -> &str {
+        self.0.as_str()
+    }
+}
+#[test]
+fn test_name() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let s = "Hello World!";
+    let hasher = DefaultHasher::new();
+
+    fn hash(hasher: &DefaultHasher, value: impl Hash) -> u64 {
+        let mut hasher = hasher.clone();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+    assert_eq!(hash(&hasher, Name(s.into())), hash(&hasher, s));
+}
+
 /// Primitive String type.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PdfString {
-    pub data: Vec<u8>,
+    pub data: IBytes,
 }
 impl fmt::Debug for PdfString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "\"")?;
-        for &b in &self.data {
+        for &b in self.data.as_slice() {
             match b {
                 b'"' => write!(f, "\\\"")?,
                 b' ' ..= b'~' => write!(f, "{}", b as char)?,
@@ -299,13 +346,13 @@ impl PdfString {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         if self.data.iter().any(|&b| b >= 0x80) {
             write!(out, "<")?;
-            for &b in &self.data {
+            for &b in self.data.as_slice() {
                 write!(out, "{:02x}", b)?;
             }
             write!(out, ">")?;
         } else {
             write!(out, r"(")?;
-            for &b in &self.data {
+            for &b in self.data.as_slice() {
                 match b {
                     b'\\' | b'(' | b')' => write!(out, r"\")?,
                     _ => ()
@@ -324,7 +371,7 @@ impl AsRef<[u8]> for PdfString {
 }
 
 impl PdfString {
-    pub fn new(data: Vec<u8>) -> PdfString {
+    pub fn new(data: IBytes) -> PdfString {
         PdfString {
             data
         }
@@ -332,7 +379,7 @@ impl PdfString {
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
     }
-    pub fn into_bytes(self) -> Vec<u8> {
+    pub fn into_bytes(self) -> IBytes {
         self.data
     }
     /// without encoding information the PdfString cannot be decoded into a String
@@ -451,9 +498,9 @@ impl Primitive {
             p => unexpected_primitive!(Dictionary, p.get_debug_name())
         }
     }
-    pub fn into_name(self) -> Result<String> {
+    pub fn into_name(self) -> Result<Name> {
         match self {
-            Primitive::Name(name) => Ok(name),
+            Primitive::Name(name) => Ok(Name(name)),
             p => unexpected_primitive!(Name, p.get_debug_name())
         }
     }
@@ -494,9 +541,9 @@ impl From<bool> for Primitive {
         Primitive::Boolean(x)
     }
 }
-impl<'a> From<Name<'a>> for Primitive {
-    fn from(Name(s): Name<'a>) -> Primitive {
-        Primitive::Name(s.into())
+impl From<Name> for Primitive {
+    fn from(Name(s): Name) -> Primitive {
+        Primitive::Name(s)
     }
 }
 impl From<PdfString> for Primitive {
@@ -525,11 +572,6 @@ impl From<PlainRef> for Primitive {
         Primitive::Reference (x)
     }
 }
-impl From<String> for Primitive {
-    fn from(x: String) -> Primitive {
-        Primitive::Name (x)
-    }
-}
 impl<'a> TryInto<f32> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<f32> {
@@ -542,11 +584,11 @@ impl<'a> TryInto<i32> for &'a Primitive {
         self.as_integer()
     }
 }
-impl<'a> TryInto<Name<'a>> for &'a Primitive {
+impl<'a> TryInto<Name> for &'a Primitive {
     type Error = PdfError;
-    fn try_into(self) -> Result<Name<'a>> {
+    fn try_into(self) -> Result<Name> {
         match self {
-            &Primitive::Name(ref s) => Ok(Name(s.as_str())),
+            &Primitive::Name(ref s) => Ok(Name(s.clone())),
             p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name",
                 found: p.get_debug_name()
@@ -590,7 +632,7 @@ impl<'a> TryInto<String> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<String> {
         match *self {
-            Primitive::Name(ref s) => Ok(s.clone()),
+            Primitive::Name(ref s) => Ok(s.as_str().into()),
             Primitive::String(ref s) => Ok(s.to_string_lossy()?),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
@@ -650,13 +692,13 @@ mod tests {
     use crate::primitive::PdfString;
     #[test]
     fn utf16be_string() {
-        let s = PdfString::new(vec![0xfe, 0xff, 0x20, 0x09]);
+        let s = PdfString::new([0xfe, 0xff, 0x20, 0x09].as_slice().into());
         assert_eq!(s.to_string_lossy().unwrap(), "\u{2009}");
     }
 
     #[test]
     fn utf16be_invalid_string() {
-        let s = PdfString::new(vec![0xfe, 0xff, 0xd8, 0x34]);
+        let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
         assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
     }
@@ -664,7 +706,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn utf16be_invalid_bytelen() {
-        let s = PdfString::new(vec![0xfe, 0xff, 0xd8, 0x34, 0x20]);
+        let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34, 0x20].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
         assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
     }
@@ -672,18 +714,18 @@ mod tests {
     #[test]
     fn pdfstring_lossy_vs_ascii() {
         // verify UTF-16-BE fails on invalid
-        let s = PdfString::new(vec![0xfe, 0xff, 0xd8, 0x34]);
+        let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34].as_slice().into());
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
         // verify UTF-16-BE supports umlauts
-        let s = PdfString::new(vec![0xfe, 0xff, 0x00, 0xe4 /*ä*/]);
+        let s = PdfString::new([0xfe, 0xff, 0x00, 0xe4 /*ä*/].as_slice().into());
         assert_eq!(s.to_string_lossy().unwrap(), "ä");
         assert_eq!(s.to_string().unwrap(), "ä");
         // verify valid UTF-8 bytestream with umlaut works
-        let s = PdfString::new(vec![b'm', b'i', b't', 0xc3, 0xa4 /*ä*/]);
+        let s = PdfString::new([b'm', b'i', b't', 0xc3, 0xa4 /*ä*/].as_slice().into());
         assert_eq!(s.to_string_lossy().unwrap(), "mitä");
         assert_eq!(s.to_string().unwrap(), "mitä");
         // verify valid ISO-8859-1 bytestream with umlaut fails
-        let s = PdfString::new(vec![b'm', b'i', b't', 0xe4/*ä in latin1*/]);
+        let s = PdfString::new([b'm', b'i', b't', 0xe4/*ä in latin1*/].as_slice().into());
         let repl_ch = ['m', 'i', 't', std::char::REPLACEMENT_CHARACTER].iter().collect::<String>();
         assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode

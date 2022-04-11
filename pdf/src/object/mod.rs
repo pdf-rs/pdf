@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
+use istring::SmallString;
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -444,9 +445,14 @@ impl Object for Dictionary {
     }
 }
 
-impl Object for String {
+impl Object for Name {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         p.into_name()
+    }
+}
+impl ObjectWrite for Name {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Name(self.0.clone()))
     }
 }
 
@@ -527,12 +533,7 @@ impl Trace for Primitive {
     }
 }
 
-impl ObjectWrite for String {
-    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
-        Ok(Primitive::Name(self.clone()))
-    }
-}
-impl<V: Object> Object for HashMap<String, V> {
+impl<V: Object> Object for HashMap<Name, V> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(HashMap::new()),
@@ -548,14 +549,14 @@ impl<V: Object> Object for HashMap<String, V> {
         }
     }
 }
-impl<V: ObjectWrite> ObjectWrite for HashMap<String, V> {
+impl<V: ObjectWrite> ObjectWrite for HashMap<Name, V> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.is_empty() {
             Ok(Primitive::Null)
         } else {
             let mut dict = Dictionary::new();
             for (k, v) in self.iter() {
-                dict.insert(k, v.to_primitive(update)?);
+                dict.insert(k.clone(), v.to_primitive(update)?);
             }
             Ok(Primitive::Dictionary(dict))
         }
