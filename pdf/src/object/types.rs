@@ -127,7 +127,7 @@ pub struct Catalog {
 // URI: dict
 // AcroForm: dict
     #[pdf(key="AcroForm")]
-    pub forms: Option<IntreactiveFormDictionary>,
+    pub forms: Option<InteractiveFormDictionary>,
 
 // Metadata: stream
     #[pdf(key="Metadata")]
@@ -135,6 +135,9 @@ pub struct Catalog {
 
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
+
+    #[pdf(Type="Sig?")]
+    pub signatures: Option<SignatureDictionary>,
 // MarkInfo: dict
 // Lang: text string
 // SpiderInfo: dict
@@ -701,7 +704,7 @@ pub struct FormDict {
 }
 
 #[derive(Object, ObjectWrite, Debug, Clone)]
-pub struct IntreactiveFormDictionary {
+pub struct InteractiveFormDictionary {
     #[pdf(key="Fields")]
     pub fields: Vec<RcRef<FieldDictionary>>,
     
@@ -742,67 +745,73 @@ pub enum FieldType {
 }
 
 #[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="SV")]
 pub struct SeedValueDictionary {
     #[pdf(key="Ff", default="0")]
     pub flags: u32,
+    #[pdf(key="Filter")]
+    pub filter: Option<Name>,
+    #[pdf(key="SubFilter")]
+    pub sub_filter:  Option<Vec<Name>>,
     #[pdf(key="V")]
-    pub value: Primitive,
+    pub value: Option<Primitive>,
     #[pdf(key="DigestMethod")]
-    pub digest_method: Primitive,
+    pub digest_method: Vec<PdfString>,
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
 #[derive(Object, ObjectWrite, Debug)]
-#[pdf(Type="Sig")]
 pub struct SignatureDictionary {
-    #[pdf(key="Type")]
-    pub typ: FieldType,
     #[pdf(key="Filter")]
-    pub filter: Primitive,
+    pub filter: Name,
     #[pdf(key="SubFilter")]
-    pub sub_filter: Primitive,
+    pub sub_filter: Name,
     #[pdf(key="ByteRange")]
-    pub byte_range: Primitive,
+    pub byte_range: Vec<usize>,
     #[pdf(key="Contents")]
-    pub contents: Primitive,
+    pub contents: PdfString,
     #[pdf(key="Cert")]
-    pub cert: Vec<Primitive>,
+    pub cert: Vec<PdfString>,
     #[pdf(key="Reference")]
     pub reference: Option<Primitive>,
     #[pdf(key="Name")]
-    pub name: Option<Primitive>,
+    pub name: Option<PdfString>,
     #[pdf(key="M")]
-    pub m: Option<Primitive>,
+    pub m: Option<PdfString>,
     #[pdf(key="Location")]
-    pub location: Option<Primitive>,
+    pub location: Option<PdfString>,
     #[pdf(key="Reason")]
-    pub reason: Option<Primitive>,
+    pub reason: Option<PdfString>,
     #[pdf(key="ContactInfo")]
-    pub contact_info: Option<Primitive>,
+    pub contact_info: Option<PdfString>,
     #[pdf(key="V")]
-    pub v: Primitive,
+    pub v: i32,
     #[pdf(key="R")]
-    pub r: Primitive,
+    pub r: i32,
     #[pdf(key="Prop_Build")]
-    pub prop_build: Primitive,
+    pub prop_build: Dictionary,
     #[pdf(key="Prop_AuthTime")]
-    pub prop_auth_time: Primitive,
+    pub prop_auth_time: i32,
     #[pdf(key="Prop_AuthType")]
-    pub prop_auth_type: Primitive,
+    pub prop_auth_type: Name,
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
 #[derive(Object, ObjectWrite, Debug)]
-#[pdf(Type="SigRef")]
+#[pdf(Type="SigRef?")]
 pub struct SignatureReferenceDictionary {
-    #[pdf(key="Type")]
-    pub typ: Option<FieldType>,
     #[pdf(key="TransformMethod")]
-    pub transform_method: Primitive,
+    pub transform_method: Name,
     #[pdf(key="TransformParams")]
-    pub transform_params: Option<Vec<Primitive>>,
+    pub transform_params: Option<Dictionary>,
     #[pdf(key="Data")]
     pub data: Option<Primitive>,
     #[pdf(key="DigestMethod")]
-    pub digest_method: Option<Primitive>,
+    pub digest_method: Option<Name>,
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
 #[derive(Object, ObjectWrite, Debug)]
@@ -827,9 +836,6 @@ pub struct FieldDictionary {
     
     #[pdf(key="Ff", default="0")]
     pub flags: u32,
-
-     #[pdf(key="SV")]
-    pub seed_value: Option<SeedValueDictionary>,
 
     #[pdf(key="SigFlags", default="0")]
     pub sig_flags: u32,
