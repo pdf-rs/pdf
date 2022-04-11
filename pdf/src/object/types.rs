@@ -136,8 +136,6 @@ pub struct Catalog {
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
 
-    #[pdf(Type="Sig?")]
-    pub signatures: Option<SignatureDictionary>,
 // MarkInfo: dict
 // Lang: text string
 // SpiderInfo: dict
@@ -762,6 +760,7 @@ pub struct SeedValueDictionary {
 }
 
 #[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="Sig?")]
 pub struct SignatureDictionary {
     #[pdf(key="Filter")]
     pub filter: Name,
