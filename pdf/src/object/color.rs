@@ -22,12 +22,12 @@ pub enum ColorSpace {
     DeviceGray,
     DeviceRGB,
     DeviceCMYK,
-    DeviceN { names: Vec<String>, alt: Box<ColorSpace>, tint: Function, attr: Option<Dictionary> },
+    DeviceN { names: Vec<Name>, alt: Box<ColorSpace>, tint: Function, attr: Option<Dictionary> },
     CalGray(Dictionary),
     CalRGB(Dictionary),
     CalCMYK(Dictionary),
     Indexed(Box<ColorSpace>, Arc<[u8]>),
-    Separation(String, Box<ColorSpace>, Function),
+    Separation(Name, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
     Pattern,
     Other(Vec<Primitive>)
@@ -70,7 +70,10 @@ impl ColorSpace {
                     p => p.clone()
                 };
                 let lookup = match lookup {
-                    Primitive::String(string) => string.into_bytes().into(),
+                    Primitive::String(string) => {
+                        let data: Vec<u8> = string.into_bytes().into();
+                        data.into()
+                    }
                     Primitive::Stream(stream) => {
                         let s: Stream::<()> = Stream::from_stream(stream, resolve)?;
                         t!(s.data(resolve))

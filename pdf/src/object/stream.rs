@@ -207,7 +207,7 @@ impl<T: Object> Object for StreamInfo<T> {
             dict.remove("Length").ok_or(PdfError::MissingEntry{ typ: "StreamInfo", field: "Length".into() })?,
             resolve)?;
 
-        let filters = Vec::<String>::from_primitive(
+        let filters = Vec::<Name>::from_primitive(
             dict.remove("Filter").unwrap_or(Primitive::Null),
             resolve)?;
 
@@ -219,7 +219,7 @@ impl<T: Object> Object for StreamInfo<T> {
             dict.remove("F").unwrap_or(Primitive::Null),
             resolve)?;
 
-        let file_filters = Vec::<String>::from_primitive(
+        let file_filters = Vec::<Name>::from_primitive(
             dict.remove("FFilter").unwrap_or(Primitive::Null),
             resolve)?;
 

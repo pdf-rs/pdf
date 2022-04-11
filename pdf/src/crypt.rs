@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
 use std::collections::HashMap;
 use crate::object::PlainRef;
-use crate::primitive::{Dictionary, PdfString};
+use crate::primitive::{Dictionary, PdfString, Name};
 use crate::error::{PdfError, Result};
 
 const PADDING: [u8; 32] = [
@@ -78,10 +78,10 @@ pub struct CryptDict {
     bits: u32,
 
     #[pdf(key="CF")]
-    crypt_filters: HashMap<String, CryptFilter>,
+    crypt_filters: HashMap<Name, CryptFilter>,
 
     #[pdf(key="StmF")]
-    default_crypt_filter: Option<String>,
+    default_crypt_filter: Option<Name>,
 
     #[pdf(key="EncryptMetadata", default="true")]
     encrypt_metadata: bool,

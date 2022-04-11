@@ -40,7 +40,7 @@ fn main() -> Result<(), PdfError> {
         for (i, &font) in resources.fonts.values().enumerate() {
             let font = file.get(font)?;
             let name = match &font.name {
-                Some(name) => name.clone(),
+                Some(name) => name.as_str().into(),
                 None => i.to_string(),
             };
             fonts.insert(name, font.clone());

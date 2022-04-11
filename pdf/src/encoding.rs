@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use istring::SmallString;
 use crate as pdf;
 use crate::object::{Object, Resolve};
 use crate::primitive::Primitive;
@@ -7,7 +8,7 @@ use crate::error::{Result};
 #[derive(Debug, Clone)]
 pub struct Encoding {
     pub base: BaseEncoding,
-    pub differences: HashMap<u32, String>,
+    pub differences: HashMap<u32, SmallString>,
 }
 
 #[derive(Object, Debug, Clone, Eq, PartialEq)]
