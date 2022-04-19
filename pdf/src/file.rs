@@ -19,7 +19,18 @@ use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
-use moka::sync::Cache;
+use cachelib::Cache;
+use datasize::DataSize;
+
+pub trait PdfCache {
+    type ObjectCache: Cache<PlainRef, Result<AnySync, Arc<PdfError>>>;
+    type StreamCache: Cache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>;
+}
+pub struct DefaultCache;
+impl PdfCache for DefaultCache {
+    type ObjectCache = Mutex<HashMap<PlainRef, Result<AnySync, Arc<PdfError>>>>;
+    type StreamCache = Mutex<HashMap<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>;
+}
 
 #[must_use]
 pub struct PromisedRef<T> {
@@ -35,18 +46,10 @@ impl<T> PromisedRef<T> {
     }
 }
 
-use std::thread::ThreadId;
-#[cfg(feature="sync")]
-#[derive(Default)]
-struct Waiter {
-    mutex: Mutex<HashMap<PlainRef, (ThreadId, Arc<Condvar>)>>,
-}
-
-pub struct Storage<B: Backend> {
+pub struct Storage<B: Backend, C: PdfCache> {
     // objects identical to those in the backend
-    cache: Cache<PlainRef, Result<AnySync, Arc<PdfError>>>,
-
-    stream_cache: Cache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>,
+    cache: C::ObjectCache,
+    stream_cache: C::StreamCache,
 
     // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
@@ -61,14 +64,14 @@ pub struct Storage<B: Backend> {
     // Position of the PDF header in the file.
     start_offset: usize,
 }
-impl<B: Backend> Storage<B> {
-    fn new(backend: B, options: ParseOptions) -> Result<Storage<B>> {
+impl<B: Backend, C: PdfCache> Storage<B, C> {
+    fn new(backend: B, options: ParseOptions) -> Result<Storage<B, C>> {
         Ok(Storage {
             start_offset: backend.locate_start_offset()?,
             backend,
             refs: XRefTable::new(0),
-            cache: Cache::new(1024 * 1024),
-            stream_cache: Cache::new(1024 * 1024),
+            cache: C::ObjectCache::new(),
+            stream_cache: C::StreamCache::new(),
             changes: HashMap::new(),
             decoder: None,
             options,
@@ -87,7 +90,7 @@ impl<B: Backend> Storage<B> {
         Ok(data.into())
     }
 }
-impl<B: Backend> Resolve for Storage<B> {
+impl<B: Backend, C: PdfCache> Resolve for Storage<B, C> {
     fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(p) => Ok((*p).clone()),
@@ -114,10 +117,10 @@ impl<B: Backend> Resolve for Storage<B> {
         }
     }
 
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
-        let res = self.cache.get_or_insert_with(key, || {
+        let res = self.cache.get(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(Shared::new(obj).into()),
                 Err(e) => Err(Arc::new(e)),
@@ -132,11 +135,11 @@ impl<B: Backend> Resolve for Storage<B> {
         &self.options
     }
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        self.stream_cache.get_or_insert_with(id, || self.decode(id, range, filters).map_err(Arc::new))
+        self.stream_cache.get(id, || self.decode(id, range, filters).map_err(Arc::new))
         .map_err(|e| e.into())
     }
 }
-impl<B: Backend> Updater for Storage<B> {
+impl<B: Backend, C: PdfCache> Updater for Storage<B, C> {
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
         let id = self.refs.len() as u64;
         self.refs.push(XRef::Promised);
@@ -181,7 +184,7 @@ impl<B: Backend> Updater for Storage<B> {
     }
 }
 
-impl Storage<Vec<u8>> {
+impl<C: PdfCache> Storage<Vec<u8>, C> {
     pub fn save(&mut self, trailer: &mut Trailer) -> Result<&[u8]> {
         let xref_promise = self.promise::<Stream<XRefInfo>>();
 
@@ -221,12 +224,14 @@ impl Storage<Vec<u8>> {
     }
 }
 
-pub fn load_storage_and_trailer<B: Backend>(storage: &mut Storage<B>) -> Result<Dictionary> {
+pub fn load_storage_and_trailer<B: Backend, C: PdfCache>(storage: &mut Storage<B, C>) -> Result<Dictionary>
+
+{
     load_storage_and_trailer_password(storage, b"")
 }
 
-pub fn load_storage_and_trailer_password<B: Backend>(
-    storage: &mut Storage<B>,
+pub fn load_storage_and_trailer_password<B: Backend, C: PdfCache>(
+    storage: &mut Storage<B, C>,
     password: &[u8],
 ) -> Result<Dictionary> {
     let (refs, trailer) = t!(storage.backend.read_xref_table_and_trailer(storage.start_offset, storage));
@@ -257,15 +262,19 @@ pub fn load_storage_and_trailer_password<B: Backend>(
     Ok(trailer)
 }
 
-pub struct File<B: Backend> {
-    storage:    Storage<B>,
+/// hack to add the `C` generic without breaking all existing code
+pub type File<B> = File2<B, DefaultCache>;
+
+/// the actual type
+pub struct File2<B: Backend, C: PdfCache=DefaultCache> {
+    storage:    Storage<B, C>,
     pub trailer:    Trailer,
 }
-impl<B: Backend> Resolve for File<B> {
+impl<B: Backend, C: PdfCache> Resolve for File2<B, C> {
     fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
         self.storage.resolve_flags(r, flags, depth)
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.storage.get(r)
     }
     fn options(&self) -> &ParseOptions {
@@ -275,7 +284,7 @@ impl<B: Backend> Resolve for File<B> {
         self.storage.get_data_or_decode(id, range, filters)
     }
 }
-impl<B: Backend> Updater for File<B> {
+impl<B: Backend, C: PdfCache> Updater for File2<B, C> {
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
         self.storage.create(obj)
     }
@@ -290,7 +299,7 @@ impl<B: Backend> Updater for File<B> {
     }
 }
 
-impl File<Vec<u8>> {
+impl<C: PdfCache> File2<Vec<u8>, C> {
     /// Opens the file at `path` and uses Vec<u8> as backend.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::from_data(fs::read(path)?)
@@ -306,7 +315,7 @@ impl File<Vec<u8>> {
         Ok(())
     }
 }
-impl<B: Backend> File<B> {
+impl<B: Backend, C: PdfCache> File2<B, C> {
     pub fn from_data_password(backend: B, password: &[u8]) -> Result<Self> {
         Self::load_data(backend, password, ParseOptions::strict())
     }
@@ -328,7 +337,7 @@ impl<B: Backend> File<B> {
             Primitive::Dictionary(trailer),
             &storage,
         ));
-        Ok(File { storage, trailer })
+        Ok(File2 { storage, trailer })
     }
 
     pub fn get_root(&self) -> &Catalog {
@@ -356,8 +365,7 @@ impl<B: Backend> File<B> {
     }
 }
 
-    
-#[derive(Object, ObjectWrite)]
+#[derive(Object, ObjectWrite, DataSize)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,

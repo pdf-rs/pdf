@@ -9,6 +9,7 @@ use std::convert::TryInto;
 use std::borrow::Cow;
 use std::sync::Arc;
 use istring::SmallString;
+use datasize::DataSize;
 
 #[allow(non_upper_case_globals, dead_code)]
 mod flags {
@@ -23,7 +24,7 @@ mod flags {
     pub const ForceBold: u32     = 1 << 18;
 }
 
-#[derive(Object, Debug, Copy, Clone)]
+#[derive(Object, Debug, Copy, Clone, DataSize)]
 pub enum FontType {
     Type0,
     Type1,
@@ -34,7 +35,7 @@ pub enum FontType {
     CIDFontType2, // TrueType
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct Font {
     pub subtype: FontType,
     pub name: Option<Name>,
@@ -42,13 +43,13 @@ pub struct Font {
 
     encoding: Option<Encoding>,
 
-    to_unicode: Option<Stream>,
+    to_unicode: Option<Stream<()>>,
 
     /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
     pub _other: Dictionary
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum FontData {
     Type1(TFont),
     Type0(Type0Font),
@@ -59,7 +60,7 @@ pub enum FontData {
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum CidToGidMap {
     Identity,
     Table(Vec<u16>)
@@ -273,7 +274,7 @@ impl Font {
         self.to_unicode.as_ref().map(|s| s.data(resolve).and_then(|d| parse_cmap(&d)))
     }
 }
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct TFont {
     #[pdf(key="BaseFont")]
     pub base_font: Option<Name>,
@@ -293,16 +294,16 @@ pub struct TFont {
     pub font_descriptor: Option<FontDescriptor>
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
     descendant_fonts: Vec<RcRef<Font>>,
 
     #[pdf(key="ToUnicode")]
-    to_unicode: Option<Stream>,
+    to_unicode: Option<Stream<()>>,
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct CIDFont {
     #[pdf(key="CIDSystemInfo")]
     system_info: Dictionary,
@@ -321,7 +322,7 @@ pub struct CIDFont {
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
     pub font_name: Name,
@@ -376,10 +377,10 @@ pub struct FontDescriptor {
     pub missing_width: f32,
 
     #[pdf(key="FontFile")]
-    pub font_file: Option<Stream>,
+    pub font_file: Option<Stream<()>>,
 
     #[pdf(key="FontFile2")]
-    pub font_file2: Option<Stream>,
+    pub font_file2: Option<Stream<()>>,
 
     #[pdf(key="FontFile3")]
     pub font_file3: Option<Stream<FontStream3>>,
@@ -401,20 +402,20 @@ impl FontDescriptor {
     }
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 #[pdf(key="Subtype")]
 pub enum FontTypeExt {
     Type1C,
     CIDFontType0C,
     OpenType
 }
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct FontStream3 {
     #[pdf(key="Subtype")]
     pub subtype: FontTypeExt
 }
 
-#[derive(Object, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Object, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, DataSize)]
 pub enum FontStretch {
     UltraCondensed,
     ExtraCondensed,

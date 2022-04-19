@@ -10,6 +10,7 @@ use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
 use itertools::Itertools;
 use istring::{IString, SmallString, IBytes};
+use datasize::DataSize;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
@@ -23,6 +24,21 @@ pub enum Primitive {
     Array (Vec<Primitive>),
     Reference (PlainRef),
     Name (SmallString),
+}
+impl DataSize for Primitive {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = std::mem::size_of::<Self>();
+
+    fn estimate_heap_size(&self) -> usize {
+        match self {
+            Primitive::String(ref s) => s.estimate_heap_size(),
+            Primitive::Stream(ref s) => s.estimate_heap_size(),
+            Primitive::Dictionary(ref d) => d.estimate_heap_size(),
+            Primitive::Array(ref arr) => arr.estimate_heap_size(),
+            Primitive::Name(ref s) => s.estimate_heap_size(),
+            _ => 0
+        }
+    }
 }
 
 impl fmt::Display for Primitive {
@@ -96,7 +112,7 @@ pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
 }
 
 /// Primitive Dictionary type.
-#[derive(Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq, DataSize)]
 pub struct Dictionary {
     dict: BTreeMap<Name, Primitive>
 }
@@ -211,7 +227,7 @@ impl<'a> IntoIterator for &'a Dictionary {
 }
 
 /// Primitive Stream (as opposed to the higher-level `Stream`)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DataSize)]
 pub struct PdfStream {
     pub info: Dictionary,
     pub (crate) id: PlainRef,
@@ -248,7 +264,7 @@ macro_rules! unexpected_primitive {
     )
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Ord, PartialOrd, DataSize)]
 pub struct Name(pub SmallString);
 impl Name {
     #[inline]
@@ -309,7 +325,7 @@ fn test_name() {
 }
 
 /// Primitive String type.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, DataSize)]
 pub struct PdfString {
     pub data: IBytes,
 }
@@ -648,7 +664,10 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-impl Object for DateTime<FixedOffset> {
+pub struct Date(pub DateTime<FixedOffset>);
+datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
+
+impl Object for Date {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
@@ -672,11 +691,11 @@ impl Object for DateTime<FixedOffset> {
                     let tz_minute = parse_or(s, 19..21, 0);
                     let tz = FixedOffset::east(tz_hour * 60 + tz_minute);
 
-                    Ok(DateTime::from_utc(
+                    Ok(Date(DateTime::from_utc(
                             NaiveDateTime::new(NaiveDate::from_ymd(year, month, day),
                                                NaiveTime::from_hms(hour, minute, second)),
                           tz
-                      ))
+                    )))
 
                 } else {
                     bail!("Failed parsing date");

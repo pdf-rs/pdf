@@ -48,6 +48,7 @@ impl<'a> Context<'a> {
             Ok(data)
         }
     }
+    #[cfg(test)]
     fn fake() -> Self {
         Context {
             decoder: None,
@@ -378,7 +379,7 @@ mod tests {
     fn compact_array() {
         use crate::object::NoResolve;
         use crate::primitive::{Primitive, PdfString};
-        use super::lexer::{Substr, Lexer};
+        use super::lexer::{Lexer};
         use super::*;
         let mut lx = Lexer::new(b"[(Complete L)20(egend for Physical and P)20(olitical Maps)]TJ");
         assert_eq!(parse_with_lexer(&mut lx, &NoResolve, ParseFlags::ANY).unwrap(),

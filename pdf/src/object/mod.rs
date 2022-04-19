@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
-use istring::SmallString;
+use datasize::{DataSize};
 
 pub type ObjNr = u64;
 pub type GenNr = u16;
@@ -54,25 +54,25 @@ pub trait Resolve: {
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         self.resolve_flags(r, ParseFlags::ANY, 16)
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>>;
+    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>>;
     fn options(&self) -> &ParseOptions;
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>>;
 }
 
 pub struct NoResolve;
 impl Resolve for NoResolve {
-    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
+    fn resolve_flags(&self, _: PlainRef, _: ParseFlags, _: usize) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
-    fn get<T: Object>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object+DataSize>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
         Err(PdfError::Reference)
     }
     fn options(&self) -> &ParseOptions {
         static STRICT: ParseOptions = ParseOptions::strict();
         &STRICT
     }
-    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        unimplemented!()
+    fn get_data_or_decode(&self, _: PlainRef, _: Range<usize>, _: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        Err(PdfError::Reference)
     }
 }
 
@@ -119,7 +119,7 @@ pub trait Trace {
 ///////
 
 // TODO move to primitive.rs
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, DataSize)]
 pub struct PlainRef {
     pub id:     ObjNr,
     pub gen:    GenNr,
@@ -137,6 +137,7 @@ impl ObjectWrite for PlainRef {
 
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
 
+#[derive(DataSize)]
 pub struct Ref<T> {
     inner:      PlainRef,
     _marker:    PhantomData<T>
@@ -206,7 +207,7 @@ impl<T> Eq for Ref<T> {}
 pub type Shared<T> = Arc<T>;
 
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct RcRef<T> {
     inner: PlainRef,
     data: Shared<T>
@@ -220,7 +221,7 @@ impl<T> RcRef<T> {
         Ref::new(self.inner)
     }
 }
-impl<T: Object + std::fmt::Debug> Object for RcRef<T> {
+impl<T: Object + std::fmt::Debug + DataSize> Object for RcRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(r) => resolve.get(Ref::new(r)),
@@ -269,7 +270,7 @@ impl<T> PartialEq for RcRef<T> {
 }
 impl<T> Eq for RcRef<T> {}
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum MaybeRef<T> {
     Direct(Shared<T>),
     Indirect(RcRef<T>),
@@ -282,7 +283,7 @@ impl<T> MaybeRef<T> {
         }
     }
 }
-impl<T: Object> Object for MaybeRef<T> {
+impl<T: Object+DataSize> Object for MaybeRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         Ok(match p {
             Primitive::Reference(r) => MaybeRef::Indirect(resolve.get(Ref::new(r))?),
@@ -451,7 +452,7 @@ impl Object for Name {
     }
 }
 impl ObjectWrite for Name {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
         Ok(Primitive::Name(self.0.clone()))
     }
 }

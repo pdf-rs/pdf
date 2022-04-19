@@ -1,21 +1,27 @@
 use std::any::TypeId;
 use std::rc::Rc;
 use std::sync::Arc;
+use cachelib::ValueSize;
+use datasize::DataSize;
 use crate::object::{Object};
 use crate::error::{Result, PdfError};
 
 pub trait AnyObject {
     fn type_name(&self) -> &'static str;
     fn type_id(&self) -> TypeId;
+    fn size(&self) -> usize;
 }
 impl<T> AnyObject for T
-    where T: Object + 'static
+    where T: Object + 'static + DataSize
 {
     fn type_name(&self) -> &'static str {
         std::any::type_name::<T>()
     }
     fn type_id(&self) -> TypeId {
         TypeId::of::<T>()
+    }
+    fn size(&self) -> usize {
+        datasize::data_size(self)
     }
 }
 
@@ -78,6 +84,11 @@ impl AnySync {
 impl<T: AnyObject + Sync + Send + 'static> From<Arc<T>> for AnySync {
     fn from(t: Arc<T>) -> Self {
         AnySync::new(t)
+    }
+}
+impl ValueSize for AnySync {
+    fn size(&self) -> usize {
+        self.0.size()
     }
 }
 fn type_mismatch<T: AnyObject + 'static>(name: &str) -> PdfError {

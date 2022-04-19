@@ -4,14 +4,15 @@ use crate as pdf;
 use crate::object::{Object, Resolve};
 use crate::primitive::Primitive;
 use crate::error::{Result};
+use datasize::DataSize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct Encoding {
     pub base: BaseEncoding,
     pub differences: HashMap<u32, SmallString>,
 }
 
-#[derive(Object, Debug, Clone, Eq, PartialEq)]
+#[derive(Object, Debug, Clone, Eq, PartialEq, DataSize)]
 pub enum BaseEncoding {
     StandardEncoding,
     SymbolEncoding,

@@ -2,6 +2,7 @@ use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 use itertools::izip;
+use datasize::DataSize;
 
 #[derive(Object, Debug, Clone)]
 struct RawFunction {
@@ -18,7 +19,7 @@ struct RawFunction {
     size: Option<Vec<u32>>,
 
     #[pdf(key="BitsPerSample")]
-    bits_per_sample: Option<u32>,
+    _bits_per_sample: Option<u32>,
 
     #[pdf(key="Order", default="1")]
     order: u32,
@@ -45,7 +46,7 @@ struct Function2 {
     exponent: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum Function {
     Sampled(SampledFunction),
     Interpolated(Vec<InterpolatedFunctionDim>),
@@ -179,7 +180,7 @@ impl Object for Function {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 struct SampledFunctionInput {
     domain: (f32, f32),
     encode_offset: f32,
@@ -194,7 +195,7 @@ impl SampledFunctionInput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 struct SampledFunctionOutput {
     offset: f32,
     scale: f32
@@ -205,14 +206,14 @@ impl SampledFunctionOutput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 enum Interpolation {
     Linear,
     #[allow(dead_code)]  // TODO
     Cubic,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct SampledFunction {
     input: Vec<SampledFunctionInput>,
     output: Vec<SampledFunctionOutput>,
@@ -249,7 +250,7 @@ impl SampledFunction {
             2 => match self.order {
                 Interpolation::Linear => {
                     let (i0, s0, f0) = self.input[0].map(x[0]);
-                    let (i1, s1, f1) = self.input[1].map(x[1]);
+                    let (i1,  _, f1) = self.input[1].map(x[1]);
                     let (j0, j1) = (i0+1, i1+1);
                     let (g0, g1) = (1. - f0, 1. - f1);
                     
@@ -275,7 +276,7 @@ impl SampledFunction {
                 Interpolation::Linear => {
                     let (i0, s0, f0) = self.input[0].map(x[0]);
                     let (i1, s1, f1) = self.input[1].map(x[1]);
-                    let (i2, s2, f2) = self.input[2].map(x[2]);
+                    let (i2,  _, f2) = self.input[2].map(x[2]);
                     let (j0, j1, j2) = (i0+1, i1+1, i2+1);
                     let (g0, g1, g2) = (1. - f0, 1. - f1, 1. - f2);
                     
@@ -312,7 +313,7 @@ impl SampledFunction {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct InterpolatedFunctionDim {
     pub input_range: (f32, f32),
     pub output_range: (f32, f32),
@@ -333,7 +334,7 @@ pub enum PostScriptError {
     StackUnderflow,
     IncorrectStackSize
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct PsFunc {
     pub ops: Vec<PsOp>
 }
@@ -404,7 +405,7 @@ impl PsFunc {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, DataSize)]
 pub enum PsOp {
     Int(i32),
     Value(f32),

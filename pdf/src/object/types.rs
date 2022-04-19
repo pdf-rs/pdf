@@ -1,7 +1,7 @@
 //! Models of PDF types
 
 use std::collections::HashMap;
-use std::borrow::Cow;
+use datasize::DataSize;
 
 use crate as pdf;
 use crate::object::*;
@@ -11,7 +11,7 @@ use crate::font::Font;
 use crate::enc::StreamFilter;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum PagesNode {
     Tree(PageTree),
     Leaf(Page),
@@ -52,7 +52,7 @@ impl PagesNode {
 
 /// A `PagesNode::Leaf` wrapped in a `RcRef`
 /// 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct PageRc(RcRef<PagesNode>);
 impl Deref for PageRc {
     type Target = Page;
@@ -71,7 +71,7 @@ impl PageRc {
 
 /// A `PagesNode::Tree` wrapped in a `RcRef`
 /// 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct PagesRc(RcRef<PagesNode>);
 impl Deref for PagesRc {
     type Target = PageTree;
@@ -102,7 +102,7 @@ impl ObjectWrite for PagesRc {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
@@ -127,11 +127,11 @@ pub struct Catalog {
 // URI: dict
 // AcroForm: dict
     #[pdf(key="AcroForm")]
-    pub forms: Option<IntreactiveFormDictionary>,
+    pub forms: Option<InteractiveFormDictionary>,
 
 // Metadata: stream
     #[pdf(key="Metadata")]
-    pub metadata: Option<Ref<Stream>>,
+    pub metadata: Option<Ref<Stream<()>>>,
 
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
@@ -148,7 +148,7 @@ pub struct Catalog {
 // NeedsRendering: bool
 }
 
-#[derive(Object, ObjectWrite, Debug, Default, Clone)]
+#[derive(Object, ObjectWrite, Debug, Default, Clone, DataSize)]
 #[pdf(Type = "Pages?")]
 pub struct PageTree {
     #[pdf(key="Parent")]
@@ -237,7 +237,7 @@ impl PageTree {
 }
 impl SubType<PagesNode> for PageTree {}
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 #[pdf(Type="Page?")]
 pub struct Page {
     #[pdf(key="Parent")]
@@ -311,7 +311,7 @@ impl Page {
 }
 impl SubType<PagesNode> for Page {}
 
-#[derive(Object)]
+#[derive(Object, DataSize)]
 pub struct PageLabel {
     #[pdf(key="S")]
     pub style:  Option<Counter>,
@@ -323,7 +323,7 @@ pub struct PageLabel {
     pub start:  Option<usize>
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<Name, GraphicsStateParameters>,
@@ -352,7 +352,7 @@ impl Resources {
 
 
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum Pattern {
     Dict(Dictionary),
     Stream(PdfStream)
@@ -376,20 +376,20 @@ impl ObjectWrite for Pattern {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2
 }
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
     Bevel = 2
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
@@ -457,7 +457,7 @@ pub struct GraphicsStateParameters {
     _other: Dictionary
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 #[pdf(is_stream)]
 pub enum XObject {
     #[pdf(name="PS")]
@@ -469,7 +469,7 @@ pub enum XObject {
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct ImageXObject {
     inner: Stream<ImageDict>
 }
@@ -559,13 +559,13 @@ impl ImageXObject {
     }
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 #[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 #[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
@@ -626,7 +626,7 @@ pub struct ImageDict {
 }
 
 
-#[derive(Object, Debug, Copy, Clone)]
+#[derive(Object, Debug, Copy, Clone, DataSize)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
@@ -654,7 +654,7 @@ impl RenderingIntent {
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     #[pdf(key="FormType", default="1")]
@@ -682,7 +682,7 @@ pub struct FormDict {
     pub reference: Option<Dictionary>,
 
     #[pdf(key="Metadata")]
-    pub metadata: Option<Ref<Stream>>,
+    pub metadata: Option<Ref<Stream<()>>>,
 
     #[pdf(key="PieceInfo")]
     pub piece_info: Option<Dictionary>,
@@ -700,8 +700,8 @@ pub struct FormDict {
     pub other: Dictionary,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
-pub struct IntreactiveFormDictionary {
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+pub struct InteractiveFormDictionary {
     #[pdf(key="Fields")]
     pub fields: Vec<RcRef<FieldDictionary>>,
     
@@ -727,7 +727,7 @@ pub struct IntreactiveFormDictionary {
     pub xfa: Option<Primitive>,
 }
 
-#[derive(Object, ObjectWrite, Debug, Copy, Clone, PartialEq)]
+#[derive(Object, ObjectWrite, Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum FieldType {
     #[pdf(name="Btn")]
     Button,
@@ -739,10 +739,10 @@ pub enum FieldType {
     Signature,
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct FieldDictionary {
     #[pdf(key="FT")]
-    pub typ: FieldType,
+    pub typ: Option<FieldType>,
     
     #[pdf(key="Parent")]
     pub parent: Option<MaybeRef<FieldDictionary>>,
@@ -772,7 +772,7 @@ pub struct FieldDictionary {
     pub actions: Option<Dictionary>,
 }
 
-
+#[derive(Debug, DataSize)]
 pub enum Counter {
     Arabic,
     RomanUpper,
@@ -797,7 +797,7 @@ impl Object for Counter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum NameTreeNode<T> {
     ///
     Intermediate (Vec<Ref<NameTree<T>>>),
@@ -807,12 +807,12 @@ pub enum NameTreeNode<T> {
 }
 /// Note: The PDF concept of 'root' node is an intermediate or leaf node which has no 'Limits'
 /// entry. Hence, `limits`, 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct NameTree<T> {
     pub limits: Option<(PdfString, PdfString)>,
     pub node: NameTreeNode<T>,
 }
-impl<T: Object> NameTree<T> {
+impl<T: Object+DataSize> NameTree<T> {
     pub fn walk(&self, r: &impl Resolve, callback: &mut dyn FnMut(&PdfString, &T)) -> Result<(), PdfError> {
         match self.node {
             NameTreeNode::Leaf(ref items) => {
@@ -887,7 +887,7 @@ impl<T: ObjectWrite> ObjectWrite for NameTree<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum DestView {
     // left, top, zoom
     XYZ { left: Option<f32>, top: Option<f32>, zoom: f32 },
@@ -899,13 +899,13 @@ pub enum DestView {
     FitBH { top: f32 }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum MaybeNamedDest {
     Named(PdfString),
     Direct(Dest),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct Dest {
     pub page: Option<Ref<Page>>,
     pub view: DestView
@@ -1039,7 +1039,7 @@ impl ObjectWrite for Dest {
 }
 
 /// There is one `NameDictionary` associated with each PDF file.
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct NameDictionary {
     #[pdf(key="Pages")]
     pub pages: Option<NameTree<Primitive>>,
@@ -1079,7 +1079,7 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct FileSpec {
     #[pdf(key="EF")]
     ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
@@ -1091,7 +1091,7 @@ pub struct FileSpec {
 
 /// Used only as elements in `FileSpec`
 #[derive(Object, ObjectWrite, Debug, Clone)]
-pub struct Files<T: Object + ObjectWrite> {
+pub struct Files<T: Object + ObjectWrite + DataSize> {
     #[pdf(key="F")]
     f: Option<T>,
     #[pdf(key="UF")]
@@ -1103,9 +1103,22 @@ pub struct Files<T: Object + ObjectWrite> {
     #[pdf(key="Unix")]
     unix: Option<T>,
 }
+impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
+    const IS_DYNAMIC: bool = T::IS_DYNAMIC;
+    const STATIC_HEAP_SIZE: usize = 5 * Option::<T>::STATIC_HEAP_SIZE;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.f.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.uf.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.dos.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.mac.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.unix.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0)
+    }
+
+}
 
 /// PDF Embedded File Stream.
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct EmbeddedFile {
     /*
     #[pdf(key="Subtype")]
@@ -1115,7 +1128,7 @@ pub struct EmbeddedFile {
     params: Option<EmbeddedFileParamDict>,
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size")]
     size: Option<i32>,
@@ -1132,7 +1145,7 @@ pub struct EmbeddedFileParamDict {
     */
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct OutlineItem {
     #[pdf(key="Title")]
     pub title: Option<PdfString>,
@@ -1168,7 +1181,7 @@ pub struct OutlineItem {
     pub flags: Option<i32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DataSize)]
 pub enum Action {
     Goto(MaybeNamedDest),
     Other(Dictionary)
@@ -1199,7 +1212,7 @@ impl ObjectWrite for Action {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type="Outlines?")]
 pub struct Outlines {
     #[pdf(key="Count", default="0")]
@@ -1213,7 +1226,7 @@ pub struct Outlines {
 
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, DataSize)]
 pub struct Rect {
     pub left:   f32,
     pub bottom: f32,
@@ -1243,7 +1256,7 @@ impl ObjectWrite for Rect {
 
 // Stuff from chapter 10 of the PDF 1.7 ref
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct MarkInformation { // TODO no /Type
     /// indicating whether the document conforms to Tagged PDF conventions
     #[pdf(key="Marked", default="false")]
@@ -1256,13 +1269,13 @@ pub struct MarkInformation { // TODO no /Type
     pub suspects: bool,
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "StructTreeRoot")]
 pub struct StructTreeRoot {
     #[pdf(key="K")]
     pub children: Vec<StructElem>,
 }
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct StructElem {
     #[pdf(key="S")]
     struct_type: StructType,
@@ -1278,7 +1291,7 @@ pub struct StructElem {
     page: Option<Ref<Page>>,
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub enum StructType {
     Document,
     Part,

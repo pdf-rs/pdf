@@ -8,6 +8,7 @@ use block_modes::{BlockMode, Cbc};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
 use std::collections::HashMap;
+use datasize::DataSize;
 use crate::object::PlainRef;
 use crate::primitive::{Dictionary, PdfString, Name};
 use crate::error::{PdfError, Result};
@@ -57,7 +58,7 @@ impl Rc4 {
 }
 
 /// 7.6.1 Table 20 + 7.6.3.2 Table 21
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct CryptDict {
     #[pdf(key="O")]
     o: PdfString,
@@ -96,7 +97,7 @@ pub struct CryptDict {
     _other: Dictionary
 }
 
-#[derive(Object, Debug, Clone, Copy)]
+#[derive(Object, Debug, Clone, Copy, DataSize)]
 pub enum CryptMethod {
     None,
     V2,
@@ -104,13 +105,13 @@ pub enum CryptMethod {
     AESV3,
 }
 
-#[derive(Object, Debug, Clone, Copy)]
+#[derive(Object, Debug, Clone, Copy, DataSize)]
 pub enum AuthEvent {
     DocOpen,
     EFOpen
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 #[pdf(Type="CryptFilter?")]
 pub struct CryptFilter {
     #[pdf(key="CFM", default="CryptMethod::None")]
@@ -616,6 +617,8 @@ impl fmt::Debug for Decoder {
 
 #[cfg(test)]
 mod tests {
+    use crate::file::DefaultCache;
+
     #[test]
     fn unencrypted_strings() {
         let data_prefix = b"%PDF-1.5\n\

@@ -1,3 +1,5 @@
+use datasize::DataSize;
+
 use crate as pdf;
 use crate::object::*;
 use crate::primitive::*;
@@ -12,10 +14,11 @@ pub (crate) enum StreamData {
     Generated(Arc<[u8]>),
     Original(Range<usize>, PlainRef),
 }
+datasize::non_dynamic_const_heap_size!(StreamData, std::mem::size_of::<StreamData>());
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
-#[derive(Clone)]
-pub struct Stream<I=()> {
+#[derive(Clone, DataSize)]
+pub struct Stream<I> {
     pub info: StreamInfo<I>,
     pub (crate) inner_data: StreamData,
 }
@@ -119,7 +122,7 @@ impl<I: ObjectWrite> Stream<I> {
         }
 
         match self.inner_data {
-            StreamData::Generated(ref data) => unimplemented!(),
+            StreamData::Generated(ref _data) => unimplemented!(),
             StreamData::Original(ref file_range, id) => {
                 info.insert("Length", Primitive::Integer(file_range.len() as _));
                 Ok(PdfStream { info, id, file_range: file_range.clone() })
@@ -142,7 +145,7 @@ impl<I: Object> Deref for Stream<I> {
 
 
 /// General stream type. `I` is the additional information to be read from the stream dict.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct StreamInfo<I> {
     // General dictionary entries
     /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and
@@ -257,7 +260,7 @@ impl<T: Object> Object for StreamInfo<T> {
     }
 }
 
-#[derive(Object, Default, Debug)]
+#[derive(Object, Default, Debug, DataSize)]
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
     #[pdf(key = "N")]
@@ -270,11 +273,10 @@ pub struct ObjStmInfo {
 
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
-    pub extends: Option<Ref<Stream>>,
-
+    pub extends: Option<Ref<Stream<()>>>,
 }
 
-
+#[derive(DataSize)]
 pub struct ObjectStream {
     /// Byte offset of each object. Index is the object number.
     offsets:    Vec<usize>,

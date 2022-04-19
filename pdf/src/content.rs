@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 use std::cmp::Ordering;
 use itertools::Itertools;
 use istring::SmallString;
+use datasize::DataSize;
 
 use crate::error::*;
 use crate::object::*;
@@ -11,7 +12,7 @@ use crate::primitive::*;
 use crate::enc::StreamFilter;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct Content {
     /// The raw content stream parts. usually one, but could be any number.
     pub parts: Vec<Stream<()>>,
@@ -510,7 +511,7 @@ impl Object for Content {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct FormXObject {
     pub stream: Stream<FormDict>,
 }

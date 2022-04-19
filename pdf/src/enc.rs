@@ -11,9 +11,10 @@ use crate::object::{Object, Resolve};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::TryInto;
 use once_cell::sync::OnceCell;
+use datasize::DataSize;
 
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     pub predictor: i32,
@@ -38,7 +39,7 @@ impl Default for LZWFlateParams {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.
@@ -49,7 +50,7 @@ pub struct DCTDecodeParams {
     pub color_transform: Option<i32>,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct CCITTFaxDecodeParams {
     #[pdf(key="K", default="0")]
     pub k: i32,
@@ -75,7 +76,7 @@ pub struct CCITTFaxDecodeParams {
     #[pdf(key="DamagedRowsBeforeError", default="0")]
     pub damaged_rows_before_error: u32,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum StreamFilter {
     ASCIIHexDecode,
     ASCII85Decode,
@@ -373,10 +374,10 @@ static JPX_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
 static JBIG2_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
 
 pub fn set_jpx_decoder(f: Box<DecodeFn>) {
-    JPX_DECODER.set(f);
+    let _ = JPX_DECODER.set(f);
 }
 pub fn set_jbig2_decoder(f: Box<DecodeFn>) {
-    JBIG2_DECODER.set(f);
+    let _ = JBIG2_DECODER.set(f);
 }
 
 pub fn jpx_decode(data: &[u8]) -> Result<Vec<u8>> {

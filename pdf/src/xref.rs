@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use crate::error::*;
 use crate::object::*;
 use crate as pdf;
+use datasize::DataSize;
 
 ///////////////////////////
 // Cross-reference table //
@@ -206,7 +207,7 @@ impl XRefSection {
 }
 
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
     // XRefStream fields
