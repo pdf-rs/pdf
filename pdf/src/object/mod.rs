@@ -33,18 +33,21 @@ pub type GenNr = u16;
 pub struct ParseOptions {
     pub allow_error_in_option: bool,
     pub allow_xref_error: bool,
+    pub allow_invalid_ops: bool,
 }
 impl ParseOptions {
     pub const fn tolerant() -> Self {
         ParseOptions {
             allow_error_in_option: true,
             allow_xref_error: true,
+            allow_invalid_ops: true,
         }
     }
     pub const fn strict() -> Self {
         ParseOptions {
             allow_error_in_option: false,
             allow_xref_error: false,
+            allow_invalid_ops: true,
         }
     }
 }

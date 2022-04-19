@@ -256,7 +256,11 @@ impl OpBuilder {
                     lexer.set_pos(backup_pos);
                     let op = t!(lexer.next());
                     let operator = t!(op.as_str());
-                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), operator, lexer.ctx());
+                    match self.add(operator, buffer.drain(..), &mut lexer, resolve) {
+                        Ok(()) => {},
+                        Err(e) if resolve.options().allow_invalid_ops => {},
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             match lexer.get_pos().cmp(&data.len()) {
@@ -320,7 +324,7 @@ impl OpBuilder {
             }
             "d0"  => {}
             "d1"  => {}
-            "Do"  => {
+            "Do" | "Do0" => {
                 names!(args, name);
                 push(Op::XObject { name });
             }
