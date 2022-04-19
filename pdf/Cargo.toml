@@ -38,7 +38,7 @@ fax = "0.2.0"
 euclid = { version = "0.22.6", optional = true }
 bitflags = "1.3"
 istring = { version = "0.3.1", git = "https://github.com/s3bk/istring", features = ["std", "size"] }
-datasize = "*"
+datasize = { git = "https://github.com/s3bk/datasize" }
 cachelib = { version = "0.2", git = "https://github.com/s3bk/cachelib", features = ["sync"] }
 
 
