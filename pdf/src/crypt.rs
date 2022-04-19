@@ -617,8 +617,6 @@ impl fmt::Debug for Decoder {
 
 #[cfg(test)]
 mod tests {
-    use crate::file::DefaultCache;
-
     #[test]
     fn unencrypted_strings() {
         let data_prefix = b"%PDF-1.5\n\
