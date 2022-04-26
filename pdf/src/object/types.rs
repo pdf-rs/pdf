@@ -332,7 +332,7 @@ pub struct Resources {
     pub color_spaces: HashMap<Name, ColorSpace>,
 
     #[pdf(key="Pattern")]
-    pub pattern: HashMap<Name, RcRef<Pattern>>,
+    pub pattern: HashMap<Name, Ref<Pattern>>,
 
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
