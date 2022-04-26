@@ -357,7 +357,7 @@ pub struct PatternDict {
     pub paint_type: Option<i32>,
 
     #[pdf(key="TilingType")]
-    pub tiling_type: i32,
+    pub tiling_type: Option<i32>,
 
     #[pdf(key="BBox")]
     pub bbox: Rect,
