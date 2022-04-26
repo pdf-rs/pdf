@@ -354,7 +354,7 @@ impl Resources {
 #[derive(Debug, Object, ObjectWrite, DataSize, Clone)]
 pub struct PatternDict {
     #[pdf(key="PaintType")]
-    pub paint_type: i32,
+    pub paint_type: Option<i32>,
 
     #[pdf(key="TilingType")]
     pub tiling_type: i32,
