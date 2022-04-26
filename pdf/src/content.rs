@@ -161,7 +161,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
 
 
     // ugh
-    let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
+    let bits_per_component = dict.get("BitsPerComponent").map(|p| p.as_integer()).transpose()?;
     let color_space = dict.get("ColorSpace").map(|p| ColorSpace::from_primitive(expand_abbr(p.clone(), 
         &[
             ("G", "DeviceGray"),

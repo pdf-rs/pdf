@@ -619,7 +619,7 @@ pub struct ImageDict {
     pub color_space: Option<ColorSpace>,
 
     #[pdf(key="BitsPerComponent")]
-    pub bits_per_component: i32,
+    pub bits_per_component: Option<i32>,
     // Note: only allowed values are 1, 2, 4, 8, 16. Enum?
     
     #[pdf(key="Intent")]
