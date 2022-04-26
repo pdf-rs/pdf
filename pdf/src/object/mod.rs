@@ -450,8 +450,8 @@ impl Object for Dictionary {
 }
 
 impl Object for Name {
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        p.into_name()
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        p.resolve(resolve)?.into_name()
     }
 }
 impl ObjectWrite for Name {
