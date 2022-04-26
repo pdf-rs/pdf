@@ -5,13 +5,14 @@ use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::parser::Lexer;
+use crate::enc::{StreamFilter, decode};
 
 use std::ops::{Deref, Range};
 use std::fmt;
 
 #[derive(Clone)]
 pub (crate) enum StreamData {
-    Generated(Arc<[u8]>),
+    Generated(Arc<[u8]>, Vec<StreamFilter>),
     Original(Range<usize>, PlainRef),
 }
 datasize::non_dynamic_const_heap_size!(StreamData, std::mem::size_of::<StreamData>());
@@ -29,6 +30,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
         Ok(Stream { info, inner_data: StreamData::Original(file_range, id) })
     }
 
+    /// the data is not compressed. the specified filters are to be applied when compressing the data
     pub fn new_with_filters(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
         Stream {
             info: StreamInfo {
@@ -37,7 +39,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            inner_data: StreamData::Generated(data.into()),
+            inner_data: StreamData::Generated(data.into(), vec![]),
         }
     }
     pub fn new(i: I, data: impl Into<Arc<[u8]>>) -> Stream<I> {
@@ -48,13 +50,36 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            inner_data: StreamData::Generated(data.into()),
+            inner_data: StreamData::Generated(data.into(), vec![]),
+        }
+    }
+    /// the data is already compressed with the specified filters
+    pub fn from_compressed(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
+        Stream {
+            info: StreamInfo {
+                filters: filters.clone(),
+                file: None,
+                file_filters: Vec::new(),
+                info: i
+            },
+            inner_data: StreamData::Generated(data.into(), filters),
         }
     }
 
     pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
         match self.inner_data {
-            StreamData::Generated(ref data) => Ok(data.clone()),
+            StreamData::Generated(ref data, ref filters) => {
+                if filters.len() == 0 {
+                    Ok(data.clone())
+                } else {
+                    use std::borrow::Cow;
+                    let mut data: Cow<[u8]> = (&**data).into();
+                    for filter in filters {
+                        data = t!(decode(&data, filter), filter).into();
+                    }
+                    Ok(data.into())
+                }
+            }
             StreamData::Original(ref file_range, id) => {
                 resolve.get_data_or_decode(id, file_range.clone(), &self.info.filters)
             }
@@ -122,7 +147,7 @@ impl<I: ObjectWrite> Stream<I> {
         }
 
         match self.inner_data {
-            StreamData::Generated(ref _data) => unimplemented!(),
+            StreamData::Generated(ref _data, _) => unimplemented!(),
             StreamData::Original(ref file_range, id) => {
                 info.insert("Length", Primitive::Integer(file_range.len() as _));
                 Ok(PdfStream { info, id, file_range: file_range.clone() })

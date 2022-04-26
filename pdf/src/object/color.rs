@@ -31,6 +31,7 @@ pub enum ColorSpace {
     Separation(Name, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
     Pattern,
+    Named(Name),
     Other(Vec<Primitive>)
 }
 impl DataSize for ColorSpace {
@@ -58,7 +59,8 @@ impl DataSize for ColorSpace {
             }
             ColorSpace::Icc(ref s) => s.estimate_heap_size(),
             ColorSpace::Pattern => 0,
-            ColorSpace::Other(ref v) => v.estimate_heap_size()
+            ColorSpace::Other(ref v) => v.estimate_heap_size(),
+            ColorSpace::Named(ref n) => n.estimate_heap_size()
         }
     }
 }
@@ -81,7 +83,7 @@ impl ColorSpace {
                 "DeviceRGB" => ColorSpace::DeviceRGB,
                 "DeviceCMYK" => ColorSpace::DeviceCMYK,
                 "Pattern" => ColorSpace::Pattern,
-                _ => bail!("unimplemented color space {}", name)
+                name => ColorSpace::Named(name.into()),
             };
             return Ok(cs);
         }
@@ -143,6 +145,9 @@ impl ColorSpace {
             "CalCMYK" => {
                 let dict = Dictionary::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
                 Ok(ColorSpace::CalCMYK(dict))
+            }
+            "Pattern" => {
+                Ok(ColorSpace::Pattern)
             }
             _ => Ok(ColorSpace::Other(arr))
         }

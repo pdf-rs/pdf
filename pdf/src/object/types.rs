@@ -6,7 +6,7 @@ use datasize::DataSize;
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
-use crate::content::{Content, FormXObject};
+use crate::content::{Content, FormXObject, Matrix, parse_ops, serialize_ops, Op};
 use crate::font::Font;
 use crate::enc::StreamFilter;
 
@@ -351,18 +351,55 @@ impl Resources {
 }
 
 
+#[derive(Debug, Object, ObjectWrite, DataSize, Clone)]
+pub struct PatternDict {
+    #[pdf(key="PaintType")]
+    pub paint_type: i32,
+
+    #[pdf(key="TilingType")]
+    pub tiling_type: i32,
+
+    #[pdf(key="BBox")]
+    pub bbox: Rect,
+
+    #[pdf(key="XStep")]
+    pub x_step: f32,
+
+    #[pdf(key="YStep")]
+    pub y_step: f32,
+
+    #[pdf(key="Resources")]
+    pub resources: Ref<Resources>,
+
+    #[pdf(key="Matrix")]
+    pub matrix: Option<Matrix>,
+}
 
 #[derive(Debug, DataSize)]
 pub enum Pattern {
-    Dict(Dictionary),
-    Stream(PdfStream)
+    Dict(PatternDict),
+    Stream(PatternDict, Vec<Op>),
+}
+impl Pattern {
+    pub fn dict(&self) -> &PatternDict {
+        match *self {
+            Pattern::Dict(ref d) => d,
+            Pattern::Stream(ref d, _) => d,
+        }
+    }
 }
 impl Object for Pattern {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let p = p.resolve(resolve)?;
         match p {
-            Primitive::Dictionary(dict) => Ok(Pattern::Dict(dict)),
-            Primitive::Stream(s) => Ok(Pattern::Stream(s)),
+            Primitive::Dictionary(dict) => Ok(Pattern::Dict(PatternDict::from_dict(dict, resolve)?)),
+            Primitive::Stream(s) => {
+                let stream: Stream<PatternDict> = Stream::from_stream(s, resolve)?;
+                let data = stream.data(resolve)?;
+                let ops = t!(parse_ops(&data, resolve));
+                let dict = stream.info.info;
+                Ok(Pattern::Stream(dict, ops))
+            }
             p => Err(PdfError::UnexpectedPrimitive { expected: "Dictionary or Stream", found: p.get_debug_name() })
         }
     }
@@ -370,8 +407,12 @@ impl Object for Pattern {
 impl ObjectWrite for Pattern {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match self {
-            Pattern::Dict(d) => d.to_primitive(update),
-            Pattern::Stream(s) => Ok(Primitive::Stream(s.clone())),
+            Pattern::Dict(ref d) => d.to_primitive(update),
+            Pattern::Stream(ref d, ref ops) => {
+                let data = serialize_ops(&ops)?;
+                let stream = Stream::new_with_filters(d.clone(), data, vec![]);
+                stream.to_primitive(update)
+            }
         }
     }
 }
@@ -469,9 +510,9 @@ pub enum XObject {
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;
 
-#[derive(Debug, DataSize)]
+#[derive(Debug, DataSize, Clone)]
 pub struct ImageXObject {
-    inner: Stream<ImageDict>
+    pub inner: Stream<ImageDict>
 }
 impl Object for ImageXObject {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -503,7 +544,7 @@ impl ImageXObject {
     /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
     pub fn raw_image_data(&self, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Option<&StreamFilter>)> {
         match self.inner.inner_data {
-            StreamData::Generated(ref data) => Ok((data.clone(), None)),
+            StreamData::Generated(_, _) => Ok((self.inner.data(resolve)?, None)),
             StreamData::Original(ref file_range, id) => {
                 let filters = self.inner.filters.as_slice();
                 // decode all non image filters
