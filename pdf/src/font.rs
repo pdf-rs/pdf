@@ -39,7 +39,7 @@ pub enum FontType {
 pub struct Font {
     pub subtype: FontType,
     pub name: Option<Name>,
-    pub data: Result<FontData>,
+    pub data: FontData,
 
     encoding: Option<Encoding>,
 
@@ -55,7 +55,7 @@ pub enum FontData {
     Type0(Type0Font),
     TrueType(TFont),
     CIDFontType0(CIDFont),
-    CIDFontType2(CIDFont, Option<CidToGidMap>),
+    CIDFontType2(CIDFont),
     Other(Dictionary),
     None,
 }
@@ -64,6 +64,24 @@ pub enum FontData {
 pub enum CidToGidMap {
     Identity,
     Table(Vec<u16>)
+}
+impl Object for CidToGidMap {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Name(name) if name == "Identity" => {
+                Ok(CidToGidMap::Identity)
+            }
+            p @ Primitive::Stream(_) | p @ Primitive::Reference(_) => {
+                let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
+                let data = stream.data(resolve)?;
+                Ok(CidToGidMap::Table(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
+            },
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "/Identity or Stream",
+                found: p.get_debug_name()
+            })
+        }
+    }
 }
 
 impl Object for Font {
@@ -91,30 +109,14 @@ impl Object for Font {
             None => None
         };
         let _other = dict.clone();
-        let data = { ||
-            Ok(match subtype {
-                FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
-                FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
-                FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
-                FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
-                FontType::CIDFontType2 => {
-                    let cid_map = match dict.remove("CIDToGIDMap") {
-                        Some(Primitive::Name(name)) if name == "/Identity" => {
-                            Some(CidToGidMap::Identity)
-                        }
-                        Some(p @ Primitive::Stream(_)) | Some(p @ Primitive::Reference(_)) => {
-                            let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
-                            let data = stream.data(resolve)?;
-                            Some(CidToGidMap::Table(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
-                        },
-                        _ => None
-                    };
-                    let cid_font = CIDFont::from_dict(dict, resolve)?;
-                    FontData::CIDFontType2(cid_font, cid_map)
-                }
-                _ => FontData::Other(dict)
-            })
-        }();
+        let data = match subtype {
+            FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
+            FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
+            FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
+            FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
+            FontType::CIDFontType2 => FontData::CIDFontType2(CIDFont::from_dict(dict, resolve)?),
+            _ => FontData::Other(dict)
+        };
 
         Ok(Font {
             subtype,
@@ -193,20 +195,20 @@ impl Widths {
 }
 impl Font {
     pub fn embedded_data(&self, resolve: &impl Resolve) -> Option<Result<Arc<[u8]>>> {
-        match self.data.as_ref().ok()? {
+        match self.data {
             FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data(resolve)),
-            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(resolve),
+            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c) => c.font_descriptor.data(resolve),
             FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.as_ref().and_then(|d| d.data(resolve)),
             _ => None
         }
     }
     pub fn is_cid(&self) -> bool {
-        matches!(self.data, Ok(FontData::CIDFontType0(_)) | Ok(FontData::CIDFontType2(_, _)))
+        matches!(self.data, FontData::CIDFontType0(_) | FontData::CIDFontType2(_))
     }
     pub fn cid_to_gid_map(&self) -> Option<&CidToGidMap> {
-        match self.data.as_ref().ok()? {
+        match self.data {
             FontData::Type0(ref inner) => inner.descendant_fonts.get(0).and_then(|f| f.cid_to_gid_map()),
-            FontData::CIDFontType2(_, ref data) => data.as_ref(),
+            FontData::CIDFontType0(ref f) | FontData::CIDFontType2(ref f) => f.cid_to_gid_map.as_ref(),
             _ => None
         }
     }
@@ -214,7 +216,7 @@ impl Font {
         self.encoding.as_ref()
     }
     pub fn info(&self) -> Option<&TFont> {
-        match self.data.as_ref().ok()? {
+        match self.data {
             FontData::Type1(ref info) => Some(info),
             FontData::TrueType(ref info) => Some(info),
             _ => None
@@ -222,8 +224,8 @@ impl Font {
     }
     pub fn widths(&self, resolve: &impl Resolve) -> Result<Option<Widths>> {
         match self.data {
-            Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(resolve),
-            Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => {
+            FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(resolve),
+            FontData::Type1(ref info) | FontData::TrueType(ref info) => {
                 match *info {
                     TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
                         default: 0.0,
@@ -233,7 +235,7 @@ impl Font {
                     _ => Ok(None)
                 }
             },
-            Ok(FontData::CIDFontType0(ref cid)) | Ok(FontData::CIDFontType2(ref cid, _)) => {
+            FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid) => {
                 let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
                 while let Some(p) = iter.next() {
@@ -316,6 +318,9 @@ pub struct CIDFont {
 
     #[pdf(key="W")]
     pub widths: Vec<Primitive>,
+
+    #[pdf(key="CIDToGIDMap")]
+    pub cid_to_gid_map: Option<CidToGidMap>,
 
     #[pdf(other)]
     _other: Dictionary
