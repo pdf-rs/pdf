@@ -33,7 +33,7 @@ pub enum XRef {
 }
 
 impl XRef {
-    pub fn get_gen_nr(&self) -> u16 {
+    pub fn get_gen_nr(&self) -> GenNr {
         match *self {
             XRef::Free {gen_nr, ..}
             | XRef::Raw {gen_nr, ..} => gen_nr,
@@ -198,7 +198,7 @@ impl XRefSection {
     pub fn add_free_entry(&mut self, next_obj_nr: ObjNr, gen_nr: GenNr) {
         self.entries.push(XRef::Free{next_obj_nr, gen_nr});
     }
-    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
+    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: GenNr) {
         self.entries.push(XRef::Raw{pos, gen_nr});
     }
     pub fn entries(&self) -> impl Iterator<Item=(usize, &XRef)> {

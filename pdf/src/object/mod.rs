@@ -28,7 +28,7 @@ use std::convert::TryInto;
 use datasize::{DataSize};
 
 pub type ObjNr = u64;
-pub type GenNr = u16;
+pub type GenNr = u64;
 
 pub struct ParseOptions {
     pub allow_error_in_option: bool,
