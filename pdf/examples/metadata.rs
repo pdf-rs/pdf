@@ -21,7 +21,7 @@ fn main() -> Result<(), PdfError> {
 
     if let Some(ref forms) = file.get_root().forms {
         for field in forms.fields.iter() {
-            print_field(&field, &file);
+            print_field(field, &file);
         }
     }
 

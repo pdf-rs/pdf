@@ -299,7 +299,7 @@ pub struct TFont {
 #[derive(Object, Debug, DataSize)]
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
-    descendant_fonts: Vec<RcRef<Font>>,
+    descendant_fonts: Vec<MaybeRef<Font>>,
 
     #[pdf(key="ToUnicode")]
     to_unicode: Option<Stream<()>>,
