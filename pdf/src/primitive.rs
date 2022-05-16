@@ -664,12 +664,21 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-pub struct Date(pub DateTime<FixedOffset>);
+#[derive(Clone, Debug)]
+pub struct Date {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+    pub tz_hour: u8,
+    pub tz_minute: u8,
+}
 datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
 
 impl Object for Date {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
             Primitive::String (PdfString {data}) => {
                 let s = str::from_utf8(&data)?;
@@ -678,7 +687,7 @@ impl Object for Date {
 
                     let year = match s.get(2..6) {
                         Some(year) => {
-                            str::parse::<i32>(year)?
+                            str::parse::<u16>(year)?
                         }
                         None => bail!("Missing obligatory year in date")
                     };
@@ -689,14 +698,12 @@ impl Object for Date {
                     let second = parse_or(s, 14..16, 0);
                     let tz_hour = parse_or(s, 16..18, 0);
                     let tz_minute = parse_or(s, 19..21, 0);
-                    let tz = FixedOffset::east(tz_hour * 60 + tz_minute);
-
-                    Ok(Date(DateTime::from_utc(
-                            NaiveDateTime::new(NaiveDate::from_ymd(year, month, day),
-                                               NaiveTime::from_hms(hour, minute, second)),
-                          tz
-                    )))
-
+                    
+                    Ok(Date {
+                        year, month, day,
+                        hour, minute, second,
+                        tz_hour, tz_minute,
+                    })
                 } else {
                     bail!("Failed parsing date");
                 }
