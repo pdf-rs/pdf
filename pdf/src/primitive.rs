@@ -4,7 +4,6 @@ use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
 use std::collections::{btree_map, BTreeMap};
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
-use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
 use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};

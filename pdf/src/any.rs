@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::rc::Rc;
 use std::sync::Arc;
-use cachelib::ValueSize;
+use globalcache::ValueSize;
 use datasize::DataSize;
 use crate::object::{Object};
 use crate::error::{Result, PdfError};

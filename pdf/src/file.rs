@@ -19,7 +19,7 @@ use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
-use cachelib::sync::SyncCache;
+use globalcache::sync::SyncCache;
 use datasize::DataSize;
 
 #[must_use]
