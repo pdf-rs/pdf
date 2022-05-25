@@ -98,7 +98,10 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     };
 
     let stream_substr = lexer.read_n(length as usize);
-    assert_eq!(stream_substr.len(), length as usize);
+
+    if stream_substr.len() != length as usize {
+        err!(PdfError::EOF)
+    }
 
     // Finish
     t!(lexer.next_expect("endstream"));
