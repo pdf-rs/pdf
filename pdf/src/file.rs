@@ -91,7 +91,9 @@ impl<B: Backend> Resolve for Storage<B> {
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
-                    assert!(flags.contains(ParseFlags::STREAM));
+                    if !flags.contains(ParseFlags::STREAM) {
+                        return Err(PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, allowed: flags });
+                    }
                     if depth == 0 {
                         bail!("too deep");
                     }
