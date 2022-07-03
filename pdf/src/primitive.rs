@@ -464,6 +464,13 @@ impl Primitive {
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
+    pub fn as_usize(&self) -> Result<usize> {
+        match *self {
+            Primitive::Integer(n) if n >= 0 => Ok(n as usize),
+            Primitive::Integer(_) => bail!("negative integer"),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name())
+        }
+    }
     pub fn as_number(&self) -> Result<f32> {
         match *self {
             Primitive::Integer(n) => Ok(n as f32),

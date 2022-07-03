@@ -75,7 +75,7 @@ pub trait Backend: Sized {
         
         let mut prev_trailer = {
             match trailer.get("Prev") {
-                Some(p) => Some(t!(p.as_integer())),
+                Some(p) => Some(t!(p.as_usize())),
                 None => None
             }
         };
@@ -87,7 +87,7 @@ pub trait Backend: Sized {
             }
             seen.push(prev_xref_offset);
 
-            let pos = t!(start_offset.checked_add(prev_xref_offset as usize).ok_or(PdfError::Invalid));
+            let pos = t!(start_offset.checked_add(prev_xref_offset).ok_or(PdfError::Invalid));
             let mut lexer = Lexer::with_offset(t!(self.read(pos..)), pos);
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
             
@@ -98,7 +98,7 @@ pub trait Backend: Sized {
             prev_trailer = {
                 match trailer.get("Prev") {
                     Some(p) => {
-                        let prev = t!(p.as_integer());
+                        let prev = t!(p.as_usize());
                         Some(prev)
                     }
                     None => None

@@ -91,15 +91,15 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     t!(lexer.next_stream());
 
     let length = match dict.get("Length") {
-        Some(&Primitive::Integer(n)) => n,
-        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER, 1)).as_integer()),
-        Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "Integer or Reference", found: other.get_debug_name() }),
+        Some(&Primitive::Integer(n)) if n >= 0 => n as usize,
+        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER, 1)).as_usize()),
+        Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "unsigned Integer or Reference", found: other.get_debug_name() }),
         None => err!(PdfError::MissingEntry { typ: "<Stream>", field: "Length".into() }),
     };
 
-    let stream_substr = lexer.read_n(length as usize);
+    let stream_substr = lexer.read_n(length);
 
-    if stream_substr.len() != length as usize {
+    if stream_substr.len() != length {
         err!(PdfError::EOF)
     }
 
@@ -239,10 +239,10 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
             for character in string_lexer.iter() {
                 string.push(t!(character));
             }
-            string_lexer.get_offset() as i64
+            string_lexer.get_offset()
         };
         // Advance to end of string
-        lexer.offset_pos(bytes_traversed as usize);
+        lexer.offset_pos(bytes_traversed);
         // decrypt it
         if let Some(ctx) = ctx {
             string = t!(ctx.decrypt(&mut string)).into();

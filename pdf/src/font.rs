@@ -239,7 +239,7 @@ impl Font {
                 let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
                 while let Some(p) = iter.next() {
-                    let c1 = p.as_integer()? as usize;
+                    let c1 = p.as_usize()?;
                     match iter.next() {
                         Some(&Primitive::Array(ref array)) => {
                             widths.ensure_cid(c1 + array.len() - 1);
@@ -458,6 +458,9 @@ impl ToUnicodeMap {
     }
     pub fn iter(&self) -> impl Iterator<Item=(u16, &str)> {
         self.inner.iter().map(|(&gid, unicode)| (gid, unicode.as_str()))
+    }
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 }
 
