@@ -318,8 +318,8 @@ impl<'a> Lexer<'a> {
     /// Read and return slice of at most n bytes.
     #[allow(dead_code)]
     pub fn read_n(&mut self, n: usize) -> Substr<'a> {
-        let start_pos = dbg!(self.pos);
-        self.pos += dbg!(n);
+        let start_pos = self.pos;
+        self.pos += n;
         if self.pos >= self.buf.len() {
             self.pos = self.buf.len() - 1;
         }
