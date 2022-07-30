@@ -156,9 +156,10 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
     let data_start = lexer.get_pos() + 1;
 
     // find the end before try parsing.
-    lexer.seek_substr("\nEI").expect("BUGZ");
+    if lexer.seek_substr("\nEI").is_none() {
+        bail!("inline image exceeds expected data range");
+    }    
     let data_end = lexer.get_pos() - 3;
-
 
     // ugh
     let bits_per_component = dict.get("BitsPerComponent").map(|p| p.as_integer()).transpose()?;
