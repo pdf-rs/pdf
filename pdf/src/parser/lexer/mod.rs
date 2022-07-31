@@ -284,6 +284,9 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         let mut matched = 0;
         loop {
+            if self.pos >= self.buf.len() {
+                return None
+            }
             if self.buf[self.pos] == substr[matched] {
                 matched += 1;
             } else {
@@ -291,9 +294,6 @@ impl<'a> Lexer<'a> {
             }
             if matched == substr.len() {
                 break;
-            }
-            if self.pos >= self.buf.len() {
-                return None
             }
             self.pos += 1;
         }
