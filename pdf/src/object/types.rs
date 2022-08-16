@@ -260,6 +260,9 @@ pub struct Page {
 
     #[pdf(key="Rotate", default="0")]
     pub rotate: i32,
+
+    #[pdf(key="Annots")]
+    pub annots: Option<Vec<MaybeRef<Annot>>>,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -283,6 +286,7 @@ impl Page {
             resources:  None,
             contents:   None,
             rotate:     0,
+            annots:     None,
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
@@ -811,6 +815,53 @@ pub struct FieldDictionary {
     
     #[pdf(key="AA")]
     pub actions: Option<Dictionary>,
+}
+
+// See PDF specification page 381,
+//    https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf
+#[derive(Object, ObjectWrite, Debug, DataSize)]
+pub struct Annot {
+    #[pdf(key="Subtype")]
+    pub subtype: Name,
+
+    #[pdf(key="Rect")]
+    pub rect: Rect,
+
+    #[pdf(key="Contents")]
+    pub contents: Option<PdfString>,
+
+    #[pdf(key="P")]
+    pub page: Option<Dictionary>,
+
+    #[pdf(key="NM")]
+    pub annotation_name: Option<PdfString>,
+
+    #[pdf(key="M")]
+    pub last_modified: Option<PdfString>, // should be a date formatted as a string
+
+    #[pdf(key="F")]
+    pub flags: Option<u32>,
+
+    #[pdf(key="AP")]
+    pub appearance: Option<Dictionary>,
+
+    #[pdf(key="AS")]
+    pub appearance_state: Option<Name>,
+
+    #[pdf(key="Border")]
+    pub border: Option<Vec<u32>>,
+
+    #[pdf(key="C")]
+    pub color: Option<Vec<f32>>,
+
+    #[pdf(key="StructParent")]
+    pub struct_parent: Option<u32>,
+
+    #[pdf(key="OC")]
+    pub optional_content: Option<Dictionary>,
+
+    #[pdf(key="A")]
+    pub ahref: Option<Dictionary>,
 }
 
 #[derive(Debug, DataSize)]
