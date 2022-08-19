@@ -86,7 +86,8 @@ pub enum StreamFilter {
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
     JBIG2Decode,
-    Crypt
+    Crypt,
+    RunLengthDecode
 }
 impl StreamFilter {
     pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &impl Resolve) -> Result<StreamFilter> {
@@ -102,6 +103,7 @@ impl StreamFilter {
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
            "JBIG2Decode" => StreamFilter::JBIG2Decode,
            "Crypt" => StreamFilter::Crypt,
+           "RunLengthDecode" => StreamFilter::RunLengthDecode,
            ty => bail!("Unrecognized filter type {:?}", ty),
        } 
        )
