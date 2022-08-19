@@ -548,11 +548,12 @@ impl ImageXObject {
             StreamData::Original(ref file_range, id) => {
                 let filters = self.inner.filters.as_slice();
                 // decode all non image filters
-                let end = filters.iter().position(|f| match f {
+                let end = filters.iter().rposition(|f| match f {
                     StreamFilter::ASCIIHexDecode => false,
                     StreamFilter::ASCII85Decode => false,
                     StreamFilter::LZWDecode(_) => false,
                     StreamFilter::FlateDecode(_) => false,
+                    StreamFilter::RunLengthDecode => false,
         
                     StreamFilter::Crypt => true,
                     _ => true

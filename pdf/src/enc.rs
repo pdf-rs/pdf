@@ -86,7 +86,8 @@ pub enum StreamFilter {
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
     JBIG2Decode,
-    Crypt
+    Crypt,
+    RunLengthDecode
 }
 impl StreamFilter {
     pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &impl Resolve) -> Result<StreamFilter> {
@@ -102,6 +103,7 @@ impl StreamFilter {
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
            "JBIG2Decode" => StreamFilter::JBIG2Decode,
            "Crypt" => StreamFilter::Crypt,
+           "RunLengthDecode" => StreamFilter::RunLengthDecode,
            ty => bail!("Unrecognized filter type {:?}", ty),
        } 
        )
@@ -369,6 +371,35 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
     }
 }
 
+pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
+    // Used <http://benno.id.au/refs/PDFReference15_v5.pdf> as specification
+    use std::io::*;
+
+    let mut buf = Vec::new();
+    let d = data;
+    let mut c = 0;
+
+    while c < data.len() {
+        let length = d[c]; // length is first byte
+        if length < 128 {
+            let start = c + 1;
+            let end = start + length as usize + 1;
+            // copy _following_ length + 1 bytes literally
+            buf.extend_from_slice(&d[start..end]);
+            c = end; // move cursor to next run
+        } else if length >= 129 {
+            let copy = 257 - length as usize; // copy 2 - 128 times
+            let b = d[c + 1]; // copied byte
+            buf.extend(std::iter::repeat(b).take(copy));
+            c = c + 2; // move cursor to next run
+        } else {
+            break; // EOD
+        }
+    }
+
+    Ok(buf)
+}
+
 pub type DecodeFn = dyn Fn(&[u8]) -> Result<Vec<u8>> + Sync + Send + 'static;
 static JPX_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
 static JBIG2_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
@@ -393,6 +424,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCII85Decode => decode_85(data),
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
+        StreamFilter::RunLengthDecode => run_length_decode(data),
 
         _ => bail!("unimplemented {filter:?}"),
     }
@@ -568,5 +600,11 @@ mod tests {
             include_str!("data/t01_plain.txt")
         );
         */
+    }
+
+    #[test]
+    fn run_length_decode_test() {
+        let x = run_length_decode(&[254, b'a', 255, b'b', 2, b'c', b'b', b'c', 254, b'a', 128]).unwrap();
+        assert_eq!(b"aaabbcbcaaa", x.as_slice());
     }
 }
