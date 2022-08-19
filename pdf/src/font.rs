@@ -152,9 +152,10 @@ impl Widths {
         }
     }
     fn ensure_cid(&mut self, cid: usize) {
-        if cid - self.first_char > self.values.capacity() {
-            let missing = cid - self.values.len();
-            self.values.reserve(missing);
+        if let Some(offset) = cid.checked_sub(self.first_char) { // cid may be < first_char
+            // reserve difference of offset to capacity
+            // if enough capacity to cover offset, saturates to zero, and reserve will do nothing
+            self.values.reserve(offset.saturating_sub(self.values.capacity()));
         }
     }
     #[allow(clippy::float_cmp)]  // TODO
