@@ -152,7 +152,7 @@ impl Widths {
         }
     }
     fn ensure_cid(&mut self, cid: usize) {
-	if cid - self.first_char > self.values.capacity() {
+        if cid - self.first_char > self.values.capacity() {
             let missing = cid - self.values.len();
             self.values.reserve(missing);
         }
