@@ -567,7 +567,7 @@ impl ImageXObject {
                     [StreamFilter::DCTDecode(_)] |
                     [StreamFilter::CCITTFaxDecode(_)] |
                     [StreamFilter::JPXDecode] |
-                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&filters[0]))),
+                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters)
                 }
             }
