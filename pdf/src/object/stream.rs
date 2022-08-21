@@ -130,6 +130,7 @@ impl<I: ObjectWrite> Stream<I> {
                 StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
                 StreamFilter::JBIG2Decode => "JBIG2Decode",
                 StreamFilter::Crypt => "Crypt",
+                StreamFilter::RunLengthDecode => "RunLengthDecode",
             })
             .map(|s| Primitive::Name(s.into()));
             match self.info.filters.len() {
