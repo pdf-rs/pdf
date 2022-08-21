@@ -94,7 +94,7 @@ pub enum PdfError {
     #[snafu(display("Tried to dereference non-existing object nr {}.", obj_nr))]
     NullRef {obj_nr: u64},
 
-    #[snafu(display("Expected primitive {}, found primive {} instead.", expected, found))]
+    #[snafu(display("Expected primitive {}, found primitive {} instead.", expected, found))]
     UnexpectedPrimitive {expected: &'static str, found: &'static str},
     /*
     WrongObjectType {expected: &'static str, found: &'static str} {

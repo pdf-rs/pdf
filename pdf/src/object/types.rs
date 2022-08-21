@@ -409,7 +409,7 @@ impl ObjectWrite for Pattern {
         match self {
             Pattern::Dict(ref d) => d.to_primitive(update),
             Pattern::Stream(ref d, ref ops) => {
-                let data = serialize_ops(&ops)?;
+                let data = serialize_ops(ops)?;
                 let stream = Stream::new_with_filters(d.clone(), data, vec![]);
                 stream.to_primitive(update)
             }
@@ -909,7 +909,7 @@ impl<T: Object> Object for NameTree<T> {
                 let names = names.resolve(resolve)?.into_array()?;
                 let mut new_names = Vec::new();
                 for pair in names.chunks(2) {
-                    let name = pair[0].clone().into_string()?;
+                    let name = pair[0].clone().resolve(resolve)?.into_string()?;
                     let value = t!(T::from_primitive(pair[1].clone(), resolve));
                     new_names.push((name, value));
                 }
@@ -985,10 +985,10 @@ impl Dest {
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
                 zoom: match array.get(4) {
-                    Some(&Primitive::Null) => 0.0,
+                    Some(Primitive::Null) => 0.0,
                     Some(&Primitive::Integer(n)) => n as f32,
                     Some(&Primitive::Number(f)) => f,
-                    Some(ref p) => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                    Some(p) => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                     None => 0.0,
                 },
             },
