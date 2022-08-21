@@ -885,7 +885,7 @@ impl Object for Matrix {
 impl ObjectWrite for Matrix {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         let Matrix { a, b, c, d, e, f } = *self;
-        Primitive::array::<f32, _, _, _>([a, b, c, d, e, f].into_iter(), update)
+        Primitive::array::<f32, _, _, _>([a, b, c, d, e, f].iter(), update)
     }
 }
 #[cfg(feature = "euclid")]
