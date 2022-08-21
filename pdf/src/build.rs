@@ -10,6 +10,7 @@ pub struct PageBuilder {
     pub trim_box: Option<Rect>,
     pub resources: Option<MaybeRef<Resources>>,
     pub rotate: i32,
+    pub annots: Option<Vec<MaybeRef<Annot>>>,
 }
 impl PageBuilder {
     pub fn from_content(content: Content) -> PageBuilder {
@@ -26,6 +27,7 @@ impl PageBuilder {
             trim_box: page.trim_box,
             resources: Some(page.resources()?.clone()),
             rotate: page.rotate,
+            annots: page.annots.clone(),
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
@@ -76,6 +78,7 @@ impl CatalogBuilder {
                 trim_box: page.trim_box,
                 resources: page.resources,
                 rotate: page.rotate,
+                annots: page.annots,
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }

@@ -260,6 +260,9 @@ pub struct Page {
 
     #[pdf(key="Rotate", default="0")]
     pub rotate: i32,
+
+    #[pdf(key="Annots")]
+    pub annots: Option<Vec<MaybeRef<Annot>>>,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -283,6 +286,7 @@ impl Page {
             resources:  None,
             contents:   None,
             rotate:     0,
+            annots:     None,
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
@@ -409,7 +413,7 @@ impl ObjectWrite for Pattern {
         match self {
             Pattern::Dict(ref d) => d.to_primitive(update),
             Pattern::Stream(ref d, ref ops) => {
-                let data = serialize_ops(&ops)?;
+                let data = serialize_ops(ops)?;
                 let stream = Stream::new_with_filters(d.clone(), data, vec![]);
                 stream.to_primitive(update)
             }
@@ -814,6 +818,53 @@ pub struct FieldDictionary {
     pub actions: Option<Dictionary>,
 }
 
+// See PDF specification page 381,
+//    https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf
+#[derive(Object, ObjectWrite, Debug, DataSize)]
+pub struct Annot {
+    #[pdf(key="Subtype")]
+    pub subtype: Name,
+
+    #[pdf(key="Rect")]
+    pub rect: Rect,
+
+    #[pdf(key="Contents")]
+    pub contents: Option<PdfString>,
+
+    #[pdf(key="P")]
+    pub page: Option<Dictionary>,
+
+    #[pdf(key="NM")]
+    pub annotation_name: Option<PdfString>,
+
+    #[pdf(key="M")]
+    pub last_modified: Option<PdfString>, // should be a date formatted as a string
+
+    #[pdf(key="F")]
+    pub flags: Option<u32>,
+
+    #[pdf(key="AP")]
+    pub appearance: Option<Dictionary>,
+
+    #[pdf(key="AS")]
+    pub appearance_state: Option<Name>,
+
+    #[pdf(key="Border")]
+    pub border: Option<Vec<u32>>,
+
+    #[pdf(key="C")]
+    pub color: Option<Vec<f32>>,
+
+    #[pdf(key="StructParent")]
+    pub struct_parent: Option<u32>,
+
+    #[pdf(key="OC")]
+    pub optional_content: Option<Dictionary>,
+
+    #[pdf(key="A")]
+    pub ahref: Option<Dictionary>,
+}
+
 #[derive(Debug, DataSize)]
 pub enum Counter {
     Arabic,
@@ -876,7 +927,7 @@ impl<T: Object+DataSize> NameTree<T> {
 impl<T: Object> Object for NameTree<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let mut dict = t!(p.resolve(resolve)?.into_dictionary());
-        
+
         // Quite long function..=
         let limits = match dict.remove("Limits") {
             Some(limits) => {
@@ -909,7 +960,7 @@ impl<T: Object> Object for NameTree<T> {
                 let names = names.resolve(resolve)?.into_array()?;
                 let mut new_names = Vec::new();
                 for pair in names.chunks(2) {
-                    let name = pair[0].clone().into_string()?;
+                    let name = pair[0].clone().resolve(resolve)?.into_string()?;
                     let value = t!(T::from_primitive(pair[1].clone(), resolve));
                     new_names.push((name, value));
                 }
@@ -985,7 +1036,7 @@ impl Dest {
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
                 zoom: match array.get(4) {
-                    Some(&Primitive::Null) => 0.0,
+                    Some(Primitive::Null) => 0.0,
                     Some(&Primitive::Integer(n)) => n as f32,
                     Some(&Primitive::Number(f)) => f,
                     Some(ref p) => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
