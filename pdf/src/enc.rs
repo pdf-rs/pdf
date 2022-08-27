@@ -425,6 +425,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
         StreamFilter::RunLengthDecode => run_length_decode(data),
+        StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
 
         _ => bail!("unimplemented {filter:?}"),
     }
