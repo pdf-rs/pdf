@@ -128,6 +128,11 @@ impl Object for Font {
         })
     }
 }
+impl ObjectWrite for Font {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        unimplemented!()
+    }
+}
 
 
 #[derive(Debug)]

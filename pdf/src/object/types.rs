@@ -339,13 +339,13 @@ pub struct Resources {
     pub xobjects: HashMap<Name, Ref<XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: HashMap<Name, Ref<Font>>,
+    pub fonts: HashMap<Name, MaybeRef<Font>>,
 
     #[pdf(key="Properties")]
     pub properties: HashMap<Name, MaybeRef<Dictionary>>,
 }
 impl Resources {
-    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {
+    pub fn fonts(&self) -> impl Iterator<Item=(&str, &MaybeRef<Font>)> {
         self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
