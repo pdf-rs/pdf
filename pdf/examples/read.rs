@@ -37,8 +37,7 @@ fn main() -> Result<(), PdfError> {
     for page in file.pages() {
         let page = page.unwrap();
         let resources = page.resources().unwrap();
-        for (i, &font) in resources.fonts.values().enumerate() {
-            let font = file.get(font)?;
+        for (i, font) in resources.fonts.values().enumerate() {
             let name = match &font.name {
                 Some(name) => name.as_str().into(),
                 None => i.to_string(),
