@@ -226,6 +226,9 @@ impl<T> RcRef<T> {
     pub fn get_ref(&self) -> Ref<T> {
         Ref::new(self.inner)
     }
+    pub fn data(&self) -> &Shared<T> {
+        &self.data
+    }
 }
 impl<T: Object + std::fmt::Debug + DataSize> Object for RcRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
