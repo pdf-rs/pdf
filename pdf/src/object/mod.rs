@@ -288,6 +288,12 @@ impl<T> MaybeRef<T> {
             _ => None
         }
     }
+    pub fn data(&self) -> &Shared<T> {
+        match *self {
+            MaybeRef::Direct(ref t) => t,
+            MaybeRef::Indirect(ref r) => &r.data
+        }
+    }
 }
 impl<T: Object+DataSize> Object for MaybeRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
