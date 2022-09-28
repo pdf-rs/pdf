@@ -41,7 +41,7 @@ fn boundary(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usize {
 
 #[inline]
 fn is_whitespace(b: u8) -> bool {
-    matches!(b, b' ' | b'\r' | b'\n' | b'\t')
+    matches!(b, 0 | b' ' | b'\r' | b'\n' | b'\t')
 }
 #[inline]
 fn not<T>(f: impl Fn(T) -> bool) -> impl Fn(T) -> bool {
