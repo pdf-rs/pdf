@@ -209,7 +209,7 @@ impl Font {
         }
     }
     pub fn is_cid(&self) -> bool {
-        matches!(self.data, FontData::CIDFontType0(_) | FontData::CIDFontType2(_))
+        matches!(self.data, FontData::Type0(_) | FontData::CIDFontType0(_) | FontData::CIDFontType2(_))
     }
     pub fn cid_to_gid_map(&self) -> Option<&CidToGidMap> {
         match self.data {
