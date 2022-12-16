@@ -150,7 +150,7 @@ impl Decoder {
     }
 
     fn key(&self) -> &[u8] {
-        &self.key[.. self.key_size]
+        &self.key[.. self.key_size/8]
     }
 
     pub fn new(key: [u8; 32], key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
@@ -255,7 +255,7 @@ impl Decoder {
             // h)
             if revision >= 3 {
                 for _ in 0..50 {
-                    data = *md5::compute(&data[..key_size]);
+                    data = *md5::compute(&data[..(key_size/8)]);
                 }
             }
 
@@ -296,7 +296,7 @@ impl Decoder {
                     .crypt_filters
                     .get(try_opt!(dict.default_crypt_filter.as_ref()).as_str())
                     .ok_or_else(|| other!("missing crypt filter entry {:?}", dict.default_crypt_filter.as_ref()))?;
-                
+
                 match default.method {
                     CryptMethod::V2 | CryptMethod::AESV2 => (
                         default.length.map(|n| 8 * n).unwrap_or(dict.bits),
@@ -319,7 +319,7 @@ impl Decoder {
             let key_size = key_bits as usize / 8;
             let key = key_derivation_user_password_rc4(level, key_size, dict, id, pass);
 
-            if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size]) {
+            if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size/8]) {
                 let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
                 Ok(decoder)
             } else {
@@ -569,7 +569,7 @@ impl Decoder {
             CryptMethod::AESV2 => {
                 // b)
                 let mut key = [0; 32 + 5 + 4];
-                let n = self.key_size;
+                let n = self.key_size/8;
                 key[..n].copy_from_slice(self.key());
                 key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
                 key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
