@@ -6,7 +6,6 @@ use crate::encoding::Encoding;
 use std::collections::HashMap;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
-use std::borrow::Cow;
 use std::sync::Arc;
 use istring::SmallString;
 use datasize::DataSize;
@@ -129,7 +128,7 @@ impl Object for Font {
     }
 }
 impl ObjectWrite for Font {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         unimplemented!()
     }
 }
@@ -514,7 +513,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         let bytes = unicode_data.as_bytes();
                         match utf16be_to_string(bytes) {
                             Ok(unicode) => map.insert(cid, unicode),
-                            Err(e) => warn!("invalid unicode for cid {cid} {bytes:?}"),
+                            Err(_) => warn!("invalid unicode for cid {cid} {bytes:?}"),
                         }
                     }
                     _ => break,
@@ -540,7 +539,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         for cid in cid_start..=cid_end {
                             match utf16be_to_string(&unicode_data) {
                                 Ok(unicode) => map.insert(cid, unicode),
-                                Err(e) => warn!("invalid unicode for cid {cid} {unicode_data:?}"),
+                                Err(_) => warn!("invalid unicode for cid {cid} {unicode_data:?}"),
                             }
                             let last = unicode_data.last_mut().unwrap();
                             if *last < 255 {
@@ -562,7 +561,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                             let bytes = unicode_data.as_string()?.as_bytes();
                             match utf16be_to_string(bytes) {
                                 Ok(unicode) => map.insert(cid, unicode),
-                                Err(e) => warn!("invalid unicode for cid {cid} {bytes:?}"),
+                                Err(_) => warn!("invalid unicode for cid {cid} {bytes:?}"),
                             }
                         }
                     }

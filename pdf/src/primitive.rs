@@ -8,7 +8,7 @@ use std::ops::Deref;
 use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
 use itertools::Itertools;
-use istring::{IString, SmallString, IBytes};
+use istring::{SmallString, IBytes};
 use datasize::DataSize;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -248,8 +248,8 @@ impl PdfStream {
         writeln!(out, "stream")?;
         unimplemented!();
         //out.write_all(&self.data)?;
-        writeln!(out, "\nendstream")?;
-        Ok(())
+        //writeln!(out, "\nendstream")?;
+        //Ok(())
     }
 }
 

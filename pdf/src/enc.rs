@@ -373,8 +373,6 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
 
 pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
     // Used <http://benno.id.au/refs/PDFReference15_v5.pdf> as specification
-    use std::io::*;
-
     let mut buf = Vec::new();
     let d = data;
     let mut c = 0;

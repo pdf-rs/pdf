@@ -140,7 +140,7 @@ impl XRefTable {
             data.extend_from_slice(&a.to_be_bytes()[8 - a_w ..]);
             data.extend_from_slice(&b.to_be_bytes()[8 - b_w ..]);
         }
-        let info = XRefInfo {
+        let _info = XRefInfo {
             size: size as u32,
             index: vec![0, size as u32],
             prev: None,
