@@ -72,7 +72,7 @@ impl<B: Backend> Storage<B> {
 
         let mut data = Vec::from(data);
         if let Some(ref decoder) = self.decoder {
-            t!(decoder.decrypt(id, &mut data));
+            data = Vec::from(t!(decoder.decrypt(id, &mut data)));
         }
         for filter in filters {
             data = t!(decode(&data, filter), filter);
