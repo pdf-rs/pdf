@@ -5,7 +5,7 @@ use std::fmt;
 use std::collections::HashMap;
 use pdf::file::File;
 use pdf::object::*;
-use pdf::primitive::PdfString;
+use pdf::primitive::{Primitive, PdfString};
 
 struct Indent(usize);
 impl fmt::Display for Indent {
@@ -24,9 +24,21 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
             println!("{}title: {:?}", indent, title.to_string_lossy());
         }
         if let Some(ref dest) = node.dest {
-            let name = dest.to_string_lossy().unwrap();
-            let page_nr = name_map(&name);
-            println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
+            match dest {
+                Primitive::String(ref s) => {
+                    let name = s.to_string_lossy().unwrap();
+                    let page_nr = name_map(&name);
+                    println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
+                }
+                Primitive::Array(ref a) => match a[0] {
+                    Primitive::Reference(r) => {
+                        let page_nr = page_map(r);
+                        println!("{}dest: {:?} -> page nr. {:?}", indent, a, page_nr);
+                    }
+                    _ => unimplemented!("invalid reference in array"),
+                }
+                _ => unimplemented!("invalid dest"),
+            }
         }
         if let Some(Action::Goto(MaybeNamedDest::Direct(Dest { page: Some(page), ..}))) = node.action {
             let page_nr = page_map(page.get_inner());
