@@ -477,10 +477,10 @@ pub fn utf16be_to_char(
     char::decode_utf16(data.chunks(2).map(|w| u16::from_be_bytes([w[0], w[1]])))
 }
 /// converts UTF16-BE to a string replacing illegal/unknown characters
-pub fn utf16be_to_string_lossy(data: &[u8]) -> pdf::error::Result<String> {
-    Ok(utf16be_to_char(data)
+pub fn utf16be_to_string_lossy(data: &[u8]) -> String {
+    utf16be_to_char(data)
         .map(|r| r.unwrap_or(std::char::REPLACEMENT_CHARACTER))
-        .collect())
+        .collect()
 }
 /// converts UTF16-BE to a string errors out in illegal/unknonw characters
 pub fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<SmallString> {
@@ -624,6 +624,6 @@ mod tests {
             assert_eq!(r.to_string(), "UTF16 decode error");
         }
         assert_eq!(utf16be_to_string(&v[..8]).unwrap(), String::from("𝄞mu"));
-        assert_eq!(utf16be_to_string_lossy(&v).unwrap(), lossy);
+        assert_eq!(utf16be_to_string_lossy(&v), lossy);
     }
 }

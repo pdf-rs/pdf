@@ -61,7 +61,7 @@ fn main() {
     let mut dests_cb = |key: &PdfString, val: &Option<Dest>| {
         //println!("{:?} {:?}", key, val);
         if let Some(Dest { page: Some(page), ..}) = val {
-            pages_map.insert(key.to_string_lossy().unwrap(), page.get_inner());
+            pages_map.insert(key.to_string_lossy(), page.get_inner());
         }
 
         count += 1;

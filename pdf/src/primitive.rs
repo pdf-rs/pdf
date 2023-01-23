@@ -401,12 +401,12 @@ impl PdfString {
     /// therefore only lossy decoding is possible replacing unknown characters.
     /// For decoding correctly see
     /// pdf_tools/src/lib.rs
-    pub fn to_string_lossy(&self) -> Result<String> {
+    pub fn to_string_lossy(&self) -> String {
         if self.data.starts_with(&[0xfe, 0xff]) {
-            Ok(crate::font::utf16be_to_string_lossy(&self.data[2..])?)
+            crate::font::utf16be_to_string_lossy(&self.data[2..])
         }
         else {
-            Ok(String::from_utf8_lossy(&self.data).into())
+            String::from_utf8_lossy(&self.data).into()
         }
     }
     /// without encoding information the PdfString cannot be sensibly decoded into a String
@@ -534,7 +534,7 @@ impl Primitive {
     }
     pub fn to_string_lossy(&self) -> Result<String> {
         let s = self.as_string()?;
-        s.to_string_lossy()
+        Ok(s.to_string_lossy())
     }
     pub fn to_string(&self) -> Result<String> {
         let s = self.as_string()?;
@@ -642,7 +642,7 @@ impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     fn try_into(self) -> Result<Cow<'a, str>> {
         match *self {
             Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
-            Primitive::String(ref s) => Ok(Cow::Owned(s.to_string_lossy()?)),
+            Primitive::String(ref s) => Ok(Cow::Owned(s.to_string_lossy())),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
@@ -655,7 +655,7 @@ impl<'a> TryInto<String> for &'a Primitive {
     fn try_into(self) -> Result<String> {
         match *self {
             Primitive::Name(ref s) => Ok(s.as_str().into()),
-            Primitive::String(ref s) => Ok(s.to_string_lossy()?),
+            Primitive::String(ref s) => Ok(s.to_string_lossy()),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
@@ -725,14 +725,14 @@ mod tests {
     #[test]
     fn utf16be_string() {
         let s = PdfString::new([0xfe, 0xff, 0x20, 0x09].as_slice().into());
-        assert_eq!(s.to_string_lossy().unwrap(), "\u{2009}");
+        assert_eq!(s.to_string_lossy(), "\u{2009}");
     }
 
     #[test]
     fn utf16be_invalid_string() {
         let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
-        assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
+        assert_eq!(s.to_string_lossy(), repl_ch);
     }
 
     #[test]
@@ -740,7 +740,7 @@ mod tests {
     fn utf16be_invalid_bytelen() {
         let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34, 0x20].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
-        assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
+        assert_eq!(s.to_string_lossy(), repl_ch);
     }
 
     #[test]
@@ -750,16 +750,16 @@ mod tests {
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
         // verify UTF-16-BE supports umlauts
         let s = PdfString::new([0xfe, 0xff, 0x00, 0xe4 /*ä*/].as_slice().into());
-        assert_eq!(s.to_string_lossy().unwrap(), "ä");
+        assert_eq!(s.to_string_lossy(), "ä");
         assert_eq!(s.to_string().unwrap(), "ä");
         // verify valid UTF-8 bytestream with umlaut works
         let s = PdfString::new([b'm', b'i', b't', 0xc3, 0xa4 /*ä*/].as_slice().into());
-        assert_eq!(s.to_string_lossy().unwrap(), "mitä");
+        assert_eq!(s.to_string_lossy(), "mitä");
         assert_eq!(s.to_string().unwrap(), "mitä");
         // verify valid ISO-8859-1 bytestream with umlaut fails
         let s = PdfString::new([b'm', b'i', b't', 0xe4/*ä in latin1*/].as_slice().into());
         let repl_ch = ['m', 'i', 't', std::char::REPLACEMENT_CHARACTER].iter().collect::<String>();
-        assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
+        assert_eq!(s.to_string_lossy(), repl_ch);
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
     }
 }
