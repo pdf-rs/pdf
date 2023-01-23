@@ -84,12 +84,7 @@ fn main() -> Result<(), PdfError> {
         for field in forms.fields.iter() {
             print!("  {:?} = ", field.name);
             match field.value {
-                Primitive::String(ref s) => {
-                    match s.to_string_lossy() {
-                        Ok(s) => println!("{:?}", s),
-                        Err(_) => println!("{:?}", s),
-                    }
-                }
+                Primitive::String(ref s) => println!("{}", s.to_string_lossy()),
                 Primitive::Integer(i) => println!("{}", i),
                 Primitive::Name(ref s) => println!("{}", s),
                 ref p => println!("{:?}", p),
