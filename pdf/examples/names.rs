@@ -26,7 +26,7 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
         if let Some(ref dest) = node.dest {
             match dest {
                 Primitive::String(ref s) => {
-                    let name = s.to_string_lossy().unwrap();
+                    let name = s.to_string_lossy();
                     let page_nr = name_map(&name);
                     println!("{}dest: {:?} -> page nr. {:?}", indent, name, page_nr);
                 }
