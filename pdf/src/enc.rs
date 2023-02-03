@@ -260,7 +260,6 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     let decoded = match inflate_bytes_zlib(data) {
         Ok(data) => data,
         Err(_) => {
-            std::fs::write("/tmp/data", data).unwrap();
             info!("invalid zlib header. trying without");
             inflate_bytes(data)?
         }
