@@ -675,7 +675,7 @@ mod tests {
             .unwrap();
         data.append(&mut format!("{}\n%%EOF", xref_offset).into_bytes());
 
-        let file = crate::file::File::from_data(data).unwrap();
+        let file = crate::file::FileOptions::uncached().load(data).unwrap();
 
         // PDF reference says strings in the encryption dictionary are "not
         // encrypted by the usual methods."

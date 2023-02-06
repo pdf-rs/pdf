@@ -3,7 +3,7 @@ extern crate pdf;
 use std::env::args;
 use std::fmt;
 use std::collections::HashMap;
-use pdf::file::File;
+use pdf::file::{FileOptions};
 use pdf::object::*;
 use pdf::primitive::{Primitive, PdfString};
 
@@ -64,7 +64,7 @@ fn main() {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
 
-    let file = File::<Vec<u8>>::open(&path).unwrap();
+    let file = FileOptions::cached().open(&path).unwrap();
     let catalog = file.get_root();
 
     let mut pages_map: HashMap<String, PlainRef> = HashMap::new();

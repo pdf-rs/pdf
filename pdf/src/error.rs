@@ -169,12 +169,6 @@ impl PdfError {
     }
 }
 datasize::non_dynamic_const_heap_size!(PdfError, 0);
-impl globalcache::ValueSize for PdfError {
-    #[inline]
-    fn size(&self) -> usize {
-        std::mem::size_of_val(self)
-    }
-}
 
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);

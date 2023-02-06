@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use std::fs;
 use std::collections::HashMap;
 
-use pdf::file::File;
+use pdf::file::{FileOptions};
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::error::PdfError;
@@ -17,7 +17,7 @@ fn main() -> Result<(), PdfError> {
     println!("read: {}", path);
     let now = SystemTime::now();
 
-    let file = File::<Vec<u8>>::open(&path).unwrap();
+    let file = FileOptions::cached().open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
         let title = info.get("Title").and_then(|p| p.to_string_lossy().ok());
         let author = info.get("Author").and_then(|p| p.to_string_lossy().ok());
