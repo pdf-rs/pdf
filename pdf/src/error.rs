@@ -169,6 +169,7 @@ impl PdfError {
     }
 }
 datasize::non_dynamic_const_heap_size!(PdfError, 0);
+#[cfg(feature = "globalcache")]
 impl globalcache::ValueSize for PdfError {
     #[inline]
     fn size(&self) -> usize {
