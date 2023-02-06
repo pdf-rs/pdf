@@ -3,7 +3,7 @@ use std::io;
 use std::error::Error;
 use crate::parser::ParseFlags;
 use std::sync::Arc;
-use datasize::DataSize;
+use datasize::{DataSize, data_size};
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -169,6 +169,14 @@ impl PdfError {
     }
 }
 datasize::non_dynamic_const_heap_size!(PdfError, 0);
+
+#[cfg(feature="cache")]
+impl globalcache::ValueSize for PdfError {
+    #[inline]
+    fn size(&self) -> usize {
+        data_size(self)
+    }
+}
 
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);

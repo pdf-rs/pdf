@@ -1,9 +1,7 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
-use std::borrow::BorrowMut;
-use std::fs;
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::path::Path;
 use std::io::Write;
 
@@ -22,6 +20,10 @@ use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
 use datasize::DataSize;
 
+use globalcache::ValueSize;
+#[cfg(feature="cache")]
+use globalcache::sync::SyncCache;
+
 #[must_use]
 pub struct PromisedRef<T> {
     inner:      PlainRef,
@@ -37,24 +39,19 @@ impl<T> PromisedRef<T> {
 }
 
 pub trait Cache<T: Clone> {
-    fn get(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T;
+    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T;
 }
 pub struct NoCache;
 impl<T: Clone> Cache<T> for NoCache {
-    fn get(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
+    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
         compute()
     }
 }
 
-pub struct SimpleCache<T>(Mutex<HashMap<PlainRef, T>>);
-impl<T: Clone> Cache<T> for SimpleCache<T> {
-    fn get(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
-        self.0.lock().unwrap().entry(key).or_insert_with(compute).clone()
-    }
-}
-impl<T: Clone> SimpleCache<T> {
-    pub fn new() -> Self {
-        SimpleCache(Mutex::new(HashMap::new()))
+#[cfg(feature="cache")]
+impl<T: Clone + ValueSize + Send + 'static> Cache<T> for Arc<SyncCache<PlainRef, T>> {
+    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
+        self.get(key, compute)
     }
 }
 
@@ -75,16 +72,6 @@ pub struct Storage<B, OC, SC> {
 
     // Position of the PDF header in the file.
     start_offset: usize,
-}
-impl<B, OC, SC> Storage<B, OC, SC>
-where
-    B: Backend,
-    OC: Cache<Result<AnySync, Arc<PdfError>>> + Default,
-    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>> + Default,
-{
-    fn new(backend: B, options: ParseOptions) -> Result<Self> {
-        Self::with_cache(backend, options, Default::default(), Default::default())
-    }
 }
 
 impl<B, OC, SC> Storage<B, OC, SC>
@@ -188,7 +175,7 @@ where
     fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
-        let res = self.cache.get(key, || {
+        let res = self.cache.get_or_compute(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(Shared::new(obj).into()),
                 Err(e) => Err(Arc::new(e)),
@@ -203,7 +190,7 @@ where
         &self.options
     }
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        self.stream_cache.get(id, || self.decode(id, range, filters).map_err(Arc::new))
+        self.stream_cache.get_or_compute(id, || self.decode(id, range, filters).map_err(Arc::new))
         .map_err(|e| e.into())
     }
 }
@@ -372,11 +359,13 @@ impl FileOptions<'static, NoCache, NoCache> {
         }
     }
 }
-impl FileOptions<'static, SimpleCache<Result<AnySync, Arc<PdfError>>>, SimpleCache<Result<Arc<[u8]>, Arc<PdfError>>>> {
+
+#[cfg(feature="cache")]
+impl FileOptions<'static, Arc<SyncCache<PlainRef, Result<AnySync, Arc<PdfError>>>>, Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>> {
     pub fn cached() -> Self {
         FileOptions {
-            oc: SimpleCache::new(),
-            sc: SimpleCache::new(),
+            oc: SyncCache::new(),
+            sc: SyncCache::new(),
             password: b"",
             parse_options: ParseOptions::strict()
         }

@@ -21,7 +21,7 @@ macro_rules! run {
 
 #[test]
 fn open_file() {
-    let _ = run!(FileOptions::cached().open(file_path!("example.pdf")));
+    let _ = run!(FileOptions::uncached().open(file_path!("example.pdf")));
     #[cfg(feature = "mmap")]
     let _ = run!({
         use memmap2::Mmap;
@@ -31,6 +31,7 @@ fn open_file() {
     });
 }
 
+#[cfg(feature="cache")]
 #[test]
 fn read_pages() {
     for entry in glob(file_path!("*.pdf")).expect("Failed to read glob pattern") {
@@ -60,7 +61,7 @@ fn user_password() {
                 println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
                 let path = path.to_str().unwrap();
-                let file = run!(FileOptions::cached().password(b"userpassword").open(path));
+                let file = run!(FileOptions::uncached().password(b"userpassword").open(path));
                 for i in 0 .. file.num_pages() {
                     println!("\nRead page {}", i);
                     let _ = file.get_page(i);
@@ -81,7 +82,7 @@ fn owner_password() {
                 println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
                 let path = path.to_str().unwrap();
-                let file = run!(FileOptions::cached().password(b"ownerpassword").open(path));
+                let file = run!(FileOptions::uncached().password(b"ownerpassword").open(path));
                 for i in 0 .. file.num_pages() {
                     println!("\nRead page {}", i);
                     let _ = file.get_page(i);
@@ -94,6 +95,7 @@ fn owner_password() {
 
 // Test for invalid PDFs found by fuzzing.
 // We don't care if they give an Err or Ok, as long as they don't panic.
+#[cfg(feature="cache")]
 #[test]
 fn invalid_pdfs() {
     for entry in glob(file_path!("invalid/*.pdf"))
@@ -120,6 +122,7 @@ fn invalid_pdfs() {
     }
 }
 
+#[cfg(feature="cache")]
 #[test]
 fn parse_objects_from_stream() {
     use pdf::object::NoResolve;

@@ -58,6 +58,14 @@ impl<T: AnyObject + 'static> From<Rc<T>> for Any {
 #[derive(Clone, DataSize)]
 pub struct AnySync(Arc<dyn AnyObject+Sync+Send>);
 
+#[cfg(feature="cache")]
+impl globalcache::ValueSize for AnySync {
+    #[inline]
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+}
+
 impl AnySync {
     pub fn downcast<T>(self) -> Result<Arc<T>> 
         where T: AnyObject + Sync + Send + 'static
