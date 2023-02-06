@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::rc::Rc;
 use std::sync::Arc;
+#[cfg(feature = "globalcache")]
 use globalcache::ValueSize;
 use datasize::DataSize;
 use crate::object::{Object};
@@ -86,6 +87,7 @@ impl<T: AnyObject + Sync + Send + 'static> From<Arc<T>> for AnySync {
         AnySync::new(t)
     }
 }
+#[cfg(feature = "globalcache")]
 impl ValueSize for AnySync {
     fn size(&self) -> usize {
         self.0.size()

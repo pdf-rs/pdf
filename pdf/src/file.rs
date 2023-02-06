@@ -19,6 +19,7 @@ use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
+#[cfg(feature = "globalcache")]
 use globalcache::sync::SyncCache;
 use datasize::DataSize;
 
@@ -38,7 +39,9 @@ impl<T> PromisedRef<T> {
 
 pub struct Storage<B: Backend> {
     // objects identical to those in the backend
+    #[cfg(feature = "globalcache")]
     cache: Arc<SyncCache<PlainRef, Result<AnySync, Arc<PdfError>>>>,
+    #[cfg(feature = "globalcache")]
     stream_cache: Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>,
 
     // objects that differ from the backend
@@ -60,7 +63,9 @@ impl<B: Backend> Storage<B> {
             start_offset: backend.locate_start_offset()?,
             backend,
             refs: XRefTable::new(0),
+            #[cfg(feature = "globalcache")]
             cache: SyncCache::new(),
+            #[cfg(feature = "globalcache")]
             stream_cache: SyncCache::new(),
             changes: HashMap::new(),
             decoder: None,
@@ -111,13 +116,20 @@ impl<B: Backend> Resolve for Storage<B> {
 
     fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
-        
+
+        #[cfg(feature = "globalcache")]
         let res = self.cache.get(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(Shared::new(obj).into()),
                 Err(e) => Err(Arc::new(e)),
             }
         });
+        #[cfg(not(feature = "globalcache"))]
+        let res: Result<AnySync, Arc<PdfError>> = match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
+            Ok(obj) => Ok(Shared::new(obj).into()),
+            Err(e) => Err(Arc::new(e)),
+        };
+
         match res {
             Ok(any) => Ok(RcRef::new(key, any.downcast()?)),
             Err(e) => Err(PdfError::Shared { source: e.clone()}),
@@ -127,8 +139,13 @@ impl<B: Backend> Resolve for Storage<B> {
         &self.options
     }
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        self.stream_cache.get(id, || self.decode(id, range, filters).map_err(Arc::new))
-        .map_err(|e| e.into())
+        #[cfg(feature = "globalcache")]
+        return self.stream_cache.get(id, || self.decode(id, range, filters).map_err(Arc::new))
+            .map_err(|e| e.into());
+
+        #[cfg(not(feature = "globalcache"))]
+        return self.decode(id, range, filters).map_err(Arc::new)
+            .map_err(|e| e.into());
     }
 }
 impl<B: Backend> Updater for Storage<B> {
