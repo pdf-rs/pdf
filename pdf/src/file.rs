@@ -288,8 +288,11 @@ where
     }
 }
 
+#[cfg(feature="cache")]
 pub type ObjectCache = Arc<SyncCache<PlainRef, Result<AnySync, Arc<PdfError>>>>;
+#[cfg(feature="cache")]
 pub type StreamCache = Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>;
+#[cfg(feature="cache")]
 pub type CachedFile<B> = File<B, ObjectCache, StreamCache>;
 
 pub struct File<B, OC, SC> {
