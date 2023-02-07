@@ -20,9 +20,8 @@ use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
 use datasize::DataSize;
 
-use globalcache::ValueSize;
 #[cfg(feature="cache")]
-use globalcache::sync::SyncCache;
+use globalcache::{ValueSize, sync::SyncCache};
 
 #[must_use]
 pub struct PromisedRef<T> {
