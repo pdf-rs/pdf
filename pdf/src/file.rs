@@ -288,6 +288,10 @@ where
     }
 }
 
+pub type ObjectCache = Arc<SyncCache<PlainRef, Result<AnySync, Arc<PdfError>>>>;
+pub type StreamCache = Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>;
+pub type CachedFile<B> = File<B, ObjectCache, StreamCache>;
+
 pub struct File<B, OC, SC> {
     storage:        Storage<B, OC, SC>,
     pub trailer:    Trailer,
@@ -360,7 +364,7 @@ impl FileOptions<'static, NoCache, NoCache> {
 }
 
 #[cfg(feature="cache")]
-impl FileOptions<'static, Arc<SyncCache<PlainRef, Result<AnySync, Arc<PdfError>>>>, Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>> {
+impl FileOptions<'static, ObjectCache, StreamCache> {
     pub fn cached() -> Self {
         FileOptions {
             oc: SyncCache::new(),
