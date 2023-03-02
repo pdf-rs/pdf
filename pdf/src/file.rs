@@ -79,7 +79,7 @@ where
     OC: Cache<Result<AnySync, Arc<PdfError>>>,
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
 {
-    fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC) -> Result<Self> {
+    pub fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC) -> Result<Self> {
         Ok(Storage {
             start_offset: backend.locate_start_offset()?,
             backend,
