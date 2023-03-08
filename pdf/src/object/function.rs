@@ -353,10 +353,10 @@ impl PsFunc {
                 PsOp::Int(i) => stack.push(i as f32),
                 PsOp::Value(v) => stack.push(v),
                 PsOp::Dup => op!(stack; v => v, v),
-                PsOp::Exch => op!(stack; a, b => a, b),
-                PsOp::Add => op!(stack; a, b => a + b),
-                PsOp::Sub => op!(stack; a, b => a - b),
-                PsOp::Mul => op!(stack; a, b => a * b),
+                PsOp::Exch => op!(stack; b, a => b, a),
+                PsOp::Add => op!(stack; b, a => a + b),
+                PsOp::Sub => op!(stack; b, a => a - b),
+                PsOp::Mul => op!(stack; b, a => a * b),
                 PsOp::Abs => op!(stack; a => a.abs()),
                 PsOp::Roll => {
                     let j = stack.pop().ok_or(PostScriptError::StackUnderflow)? as isize;
