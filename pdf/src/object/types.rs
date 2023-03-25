@@ -1124,7 +1124,7 @@ pub struct NameDictionary {
 #[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct FileSpec {
     #[pdf(key="EF")]
-    ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
+    pub ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
     /*
     #[pdf(key="RF")]
     rf: Option<Files<RelatedFilesArray>>,
@@ -1135,15 +1135,15 @@ pub struct FileSpec {
 #[derive(Object, ObjectWrite, Debug, Clone)]
 pub struct Files<T: Object + ObjectWrite + DataSize> {
     #[pdf(key="F")]
-    f: Option<T>,
+    pub f: Option<T>,
     #[pdf(key="UF")]
-    uf: Option<T>,
+    pub uf: Option<T>,
     #[pdf(key="DOS")]
-    dos: Option<T>,
+    pub dos: Option<T>,
     #[pdf(key="Mac")]
-    mac: Option<T>,
+    pub mac: Option<T>,
     #[pdf(key="Unix")]
-    unix: Option<T>,
+    pub unix: Option<T>,
 }
 impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
     const IS_DYNAMIC: bool = T::IS_DYNAMIC;
@@ -1167,13 +1167,13 @@ pub struct EmbeddedFile {
     subtype: Option<String>,
     */
     #[pdf(key="Params")]
-    params: Option<EmbeddedFileParamDict>,
+    pub params: Option<EmbeddedFileParamDict>,
 }
 
 #[derive(Object, Debug, Clone, DataSize)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size")]
-    size: Option<i32>,
+    pub size: Option<i32>,
     /*
     // TODO need Date type
     #[pdf(key="CreationDate")]
@@ -1320,17 +1320,17 @@ pub struct StructTreeRoot {
 #[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct StructElem {
     #[pdf(key="S")]
-    struct_type: StructType,
+    pub struct_type: StructType,
 
     #[pdf(key="P")]
-    parent: Ref<StructElem>,
+    pub parent: Ref<StructElem>,
 
     #[pdf(key="ID")]
-    id: Option<PdfString>,
+    pub id: Option<PdfString>,
 
     /// `Pg`: A page object representing a page on which some or all of the content items designated by the K entry are rendered.
     #[pdf(key="Pg")]
-    page: Option<Ref<Page>>,
+    pub page: Option<Ref<Page>>,
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
