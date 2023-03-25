@@ -260,6 +260,15 @@ pub struct Page {
 
     #[pdf(key="Rotate", default="0")]
     pub rotate: i32,
+
+    #[pdf(key="Metadata")]
+    pub metadata:   Option<Primitive>,
+
+    #[pdf(key="LGIDict")]
+    pub lgi:        Option<Primitive>,
+
+    #[pdf(key="VP")]
+    pub vp:         Option<Primitive>,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -283,6 +292,9 @@ impl Page {
             resources:  None,
             contents:   None,
             rotate:     0,
+            metadata:   None,
+            lgi:        None,
+            vp:         None,
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
