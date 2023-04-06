@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types)]  /* TODO temporary becaues of pdf_derive */
+#![allow(non_camel_case_types)]  /* TODO temporary because of pdf_derive */
 #![allow(unused_doc_comments)] // /* TODO temporary because of err.rs */
 #![allow(clippy::len_zero, clippy::should_implement_trait, clippy::manual_map, clippy::from_over_into)]
 
