@@ -930,7 +930,13 @@ impl<T: Object> Object for NameTree<T> {
                     node: NameTreeNode::Leaf (new_names),
                 }
             }
-            (None, None) => bail!("Neither Kids nor Names present in NameTree node.")
+            (None, None) => {
+                warn!("Neither Kids nor Names present in NameTree node.");
+                NameTree {
+                    limits,
+                    node: NameTreeNode::Intermediate(vec![])
+                }
+            }
         })
     }
 }
