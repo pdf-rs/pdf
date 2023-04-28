@@ -565,9 +565,7 @@ impl ImageXObject {
                     StreamFilter::ASCIIHexDecode => false,
                     StreamFilter::ASCII85Decode => false,
                     StreamFilter::LZWDecode(_) => false,
-                    StreamFilter::FlateDecode(_) => false,
                     StreamFilter::RunLengthDecode => false,
-        
                     StreamFilter::Crypt => true,
                     _ => true
                 }).unwrap_or(filters.len());

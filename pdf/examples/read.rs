@@ -59,6 +59,7 @@ fn main() -> Result<(), PdfError> {
             Some(StreamFilter::DCTDecode(_)) => "jpeg",
             Some(StreamFilter::JBIG2Decode) => "jbig2",
             Some(StreamFilter::JPXDecode) => "jp2k",
+            Some(StreamFilter::FlateDecode(_)) => "png",
             _ => continue,
         };
 
@@ -68,33 +69,5 @@ fn main() -> Result<(), PdfError> {
         println!("Wrote file {}", fname);
     }
     println!("Found {} image(s).", images.len());
-
-
-    for (name, font) in fonts.iter() {
-        let fname = format!("font_{}", name);
-        if let Some(Ok(data)) = font.embedded_data(&file) {
-            fs::write(fname.as_str(), data).unwrap();
-            println!("Wrote file {}", fname);
-        }
-    }
-    println!("Found {} font(s).", fonts.len());
-
-    if let Some(ref forms) = file.get_root().forms {
-        println!("Forms:");
-        for field in forms.fields.iter() {
-            print!("  {:?} = ", field.name);
-            match field.value {
-                Primitive::String(ref s) => println!("{}", s.to_string_lossy()),
-                Primitive::Integer(i) => println!("{}", i),
-                Primitive::Name(ref s) => println!("{}", s),
-                ref p => println!("{:?}", p),
-            }
-        }
-    }
-
-    if let Ok(elapsed) = now.elapsed() {
-        println!("Time: {}s", elapsed.as_secs() as f64
-                 + elapsed.subsec_nanos() as f64 * 1e-9);
-    }
     Ok(())
 }
