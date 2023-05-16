@@ -48,14 +48,11 @@ impl Object for Encoding {
                             Primitive::Integer(code) => {
                                 gid = code as u32;
                             }
-                            Primitive::Number(n) => {
-                                gid = n as u32;
-                            }
                             Primitive::Name(name) => {
                                 differences.insert(gid, name);
                                 gid += 1;
                             }
-                            _ => panic!("Unknown part primitive in dictionary: {:?}", part),
+                            _ => bail!("Unknown part primitive in dictionary: {:?}", part),
                         }
                     }
                 }
@@ -63,7 +60,7 @@ impl Object for Encoding {
             }
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
             Primitive::Stream(s) => Self::from_primitive(Primitive::Dictionary(s.info), resolve),
-            _ => panic!("Unknown element: {:?}", p),
+            _ => bail!("Unknown element: {:?}", p),
         }
     }
 }
