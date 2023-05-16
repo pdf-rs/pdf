@@ -179,7 +179,7 @@ impl Decoder {
             compute_u_rev_2(key) == document_u
         }
 
-        fn compute_u_rev_3_4(id: &[u8], key: &[u8]) -> Vec<u8> {
+        fn compute_u_rev_3_4(id: &[u8], key: &[u8]) -> [u8; 16] {
             // algorithm 5
             // a) we derived the key already.
 
@@ -204,11 +204,11 @@ impl Decoder {
             }
 
             // f)
-            data.to_vec()
+            data
         }
 
         fn check_password_rev_3_4(document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
-            compute_u_rev_3_4(id, key) == document_u[..16]
+            document_u.starts_with(&compute_u_rev_3_4(id, key))
         }
 
         fn check_password_rc4(revision: u32, document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
@@ -272,6 +272,10 @@ impl Decoder {
             key_size: usize,
             pass: &[u8],
         ) -> Result<Vec<u8>> {
+            if key_size > 16 {
+                bail!("key size > 16");
+            }
+
             let mut hash = md5::Context::new();
             if pass.len() < 32 {
                 hash.consume(pass);
