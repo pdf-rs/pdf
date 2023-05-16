@@ -48,6 +48,9 @@ impl Object for Encoding {
                             Primitive::Integer(code) => {
                                 gid = code as u32;
                             }
+                            Primitive::Number(n) => {
+                                gid = n as u32;
+                            }
                             Primitive::Name(name) => {
                                 differences.insert(gid, name);
                                 gid += 1;
