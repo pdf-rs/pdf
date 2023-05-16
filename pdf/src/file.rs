@@ -162,7 +162,8 @@ where
                     let obj_stream = t!(self.resolve_flags(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}, flags, depth-1));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
                     let (data, range) = t!(obj_stream.get_object_slice(index, self));
-                    parse(&data[range], self, flags)
+                    let slice = data.get(range.clone()).ok_or_else(|| other!("invalid range {:?}, but only have {} bytes", range, data.len()))?;
+                    parse(slice, self, flags)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
                 XRef::Promised => unimplemented!(),
