@@ -492,6 +492,9 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
     let len = inp.len();
     assert_eq!(len, out.len());
     assert_eq!(len, prev.len());
+    if bpp > len {
+        return;
+    }
 
     match filter {
         NoFilter => {

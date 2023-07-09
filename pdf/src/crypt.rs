@@ -318,6 +318,9 @@ impl Decoder {
             }
             v => err!(other!("unsupported V value {}", v)),
         };
+        if key_bits < 1 || key_bits > 256 {
+            bail!("key bits must be between 1 and 256");
+        }
         let level = dict.r;
         if !(2..=6).contains(&level) {
             err!(other!("unsupported standard security handler revision {}", level))
