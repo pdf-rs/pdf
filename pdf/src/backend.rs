@@ -70,7 +70,7 @@ pub trait Backend: Sized {
         }
         let mut refs = XRefTable::new(highest_id as ObjNr);
         for section in xref_sections {
-            refs.add_entries_from(section);
+            refs.add_entries_from(section)?;
         }
         
         let mut prev_trailer = {

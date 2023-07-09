@@ -2,6 +2,7 @@ use crate::error::*;
 use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
 
 use std::collections::{btree_map, BTreeMap};
+use std::sync::Arc;
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
 use std::ops::Deref;
@@ -57,7 +58,7 @@ impl fmt::Display for Primitive {
     }
 }
 impl Primitive {
-    pub fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         match self {
             Primitive::Null => write!(out, "null")?,
             Primitive::Integer(i) => write!(out, "{}", i)?,
@@ -65,8 +66,8 @@ impl Primitive {
             Primitive::Boolean(b) => write!(out, "{}", b)?,
             Primitive::String(ref s) => s.serialize(out)?,
             Primitive::Stream(ref s) => s.serialize(out)?,
-            Primitive::Dictionary(ref d) => d.serialize(out, level)?,
-            Primitive::Array(ref arr) => serialize_list(arr, out, level)?,
+            Primitive::Dictionary(ref d) => d.serialize(out)?,
+            Primitive::Array(ref arr) => serialize_list(arr, out)?,
             Primitive::Reference(r) =>  write!(out, "{} {} R", r.id, r.gen)?,
             Primitive::Name(ref s) => serialize_name(s, out)?,
         }
@@ -83,15 +84,15 @@ impl Primitive {
     }
 }
 
-fn serialize_list(arr: &[Primitive], out: &mut impl io::Write, level: usize) -> Result<()> {
+fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
     let mut parts = arr.iter();
-    write!(out, "{:w$}[", "", w=2*level)?;
+    write!(out, "[")?;
     if let Some(first) = parts.next() {
-        first.serialize(out, level+1)?;
+        first.serialize(out)?;
     }
     for p in parts {
         write!(out, " ")?;
-        p.serialize(out, level+1)?;
+        p.serialize(out)?;
     }
     write!(out, "]")?;
     Ok(())
@@ -179,14 +180,14 @@ impl Deref for Dictionary {
     }
 }
 impl Dictionary {
-    fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         writeln!(out, "<<")?;
         for (key, val) in self.iter() {
-            write!(out, "{:w$}/{} ", "", key, w=2*level+2)?;
-            val.serialize(out, level+2)?;
+            write!(out, "{} ", key)?;
+            val.serialize(out)?;
             writeln!(out)?;
         }
-        writeln!(out, "{:w$}>>", "", w=2*level)?;
+        writeln!(out, ">>")?;
         Ok(())
     }
 }
@@ -229,8 +230,13 @@ impl<'a> IntoIterator for &'a Dictionary {
 #[derive(Clone, Debug, PartialEq, DataSize)]
 pub struct PdfStream {
     pub info: Dictionary,
-    pub (crate) id: PlainRef,
-    pub (crate) file_range: Range<usize>,
+    pub (crate) inner: StreamInner,
+}
+
+#[derive(Clone, Debug, PartialEq, DataSize)]
+pub enum StreamInner {
+    InFile { id: PlainRef, file_range: Range<usize> },
+    Pending { data: Arc<[u8]> },
 }
 impl Object for PdfStream {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -243,13 +249,19 @@ impl Object for PdfStream {
 }
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        self.info.serialize(out, 0)?;
+        self.info.serialize(out)?;
 
         writeln!(out, "stream")?;
-        unimplemented!();
-        //out.write_all(&self.data)?;
-        //writeln!(out, "\nendstream")?;
-        //Ok(())
+        match self.inner {
+            StreamInner::InFile { id, ref file_range } => {
+                unimplemented!()
+            }
+            StreamInner::Pending { ref data } => {
+                out.write_all(&data)?;
+            }
+        }
+        writeln!(out, "\nendstream")?;
+        Ok(())
     }
 }
 

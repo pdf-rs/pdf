@@ -9,6 +9,7 @@ pub use self::parse_object::*;
 pub use self::parse_xref::*;
 
 use crate::error::*;
+use crate::primitive::StreamInner;
 use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use self::lexer::{HexStringLexer, StringLexer};
@@ -107,9 +108,11 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     t!(lexer.next_expect("endstream"));
 
     Ok(PdfStream {
-        file_range: stream_substr.file_range(),
+        inner: StreamInner::InFile {
+            id: ctx.id,
+            file_range: stream_substr.file_range(),
+        },
         info: dict,
-        id: ctx.id,
     })
 }
 

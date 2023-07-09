@@ -263,14 +263,14 @@ where
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
             writeln!(self.backend, "{} {} obj", id, 0)?;
-            primitive.serialize(&mut self.backend, 0)?;
+            primitive.serialize(&mut self.backend)?;
             writeln!(self.backend, "endobj")?;
         }
 
         let xref_pos = self.backend.len();
-
+        self.refs.set(xref_promise.get_inner().id, XRef::Raw { pos: xref_pos, gen_nr: 0 });
         // only write up to the xref stream obj id
-        let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
+        let stream = self.refs.write_stream(xref_promise.get_inner().id as usize + 1)?;
 
         writeln!(self.backend, "{} {} obj", xref_promise.get_inner().id, 0)?;
         let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;

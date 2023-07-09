@@ -105,7 +105,7 @@ impl XRefTable {
         (max_a, max_b)
     }
 
-    pub fn add_entries_from(&mut self, section: XRefSection) {
+    pub fn add_entries_from(&mut self, section: XRefSection) -> Result<()> {
         for (i, &entry) in section.entries() {
             if let Some(dst) = self.entries.get_mut(i) {
                 // Early return if the entry we have has larger or equal generation number
@@ -114,13 +114,14 @@ impl XRefTable {
                         => entry.get_gen_nr() > gen,
                     XRef::Stream { .. } | XRef::Invalid
                         => true,
-                    x => panic!("found {:?}", x)
+                    x => bail!("found {:?}", x)
                 };
                 if should_be_updated {
                     *dst = entry;
                 }
             }
         }
+        Ok(())
     }
 
     pub fn write_stream(&self, size: usize) -> Result<Stream<XRefInfo>> {
@@ -134,20 +135,20 @@ impl XRefTable {
                 XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr as u64),
                 XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr as u64),
                 XRef::Stream { stream_id, index } => (2, stream_id as u64, index as u64),
-                x => panic!("invalid xref entry: {:?}", x)
+                x => bail!("invalid xref entry: {:?}", x)
             };
             data.push(t);
             data.extend_from_slice(&a.to_be_bytes()[8 - a_w ..]);
             data.extend_from_slice(&b.to_be_bytes()[8 - b_w ..]);
         }
-        let _info = XRefInfo {
+        let info = XRefInfo {
             size: size as u32,
             index: vec![0, size as u32],
             prev: None,
             w: vec![1, a_w, b_w],
         };
-        unimplemented!()
-        //Ok(Stream::new(info, data).hexencode())
+        
+        Ok(Stream::new(info, data))
     }
 }
 

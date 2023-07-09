@@ -554,7 +554,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             BeginMarkedContent { ref tag, properties: Some(ref name) } => {
                 serialize_name(tag, f)?;
                 write!(f, " ")?;
-                name.serialize(f, 0)?;
+                name.serialize(f)?;
                 writeln!(f, " BDC")?;
             }
             BeginMarkedContent { ref tag, properties: None } => {
@@ -564,7 +564,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             MarkedContentPoint { ref tag, properties: Some(ref name) } => {
                 serialize_name(tag, f)?;
                 write!(f, " ")?;
-                name.serialize(f, 0)?;
+                name.serialize(f)?;
                 writeln!(f, " DP")?;
             }
             MarkedContentPoint { ref tag, properties: None } => {
@@ -636,7 +636,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
             StrokeColor { color: Color::Other(ref args) } =>  {
                 for p in args {
-                    p.serialize(f, 0)?;
+                    p.serialize(f)?;
                     write!(f, " ")?;
                 }
                 writeln!(f, "SCN")?;
@@ -646,7 +646,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
             FillColor { color: Color::Other(ref args) } => {
                 for p in args {
-                    p.serialize(f, 0)?;
+                    p.serialize(f)?;
                     write!(f, " ")?;
                 }
                 writeln!(f, "scn")?;
@@ -736,7 +736,8 @@ impl Content {
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.parts.len() == 1 {
-            self.parts[0].to_primitive(update)
+            let obj = self.parts[0].to_primitive(update)?;
+            update.create(obj)?.to_primitive(update)
         } else {
             self.parts.to_primitive(update)
         }
