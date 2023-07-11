@@ -2,14 +2,13 @@
 #![allow(dead_code)]  // TODO
 
 use itertools::Itertools;
-use inflate::{inflate_bytes_zlib, inflate_bytes};
-use deflate::deflate_bytes;
 
 use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, Resolve};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::TryInto;
+use std::io::{Read, Write};
 use once_cell::sync::OnceCell;
 use datasize::DataSize;
 
@@ -250,18 +249,39 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     buf
 }
 
+fn inflate_bytes_zlib(data: &[u8]) -> Result<Vec<u8>> {
+    use libflate::zlib::{Decoder};
+    let mut decoder = Decoder::new(data)?;
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded)?;
+    Ok(decoded)
+}
+
+fn inflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    use libflate::deflate::{Decoder};
+    let mut decoder = Decoder::new(data);
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded)?;
+    Ok(decoded)
+}
+
 pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+
     let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
     let stride = columns * n_components;
 
+
     // First flate decode
-    let decoded = match inflate_bytes_zlib(data) {
-        Ok(data) => data,
-        Err(_) => {
-            info!("invalid zlib header. trying without");
-            inflate_bytes(data)?
+    let decoded = {
+        if let Ok(data) = inflate_bytes_zlib(data) {
+            data
+        } else if let Ok(data) = inflate_bytes(data) {
+            data
+        } else {
+            dump_data(data);
+            bail!("can't inflate");
         }
     };
     // Then unfilter (PNG)
@@ -306,7 +326,11 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     }
 }
 fn flate_encode(data: &[u8]) -> Vec<u8> {
-    deflate_bytes(data)
+    use libflate::deflate::{Encoder};
+    let mut encoded = Vec::new();
+    let mut encoder = Encoder::new(&mut encoded);
+    encoder.write_all(data).unwrap();
+    encoded
 }
 
 pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
