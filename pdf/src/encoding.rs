@@ -4,21 +4,22 @@ use crate as pdf;
 use crate::object::{Object, Resolve};
 use crate::primitive::Primitive;
 use crate::error::{Result};
+use datasize::DataSize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct Encoding {
     pub base: BaseEncoding,
     pub differences: HashMap<u32, SmallString>,
 }
 
-#[derive(Object, Debug, Clone, Eq, PartialEq)]
+#[derive(Object, Debug, Clone, Eq, PartialEq, DataSize)]
 pub enum BaseEncoding {
     StandardEncoding,
     SymbolEncoding,
     MacRomanEncoding,
     WinAnsiEncoding,
     MacExpertEncoding,
-    #[pdf(name="Identity-H")]
+    #[pdf(name = "Identity-H")]
     IdentityH,
     None,
 
@@ -30,8 +31,8 @@ impl Object for Encoding {
         match p {
             name @ Primitive::Name(_) => { 
                 Ok(Encoding {
-                    base: BaseEncoding::from_primitive(name, resolve)?,
-                    differences: HashMap::new(),
+                base: BaseEncoding::from_primitive(name, resolve)?,
+                differences: HashMap::new(),
                 })
             }
             Primitive::Dictionary(mut dict) => {
@@ -50,19 +51,20 @@ impl Object for Encoding {
                             Primitive::Name(name) => {
                                 differences.insert(gid, name);
                                 gid += 1;
-                            },
-                            _ => panic!()
+                            }
+                            _ => bail!("Unknown part primitive in dictionary: {:?}", part),
                         }
                     }
                 }
                 Ok(Encoding { base, differences })
             }
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
-            _ => panic!()
+            Primitive::Stream(s) => Self::from_primitive(Primitive::Dictionary(s.info), resolve),
+            _ => bail!("Unknown element: {:?}", p),
         }
     }
 }
-impl Encoding { 
+impl Encoding {
     pub fn standard() -> Encoding {
         Encoding {
             base: BaseEncoding::StandardEncoding,

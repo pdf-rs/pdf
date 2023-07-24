@@ -3,6 +3,8 @@ use std::fmt::{self, Display};
 use std::cmp::Ordering;
 use itertools::Itertools;
 use istring::SmallString;
+use datasize::DataSize;
+use std::sync::Arc;
 
 use crate::error::*;
 use crate::object::*;
@@ -11,7 +13,7 @@ use crate::primitive::*;
 use crate::enc::StreamFilter;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct Content {
     /// The raw content stream parts. usually one, but could be any number.
     pub parts: Vec<Stream<()>>,
@@ -20,13 +22,17 @@ pub struct Content {
 impl Content {
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
         let mut data = vec![];
-        let mut ops = OpBuilder::new();
         for part in self.parts.iter() {
             data.extend_from_slice(&t!(part.data(resolve)));
         }
-        ops.parse(&data, resolve)?;
-        Ok(ops.ops)
+        parse_ops(&data, resolve)
     }
+}
+
+pub fn parse_ops(data: &[u8], resolve: &impl Resolve) -> Result<Vec<Op>> {
+    let mut ops = OpBuilder::new();
+    ops.parse(&data, resolve)?;
+    Ok(ops.ops)
 }
 
 macro_rules! names {
@@ -118,7 +124,7 @@ fn expand_abbr(p: Primitive, alt: &[(&str, &str)]) -> Primitive {
     }
 }
 
-fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<ImageDict>> {
+fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXObject>> {
     let mut dict = Dictionary::new();
     loop {
         let backup_pos = lexer.get_pos();
@@ -149,9 +155,15 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
     lexer.next_expect("ID")?;
     let data_start = lexer.get_pos() + 1;
 
+    // find the end before try parsing.
+    if lexer.seek_substr("\nEI").is_none() {
+        bail!("inline image exceeds expected data range");
+    }    
+    let data_end = lexer.get_pos() - 3;
+
     // ugh
-    let bits_per_component = dict.require("InlineImage", "BitsPerComponent")?.as_integer()?;
-    let color_space = dict.get("InlineImage").map(|p| ColorSpace::from_primitive(expand_abbr(p.clone(), 
+    let bits_per_component = dict.get("BitsPerComponent").map(|p| p.as_integer()).transpose()?;
+    let color_space = dict.get("ColorSpace").map(|p| ColorSpace::from_primitive(expand_abbr(p.clone(), 
         &[
             ("G", "DeviceGray"),
             ("RGB", "DeviceRGB"),
@@ -203,23 +215,9 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Stream<Imag
         other: dict,
     };
 
-    let data_end = if matches!(filters.get(0), Some(StreamFilter::ASCII85Decode) | Some(StreamFilter::ASCIIHexDecode)) {
-        loop {
-            let start = lexer.get_pos();
-            match lexer.next() {
-                Ok(s) if s == "EI" => break start,
-                Ok(_) => continue,
-                Err(e) => return Err(e),
-            }
-        }
-    } else {
-        lexer.seek_substr("\nEI").expect("BUGZ");
-        lexer.get_pos() - 3
-    };
-
     let data = lexer.new_substr(data_start .. data_end).to_vec();
 
-    Ok(Stream::new_with_filters(image_dict, data, filters))
+    Ok(Arc::new(ImageXObject { inner: Stream::from_compressed(image_dict, data, filters) }))
 }
 
 struct OpBuilder {
@@ -254,8 +252,14 @@ impl OpBuilder {
                     // It's not an object/operand - treat it as an operator.
                     lexer.set_pos(backup_pos);
                     let op = t!(lexer.next());
-                    let operator = t!(op.as_str());
-                    t!(self.add(operator, buffer.drain(..), &mut lexer, resolve), operator, lexer.ctx());
+                    let operator = t!(op.as_str(), op);
+                    match self.add(operator, buffer.drain(..), &mut lexer, resolve) {
+                        Ok(()) => {},
+                        Err(e) if resolve.options().allow_invalid_ops => {
+                            warn!("OP Err: {:?}", e);
+                        },
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             match lexer.get_pos().cmp(&data.len()) {
@@ -287,7 +291,7 @@ impl OpBuilder {
                 tag: name(&mut args)?,
                 properties: Some(args.next().ok_or(PdfError::NoOpArg)?)
             }),
-            "BI"  => push(Op::InlineImage { image: Box::new(inline_image(lexer, resolve)?) }),
+            "BI"  => push(Op::InlineImage { image: inline_image(lexer, resolve)? }),
             "BMC" => push(Op::BeginMarkedContent {
                 tag: name(&mut args)?,
                 properties: None
@@ -319,7 +323,7 @@ impl OpBuilder {
             }
             "d0"  => {}
             "d1"  => {}
-            "Do"  => {
+            "Do" | "Do0" => {
                 names!(args, name);
                 push(Op::XObject { name });
             }
@@ -510,7 +514,7 @@ impl Object for Content {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct FormXObject {
     pub stream: Stream<FormDict>,
 }
@@ -521,7 +525,7 @@ impl FormXObject {
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
         let mut ops = OpBuilder::new();
         let data = self.stream.data(resolve)?;
-        ops.parse(&data, resolve)?;
+        t!(ops.parse(&data, resolve));
         Ok(ops.ops)
     }
 }
@@ -529,8 +533,6 @@ impl Object for FormXObject {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let stream = t!(Stream::<FormDict>::from_primitive(p, resolve));
-        let mut ops = OpBuilder::new();
-        ops.parse(&stream.data(resolve)?, resolve)?;
         Ok(FormXObject {
             stream,
         })
@@ -538,7 +540,7 @@ impl Object for FormXObject {
 }
 
 #[allow(clippy::float_cmp)]  // TODO
-fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
+pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
     use Op::*;
     use std::io::Write;
 
@@ -552,7 +554,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             BeginMarkedContent { ref tag, properties: Some(ref name) } => {
                 serialize_name(tag, f)?;
                 write!(f, " ")?;
-                name.serialize(f, 0)?;
+                name.serialize(f)?;
                 writeln!(f, " BDC")?;
             }
             BeginMarkedContent { ref tag, properties: None } => {
@@ -562,7 +564,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             MarkedContentPoint { ref tag, properties: Some(ref name) } => {
                 serialize_name(tag, f)?;
                 write!(f, " ")?;
-                name.serialize(f, 0)?;
+                name.serialize(f)?;
                 writeln!(f, " DP")?;
             }
             MarkedContentPoint { ref tag, properties: None } => {
@@ -634,7 +636,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
             StrokeColor { color: Color::Other(ref args) } =>  {
                 for p in args {
-                    p.serialize(f, 0)?;
+                    p.serialize(f)?;
                     write!(f, " ")?;
                 }
                 writeln!(f, "SCN")?;
@@ -644,7 +646,7 @@ fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
             FillColor { color: Color::Other(ref args) } => {
                 for p in args {
-                    p.serialize(f, 0)?;
+                    p.serialize(f)?;
                     write!(f, " ")?;
                 }
                 writeln!(f, "scn")?;
@@ -734,27 +736,28 @@ impl Content {
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.parts.len() == 1 {
-            self.parts[0].to_primitive(update)
+            let obj = self.parts[0].to_primitive(update)?;
+            update.create(obj)?.to_primitive(update)
         } else {
             self.parts.to_primitive(update)
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum Winding {
     EvenOdd,
     NonZero
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
@@ -764,7 +767,7 @@ pub enum LineJoin {
 #[cfg(feature = "euclid")]
 pub struct PdfSpace();
 
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Default, DataSize)]
 #[repr(C, align(8))]
 pub struct Point {
     pub x: f32,
@@ -808,7 +811,7 @@ impl From<euclid::Vector2D<f32, PdfSpace>> for Point {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 #[repr(C, align(8))]
 pub struct Rect {
     pub x: f32,
@@ -846,7 +849,7 @@ impl From<euclid::Box2D<f32, PdfSpace>> for Rect {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 #[repr(C, align(8))]
 pub struct Matrix {
     pub a: f32,
@@ -873,6 +876,17 @@ impl Default for Matrix {
         }
     }
 }
+impl Object for Matrix {
+    fn from_primitive(p: Primitive, _resolve: &impl Resolve) -> Result<Self> {
+        matrix(&mut p.into_array()?.into_iter())
+    }
+}
+impl ObjectWrite for Matrix {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let Matrix { a, b, c, d, e, f } = *self;
+        Primitive::array::<f32, _, _, _>([a, b, c, d, e, f].iter(), update)
+    }
+}
 #[cfg(feature = "euclid")]
 impl Into<euclid::Transform2D<f32, PdfSpace, PdfSpace>> for Matrix {
     fn into(self) -> euclid::Transform2D<f32, PdfSpace, PdfSpace> {
@@ -892,7 +906,7 @@ impl From<euclid::Transform2D<f32, PdfSpace, PdfSpace>> for Matrix {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum Color {
     Gray(f32),
     Rgb(Rgb),
@@ -900,7 +914,7 @@ pub enum Color {
     Other(Vec<Primitive>),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum TextMode {
     Fill,
     Stroke,
@@ -910,7 +924,7 @@ pub enum TextMode {
     StrokeAndClip
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub struct Rgb {
     pub red: f32,
     pub green: f32,
@@ -922,7 +936,7 @@ impl Display for Rgb {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub struct Cmyk {
     pub cyan: f32,
     pub magenta: f32,
@@ -935,7 +949,7 @@ impl Display for Cmyk {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum TextDrawAdjusted {
     Text(PdfString),
     Spacing(f32),
@@ -953,7 +967,7 @@ impl Display for TextDrawAdjusted {
 /// Graphics Operator
 /// 
 /// See PDF32000 A.2
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum Op {
     /// Begin a marked comtent sequence
     /// 
@@ -1051,7 +1065,7 @@ pub enum Op {
 
     XObject { name: Name },
 
-    InlineImage { image: Box<Stream<ImageDict>> },
+    InlineImage { image: Arc<ImageXObject> },
 }
 
 #[cfg(test)]

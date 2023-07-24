@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use crate::error::*;
 use crate::object::*;
 use crate as pdf;
+use datasize::DataSize;
 
 ///////////////////////////
 // Cross-reference table //
@@ -32,7 +33,7 @@ pub enum XRef {
 }
 
 impl XRef {
-    pub fn get_gen_nr(&self) -> u16 {
+    pub fn get_gen_nr(&self) -> GenNr {
         match *self {
             XRef::Free {gen_nr, ..}
             | XRef::Raw {gen_nr, ..} => gen_nr,
@@ -104,7 +105,7 @@ impl XRefTable {
         (max_a, max_b)
     }
 
-    pub fn add_entries_from(&mut self, section: XRefSection) {
+    pub fn add_entries_from(&mut self, section: XRefSection) -> Result<()> {
         for (i, &entry) in section.entries() {
             if let Some(dst) = self.entries.get_mut(i) {
                 // Early return if the entry we have has larger or equal generation number
@@ -113,13 +114,14 @@ impl XRefTable {
                         => entry.get_gen_nr() > gen,
                     XRef::Stream { .. } | XRef::Invalid
                         => true,
-                    x => panic!("found {:?}", x)
+                    x => bail!("found {:?}", x)
                 };
                 if should_be_updated {
                     *dst = entry;
                 }
             }
         }
+        Ok(())
     }
 
     pub fn write_stream(&self, size: usize) -> Result<Stream<XRefInfo>> {
@@ -133,7 +135,7 @@ impl XRefTable {
                 XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr as u64),
                 XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr as u64),
                 XRef::Stream { stream_id, index } => (2, stream_id as u64, index as u64),
-                x => panic!("invalid xref entry: {:?}", x)
+                x => bail!("invalid xref entry: {:?}", x)
             };
             data.push(t);
             data.extend_from_slice(&a.to_be_bytes()[8 - a_w ..]);
@@ -145,8 +147,8 @@ impl XRefTable {
             prev: None,
             w: vec![1, a_w, b_w],
         };
-        unimplemented!()
-        //Ok(Stream::new(info, data).hexencode())
+        
+        Ok(Stream::new(info, data))
     }
 }
 
@@ -197,7 +199,7 @@ impl XRefSection {
     pub fn add_free_entry(&mut self, next_obj_nr: ObjNr, gen_nr: GenNr) {
         self.entries.push(XRef::Free{next_obj_nr, gen_nr});
     }
-    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: u16) {
+    pub fn add_inuse_entry(&mut self, pos: usize, gen_nr: GenNr) {
         self.entries.push(XRef::Raw{pos, gen_nr});
     }
     pub fn entries(&self) -> impl Iterator<Item=(usize, &XRef)> {
@@ -206,7 +208,7 @@ impl XRefSection {
 }
 
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "XRef")]
 pub struct XRefInfo {
     // XRefStream fields

@@ -2,14 +2,15 @@ use crate::error::*;
 use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
 
 use std::collections::{btree_map, BTreeMap};
+use std::sync::Arc;
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
-use chrono::{DateTime, FixedOffset};
 use std::ops::Deref;
 use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
 use itertools::Itertools;
-use istring::{IString, SmallString, IBytes};
+use istring::{SmallString, IBytes};
+use datasize::DataSize;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
@@ -23,6 +24,21 @@ pub enum Primitive {
     Array (Vec<Primitive>),
     Reference (PlainRef),
     Name (SmallString),
+}
+impl DataSize for Primitive {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = std::mem::size_of::<Self>();
+
+    fn estimate_heap_size(&self) -> usize {
+        match self {
+            Primitive::String(ref s) => s.estimate_heap_size(),
+            Primitive::Stream(ref s) => s.estimate_heap_size(),
+            Primitive::Dictionary(ref d) => d.estimate_heap_size(),
+            Primitive::Array(ref arr) => arr.estimate_heap_size(),
+            Primitive::Name(ref s) => s.estimate_heap_size(),
+            _ => 0
+        }
+    }
 }
 
 impl fmt::Display for Primitive {
@@ -42,7 +58,7 @@ impl fmt::Display for Primitive {
     }
 }
 impl Primitive {
-    pub fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         match self {
             Primitive::Null => write!(out, "null")?,
             Primitive::Integer(i) => write!(out, "{}", i)?,
@@ -50,8 +66,8 @@ impl Primitive {
             Primitive::Boolean(b) => write!(out, "{}", b)?,
             Primitive::String(ref s) => s.serialize(out)?,
             Primitive::Stream(ref s) => s.serialize(out)?,
-            Primitive::Dictionary(ref d) => d.serialize(out, level)?,
-            Primitive::Array(ref arr) => serialize_list(arr, out, level)?,
+            Primitive::Dictionary(ref d) => d.serialize(out)?,
+            Primitive::Array(ref arr) => serialize_list(arr, out)?,
             Primitive::Reference(r) =>  write!(out, "{} {} R", r.id, r.gen)?,
             Primitive::Name(ref s) => serialize_name(s, out)?,
         }
@@ -68,15 +84,15 @@ impl Primitive {
     }
 }
 
-fn serialize_list(arr: &[Primitive], out: &mut impl io::Write, level: usize) -> Result<()> {
+fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
     let mut parts = arr.iter();
-    write!(out, "{:w$}[", "", w=2*level)?;
+    write!(out, "[")?;
     if let Some(first) = parts.next() {
-        first.serialize(out, level+1)?;
+        first.serialize(out)?;
     }
     for p in parts {
         write!(out, " ")?;
-        p.serialize(out, level+1)?;
+        p.serialize(out)?;
     }
     write!(out, "]")?;
     Ok(())
@@ -96,7 +112,7 @@ pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
 }
 
 /// Primitive Dictionary type.
-#[derive(Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq, DataSize)]
 pub struct Dictionary {
     dict: BTreeMap<Name, Primitive>
 }
@@ -164,14 +180,14 @@ impl Deref for Dictionary {
     }
 }
 impl Dictionary {
-    fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         writeln!(out, "<<")?;
         for (key, val) in self.iter() {
-            write!(out, "{:w$}/{} ", "", key, w=2*level+2)?;
-            val.serialize(out, level+2)?;
+            write!(out, "{} ", key)?;
+            val.serialize(out)?;
             writeln!(out)?;
         }
-        writeln!(out, "{:w$}>>", "", w=2*level)?;
+        writeln!(out, ">>")?;
         Ok(())
     }
 }
@@ -211,11 +227,16 @@ impl<'a> IntoIterator for &'a Dictionary {
 }
 
 /// Primitive Stream (as opposed to the higher-level `Stream`)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DataSize)]
 pub struct PdfStream {
     pub info: Dictionary,
-    pub (crate) id: PlainRef,
-    pub (crate) file_range: Range<usize>,
+    pub (crate) inner: StreamInner,
+}
+
+#[derive(Clone, Debug, PartialEq, DataSize)]
+pub enum StreamInner {
+    InFile { id: PlainRef, file_range: Range<usize> },
+    Pending { data: Arc<[u8]> },
 }
 impl Object for PdfStream {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -228,11 +249,17 @@ impl Object for PdfStream {
 }
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        self.info.serialize(out, 0)?;
+        self.info.serialize(out)?;
 
         writeln!(out, "stream")?;
-        unimplemented!();
-        //out.write_all(&self.data)?;
+        match self.inner {
+            StreamInner::InFile { id, ref file_range } => {
+                unimplemented!()
+            }
+            StreamInner::Pending { ref data } => {
+                out.write_all(&data)?;
+            }
+        }
         writeln!(out, "\nendstream")?;
         Ok(())
     }
@@ -248,7 +275,7 @@ macro_rules! unexpected_primitive {
     )
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Ord, PartialOrd, DataSize)]
 pub struct Name(pub SmallString);
 impl Name {
     #[inline]
@@ -309,7 +336,7 @@ fn test_name() {
 }
 
 /// Primitive String type.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, DataSize)]
 pub struct PdfString {
     pub data: IBytes,
 }
@@ -386,12 +413,12 @@ impl PdfString {
     /// therefore only lossy decoding is possible replacing unknown characters.
     /// For decoding correctly see
     /// pdf_tools/src/lib.rs
-    pub fn to_string_lossy(&self) -> Result<String> {
+    pub fn to_string_lossy(&self) -> String {
         if self.data.starts_with(&[0xfe, 0xff]) {
-            Ok(crate::font::utf16be_to_string_lossy(&self.data[2..])?)
+            crate::font::utf16be_to_string_lossy(&self.data[2..])
         }
         else {
-            Ok(String::from_utf8_lossy(&self.data).into())
+            String::from_utf8_lossy(&self.data).into()
         }
     }
     /// without encoding information the PdfString cannot be sensibly decoded into a String
@@ -445,6 +472,13 @@ impl Primitive {
     pub fn as_u32(&self) -> Result<u32> {
         match *self {
             Primitive::Integer(n) if n >= 0 => Ok(n as u32),
+            Primitive::Integer(_) => bail!("negative integer"),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name())
+        }
+    }
+    pub fn as_usize(&self) -> Result<usize> {
+        match *self {
+            Primitive::Integer(n) if n >= 0 => Ok(n as usize),
             Primitive::Integer(_) => bail!("negative integer"),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
@@ -512,7 +546,7 @@ impl Primitive {
     }
     pub fn to_string_lossy(&self) -> Result<String> {
         let s = self.as_string()?;
-        s.to_string_lossy()
+        Ok(s.to_string_lossy())
     }
     pub fn to_string(&self) -> Result<String> {
         let s = self.as_string()?;
@@ -620,7 +654,7 @@ impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     fn try_into(self) -> Result<Cow<'a, str>> {
         match *self {
             Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
-            Primitive::String(ref s) => Ok(Cow::Owned(s.to_string_lossy()?)),
+            Primitive::String(ref s) => Ok(Cow::Owned(s.to_string_lossy())),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
@@ -633,7 +667,7 @@ impl<'a> TryInto<String> for &'a Primitive {
     fn try_into(self) -> Result<String> {
         match *self {
             Primitive::Name(ref s) => Ok(s.as_str().into()),
-            Primitive::String(ref s) => Ok(s.to_string_lossy()?),
+            Primitive::String(ref s) => Ok(s.to_string_lossy()),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
                 found: p.get_debug_name()
@@ -648,9 +682,21 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-impl Object for DateTime<FixedOffset> {
+#[derive(Clone, Debug)]
+pub struct Date {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+    pub tz_hour: u8,
+    pub tz_minute: u8,
+}
+datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
+
+impl Object for Date {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
         match p {
             Primitive::String (PdfString {data}) => {
                 let s = str::from_utf8(&data)?;
@@ -659,7 +705,7 @@ impl Object for DateTime<FixedOffset> {
 
                     let year = match s.get(2..6) {
                         Some(year) => {
-                            str::parse::<i32>(year)?
+                            str::parse::<u16>(year)?
                         }
                         None => bail!("Missing obligatory year in date")
                     };
@@ -670,14 +716,12 @@ impl Object for DateTime<FixedOffset> {
                     let second = parse_or(s, 14..16, 0);
                     let tz_hour = parse_or(s, 16..18, 0);
                     let tz_minute = parse_or(s, 19..21, 0);
-                    let tz = FixedOffset::east(tz_hour * 60 + tz_minute);
-
-                    Ok(DateTime::from_utc(
-                            NaiveDateTime::new(NaiveDate::from_ymd(year, month, day),
-                                               NaiveTime::from_hms(hour, minute, second)),
-                          tz
-                      ))
-
+                    
+                    Ok(Date {
+                        year, month, day,
+                        hour, minute, second,
+                        tz_hour, tz_minute,
+                    })
                 } else {
                     bail!("Failed parsing date");
                 }
@@ -693,14 +737,14 @@ mod tests {
     #[test]
     fn utf16be_string() {
         let s = PdfString::new([0xfe, 0xff, 0x20, 0x09].as_slice().into());
-        assert_eq!(s.to_string_lossy().unwrap(), "\u{2009}");
+        assert_eq!(s.to_string_lossy(), "\u{2009}");
     }
 
     #[test]
     fn utf16be_invalid_string() {
         let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
-        assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
+        assert_eq!(s.to_string_lossy(), repl_ch);
     }
 
     #[test]
@@ -708,7 +752,7 @@ mod tests {
     fn utf16be_invalid_bytelen() {
         let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34, 0x20].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
-        assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
+        assert_eq!(s.to_string_lossy(), repl_ch);
     }
 
     #[test]
@@ -718,16 +762,16 @@ mod tests {
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
         // verify UTF-16-BE supports umlauts
         let s = PdfString::new([0xfe, 0xff, 0x00, 0xe4 /*ä*/].as_slice().into());
-        assert_eq!(s.to_string_lossy().unwrap(), "ä");
+        assert_eq!(s.to_string_lossy(), "ä");
         assert_eq!(s.to_string().unwrap(), "ä");
         // verify valid UTF-8 bytestream with umlaut works
         let s = PdfString::new([b'm', b'i', b't', 0xc3, 0xa4 /*ä*/].as_slice().into());
-        assert_eq!(s.to_string_lossy().unwrap(), "mitä");
+        assert_eq!(s.to_string_lossy(), "mitä");
         assert_eq!(s.to_string().unwrap(), "mitä");
         // verify valid ISO-8859-1 bytestream with umlaut fails
         let s = PdfString::new([b'm', b'i', b't', 0xe4/*ä in latin1*/].as_slice().into());
         let repl_ch = ['m', 'i', 't', std::char::REPLACEMENT_CHARACTER].iter().collect::<String>();
-        assert_eq!(s.to_string_lossy().unwrap(), repl_ch);
+        assert_eq!(s.to_string_lossy(), repl_ch);
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
     }
 }

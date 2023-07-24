@@ -25,7 +25,15 @@ pub fn parse_indirect_object(lexer: &mut Lexer, r: &impl Resolve, decoder: Optio
     };
     let obj = t!(parse_with_lexer_ctx(lexer, r, Some(&ctx), flags, MAX_DEPTH));
 
-    t!(lexer.next_expect("endobj"));
+    if r.options().allow_missing_endobj {
+        let pos = lexer.get_pos();
+        if let Err(e) = lexer.next_expect("endobj") {
+            warn!("error parsing obj {} {}: {:?}", id.id, id.gen, e);
+            lexer.set_pos(pos);
+        }
+    } else {
+        t!(lexer.next_expect("endobj"));
+    }
 
     Ok((id, obj))
 }

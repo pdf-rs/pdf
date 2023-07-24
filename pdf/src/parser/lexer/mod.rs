@@ -3,7 +3,6 @@
 
 use std::str::FromStr;
 use std::ops::{Range, Deref, RangeFrom};
-use std::io::SeekFrom;
 use std::borrow::Cow;
 
 use crate::error::*;
@@ -42,7 +41,7 @@ fn boundary(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usize {
 
 #[inline]
 fn is_whitespace(b: u8) -> bool {
-    matches!(b, b' ' | b'\r' | b'\n' | b'\t')
+    matches!(b, 0 | b' ' | b'\r' | b'\n' | b'\t')
 }
 #[inline]
 fn not<T>(f: impl Fn(T) -> bool) -> impl Fn(T) -> bool {
@@ -240,39 +239,28 @@ impl<'a> Lexer<'a> {
         }
     }
 
-
     /// Just a helper function for set_pos, set_pos_from_end and offset_pos.
     #[inline]
-    fn seek(&mut self, new_pos: SeekFrom) -> Substr<'a> {
-        let wanted_pos = match new_pos {
-            SeekFrom::Start(offset) => offset as usize,
-            SeekFrom::End(offset) => self.buf.len() - offset as usize - 1,
-            SeekFrom::Current(offset) => self.pos + offset as usize,
-        };
-
-        let range = if self.pos < wanted_pos {
-            self.pos..wanted_pos
+    pub fn set_pos(&mut self, wanted_pos: usize) -> Substr<'a> {
+        let new_pos = wanted_pos.min(self.buf.len());
+        let range = if self.pos < new_pos {
+            self.pos..new_pos
         } else {
-            wanted_pos..self.pos
+            new_pos..self.pos
         };
-        self.pos = wanted_pos; // TODO restrict
+        self.pos = new_pos;
         self.new_substr(range)
     }
 
     /// Returns the substr between the old and new positions
     #[inline]
-    pub fn set_pos(&mut self, new_pos: usize) -> Substr<'a> {
-        self.seek(SeekFrom::Start(new_pos as u64))
-    }
-    /// Returns the substr between the old and new positions
-    #[inline]
     pub fn set_pos_from_end(&mut self, new_pos: usize) -> Substr<'a> {
-        self.seek(SeekFrom::End(new_pos as i64))
+        self.set_pos(self.buf.len().saturating_sub(new_pos).saturating_sub(1))
     }
     /// Returns the substr between the old and new positions
     #[inline]
     pub fn offset_pos(&mut self, offset: usize) -> Substr<'a> {
-        self.seek(SeekFrom::Current(offset as i64))
+        self.set_pos(self.pos.wrapping_add(offset))
     }
 
     /// Moves pos to start of next line. Returns the skipped-over substring.
@@ -296,6 +284,9 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         let mut matched = 0;
         loop {
+            if self.pos >= self.buf.len() {
+                return None
+            }
             if self.buf[self.pos] == substr[matched] {
                 matched += 1;
             } else {
@@ -303,9 +294,6 @@ impl<'a> Lexer<'a> {
             }
             if matched == substr.len() {
                 break;
-            }
-            if self.pos >= self.buf.len() {
-                return None
             }
             self.pos += 1;
         }

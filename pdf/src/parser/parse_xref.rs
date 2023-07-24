@@ -11,7 +11,7 @@ use std::convert::TryInto;
 /// Takes `&mut &[u8]` so that it can "consume" data as it reads
 fn parse_xref_section_from_stream(first_id: u32, mut num_entries: usize, width: &[usize], data: &mut &[u8], resolve: &impl Resolve) -> Result<XRefSection> {
     let mut entries = Vec::new();
-    let [w0, w1, w2]: [usize; 3] = width.try_into().map_err(|e| other!("invalid xref length array"))?;
+    let [w0, w1, w2]: [usize; 3] = width.try_into().map_err(|_| other!("invalid xref length array"))?;
     if num_entries * (w0 + w1 + w2) > data.len() {
         if resolve.options().allow_xref_error {
             warn!("not enough xref data. truncating.");
@@ -80,7 +80,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
     }
 
     let mut sections = Vec::new();
-    for (i, (first_id, num_objects)) in index.chunks_exact(2).map(|c| (c[0], c[1])).enumerate() {
+    for (first_id, num_objects) in index.chunks_exact(2).map(|c| (c[0], c[1])) {
         let section = t!(parse_xref_section_from_stream(first_id, num_objects as usize, width, &mut data_left, resolve));
         sections.push(section);
     }

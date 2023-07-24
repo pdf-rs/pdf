@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use std::fs;
 use std::collections::HashMap;
 
-use pdf::file::File;
+use pdf::file::{FileOptions};
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::error::PdfError;
@@ -17,7 +17,7 @@ fn main() -> Result<(), PdfError> {
     println!("read: {}", path);
     let now = SystemTime::now();
 
-    let file = File::<Vec<u8>>::open(&path).unwrap();
+    let file = FileOptions::cached().open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
         let title = info.get("Title").and_then(|p| p.to_string_lossy().ok());
         let author = info.get("Author").and_then(|p| p.to_string_lossy().ok());
@@ -37,8 +37,7 @@ fn main() -> Result<(), PdfError> {
     for page in file.pages() {
         let page = page.unwrap();
         let resources = page.resources().unwrap();
-        for (i, &font) in resources.fonts.values().enumerate() {
-            let font = file.get(font)?;
+        for (i, font) in resources.fonts.values().enumerate() {
             let name = match &font.name {
                 Some(name) => name.as_str().into(),
                 None => i.to_string(),
@@ -85,12 +84,7 @@ fn main() -> Result<(), PdfError> {
         for field in forms.fields.iter() {
             print!("  {:?} = ", field.name);
             match field.value {
-                Primitive::String(ref s) => {
-                    match s.to_string_lossy() {
-                        Ok(s) => println!("{:?}", s),
-                        Err(_) => println!("{:?}", s),
-                    }
-                }
+                Primitive::String(ref s) => println!("{}", s.to_string_lossy()),
                 Primitive::Integer(i) => println!("{}", i),
                 Primitive::Name(ref s) => println!("{}", s),
                 ref p => println!("{:?}", p),

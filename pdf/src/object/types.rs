@@ -1,17 +1,17 @@
 //! Models of PDF types
 
 use std::collections::HashMap;
-use std::borrow::Cow;
+use datasize::DataSize;
 
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
-use crate::content::{Content, FormXObject};
+use crate::content::{Content, FormXObject, Matrix, parse_ops, serialize_ops, Op};
 use crate::font::Font;
 use crate::enc::StreamFilter;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum PagesNode {
     Tree(PageTree),
     Leaf(Page),
@@ -52,7 +52,7 @@ impl PagesNode {
 
 /// A `PagesNode::Leaf` wrapped in a `RcRef`
 /// 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct PageRc(RcRef<PagesNode>);
 impl Deref for PageRc {
     type Target = Page;
@@ -71,7 +71,7 @@ impl PageRc {
 
 /// A `PagesNode::Tree` wrapped in a `RcRef`
 /// 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct PagesRc(RcRef<PagesNode>);
 impl Deref for PagesRc {
     type Target = PageTree;
@@ -102,7 +102,7 @@ impl ObjectWrite for PagesRc {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct Catalog {
 // Version: Name,
     #[pdf(key="Pages")]
@@ -131,7 +131,7 @@ pub struct Catalog {
 
 // Metadata: stream
     #[pdf(key="Metadata")]
-    pub metadata: Option<Ref<Stream>>,
+    pub metadata: Option<Ref<Stream<()>>>,
 
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
@@ -149,7 +149,7 @@ pub struct Catalog {
 // NeedsRendering: bool
 }
 
-#[derive(Object, ObjectWrite, Debug, Default, Clone)]
+#[derive(Object, ObjectWrite, Debug, Default, Clone, DataSize)]
 #[pdf(Type = "Pages?")]
 pub struct PageTree {
     #[pdf(key="Parent")]
@@ -238,7 +238,7 @@ impl PageTree {
 }
 impl SubType<PagesNode> for PageTree {}
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 #[pdf(Type="Page?")]
 pub struct Page {
     #[pdf(key="Parent")]
@@ -261,6 +261,15 @@ pub struct Page {
 
     #[pdf(key="Rotate", default="0")]
     pub rotate: i32,
+
+    #[pdf(key="Metadata")]
+    pub metadata:   Option<Primitive>,
+
+    #[pdf(key="LGIDict")]
+    pub lgi:        Option<Primitive>,
+
+    #[pdf(key="VP")]
+    pub vp:         Option<Primitive>,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -284,6 +293,9 @@ impl Page {
             resources:  None,
             contents:   None,
             rotate:     0,
+            metadata:   None,
+            lgi:        None,
+            vp:         None,
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
@@ -312,7 +324,7 @@ impl Page {
 }
 impl SubType<PagesNode> for Page {}
 
-#[derive(Object)]
+#[derive(Object, DataSize)]
 pub struct PageLabel {
     #[pdf(key="S")]
     pub style:  Option<Counter>,
@@ -324,7 +336,7 @@ pub struct PageLabel {
     pub start:  Option<usize>
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<Name, GraphicsStateParameters>,
@@ -333,37 +345,74 @@ pub struct Resources {
     pub color_spaces: HashMap<Name, ColorSpace>,
 
     #[pdf(key="Pattern")]
-    pub pattern: HashMap<Name, RcRef<Pattern>>,
+    pub pattern: HashMap<Name, Ref<Pattern>>,
 
     // shading: Option<Shading>,
     #[pdf(key="XObject")]
     pub xobjects: HashMap<Name, Ref<XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
     #[pdf(key="Font")]
-    pub fonts: HashMap<Name, Ref<Font>>,
+    pub fonts: HashMap<Name, MaybeRef<Font>>,
 
     #[pdf(key="Properties")]
     pub properties: HashMap<Name, MaybeRef<Dictionary>>,
 }
 impl Resources {
-    pub fn fonts(&self) -> impl Iterator<Item=(&str, &Ref<Font>)> {
+    pub fn fonts(&self) -> impl Iterator<Item=(&str, &MaybeRef<Font>)> {
         self.fonts.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
 
 
+#[derive(Debug, Object, ObjectWrite, DataSize, Clone)]
+pub struct PatternDict {
+    #[pdf(key="PaintType")]
+    pub paint_type: Option<i32>,
 
-#[derive(Debug)]
+    #[pdf(key="TilingType")]
+    pub tiling_type: Option<i32>,
+
+    #[pdf(key="BBox")]
+    pub bbox: Rect,
+
+    #[pdf(key="XStep")]
+    pub x_step: f32,
+
+    #[pdf(key="YStep")]
+    pub y_step: f32,
+
+    #[pdf(key="Resources")]
+    pub resources: Ref<Resources>,
+
+    #[pdf(key="Matrix")]
+    pub matrix: Option<Matrix>,
+}
+
+#[derive(Debug, DataSize)]
 pub enum Pattern {
-    Dict(Dictionary),
-    Stream(PdfStream)
+    Dict(PatternDict),
+    Stream(PatternDict, Vec<Op>),
+}
+impl Pattern {
+    pub fn dict(&self) -> &PatternDict {
+        match *self {
+            Pattern::Dict(ref d) => d,
+            Pattern::Stream(ref d, _) => d,
+        }
+    }
 }
 impl Object for Pattern {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let p = p.resolve(resolve)?;
         match p {
-            Primitive::Dictionary(dict) => Ok(Pattern::Dict(dict)),
-            Primitive::Stream(s) => Ok(Pattern::Stream(s)),
+            Primitive::Dictionary(dict) => Ok(Pattern::Dict(PatternDict::from_dict(dict, resolve)?)),
+            Primitive::Stream(s) => {
+                let stream: Stream<PatternDict> = Stream::from_stream(s, resolve)?;
+                let data = stream.data(resolve)?;
+                let ops = t!(parse_ops(&data, resolve));
+                let dict = stream.info.info;
+                Ok(Pattern::Stream(dict, ops))
+            }
             p => Err(PdfError::UnexpectedPrimitive { expected: "Dictionary or Stream", found: p.get_debug_name() })
         }
     }
@@ -371,26 +420,30 @@ impl Object for Pattern {
 impl ObjectWrite for Pattern {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match self {
-            Pattern::Dict(d) => d.to_primitive(update),
-            Pattern::Stream(s) => Ok(Primitive::Stream(s.clone())),
+            Pattern::Dict(ref d) => d.to_primitive(update),
+            Pattern::Stream(ref d, ref ops) => {
+                let data = serialize_ops(ops)?;
+                let stream = Stream::new_with_filters(d.clone(), data, vec![]);
+                stream.to_primitive(update)
+            }
         }
     }
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2
 }
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
     Bevel = 2
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
@@ -458,7 +511,7 @@ pub struct GraphicsStateParameters {
     _other: Dictionary
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 #[pdf(is_stream)]
 pub enum XObject {
     #[pdf(name="PS")]
@@ -470,9 +523,9 @@ pub enum XObject {
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;
 
-#[derive(Debug)]
+#[derive(Debug, DataSize, Clone)]
 pub struct ImageXObject {
-    inner: Stream<ImageDict>
+    pub inner: Stream<ImageDict>
 }
 impl Object for ImageXObject {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -504,15 +557,16 @@ impl ImageXObject {
     /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
     pub fn raw_image_data(&self, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Option<&StreamFilter>)> {
         match self.inner.inner_data {
-            StreamData::Generated(ref data) => Ok((data.clone(), None)),
+            StreamData::Generated(_) => Ok((self.inner.data(resolve)?, None)),
             StreamData::Original(ref file_range, id) => {
                 let filters = self.inner.filters.as_slice();
                 // decode all non image filters
-                let end = filters.iter().position(|f| match f {
+                let end = filters.iter().rposition(|f| match f {
                     StreamFilter::ASCIIHexDecode => false,
                     StreamFilter::ASCII85Decode => false,
                     StreamFilter::LZWDecode(_) => false,
                     StreamFilter::FlateDecode(_) => false,
+                    StreamFilter::RunLengthDecode => false,
         
                     StreamFilter::Crypt => true,
                     _ => true
@@ -526,7 +580,7 @@ impl ImageXObject {
                     [StreamFilter::DCTDecode(_)] |
                     [StreamFilter::CCITTFaxDecode(_)] |
                     [StreamFilter::JPXDecode] |
-                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&filters[0]))),
+                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters)
                 }
             }
@@ -560,13 +614,13 @@ impl ImageXObject {
     }
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 #[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 #[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
@@ -579,7 +633,7 @@ pub struct ImageDict {
     pub color_space: Option<ColorSpace>,
 
     #[pdf(key="BitsPerComponent")]
-    pub bits_per_component: i32,
+    pub bits_per_component: Option<i32>,
     // Note: only allowed values are 1, 2, 4, 8, 16. Enum?
     
     #[pdf(key="Intent")]
@@ -627,7 +681,7 @@ pub struct ImageDict {
 }
 
 
-#[derive(Object, Debug, Copy, Clone)]
+#[derive(Object, Debug, Copy, Clone, DataSize)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
@@ -655,7 +709,7 @@ impl RenderingIntent {
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     #[pdf(key="FormType", default="1")]
@@ -683,7 +737,7 @@ pub struct FormDict {
     pub reference: Option<Dictionary>,
 
     #[pdf(key="Metadata")]
-    pub metadata: Option<Ref<Stream>>,
+    pub metadata: Option<Ref<Stream<()>>>,
 
     #[pdf(key="PieceInfo")]
     pub piece_info: Option<Dictionary>,
@@ -701,7 +755,8 @@ pub struct FormDict {
     pub other: Dictionary,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct InteractiveFormDictionary {
     #[pdf(key="Fields")]
     pub fields: Vec<RcRef<FieldDictionary>>,
@@ -728,7 +783,7 @@ pub struct InteractiveFormDictionary {
     pub xfa: Option<Primitive>,
 }
 
-#[derive(Object, ObjectWrite, Debug, Copy, Clone, PartialEq)]
+#[derive(Object, ObjectWrite, Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum FieldType {
     #[pdf(name="Btn")]
     Button,
@@ -813,7 +868,7 @@ pub struct SignatureReferenceDictionary {
     pub other: Dictionary
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct FieldDictionary {
     #[pdf(key="FT")]
     pub typ: Option<FieldType>,
@@ -849,7 +904,7 @@ pub struct FieldDictionary {
     pub actions: Option<Dictionary>,
 }
 
-
+#[derive(Debug, DataSize)]
 pub enum Counter {
     Arabic,
     RomanUpper,
@@ -874,7 +929,7 @@ impl Object for Counter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum NameTreeNode<T> {
     ///
     Intermediate (Vec<Ref<NameTree<T>>>),
@@ -884,12 +939,12 @@ pub enum NameTreeNode<T> {
 }
 /// Note: The PDF concept of 'root' node is an intermediate or leaf node which has no 'Limits'
 /// entry. Hence, `limits`, 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct NameTree<T> {
     pub limits: Option<(PdfString, PdfString)>,
     pub node: NameTreeNode<T>,
 }
-impl<T: Object> NameTree<T> {
+impl<T: Object+DataSize> NameTree<T> {
     pub fn walk(&self, r: &impl Resolve, callback: &mut dyn FnMut(&PdfString, &T)) -> Result<(), PdfError> {
         match self.node {
             NameTreeNode::Leaf(ref items) => {
@@ -944,7 +999,7 @@ impl<T: Object> Object for NameTree<T> {
                 let names = names.resolve(resolve)?.into_array()?;
                 let mut new_names = Vec::new();
                 for pair in names.chunks(2) {
-                    let name = pair[0].clone().into_string()?;
+                    let name = pair[0].clone().resolve(resolve)?.into_string()?;
                     let value = t!(T::from_primitive(pair[1].clone(), resolve));
                     new_names.push((name, value));
                 }
@@ -953,7 +1008,13 @@ impl<T: Object> Object for NameTree<T> {
                     node: NameTreeNode::Leaf (new_names),
                 }
             }
-            (None, None) => bail!("Neither Kids nor Names present in NameTree node.")
+            (None, None) => {
+                warn!("Neither Kids nor Names present in NameTree node.");
+                NameTree {
+                    limits,
+                    node: NameTreeNode::Intermediate(vec![])
+                }
+            }
         })
     }
 }
@@ -964,7 +1025,7 @@ impl<T: ObjectWrite> ObjectWrite for NameTree<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum DestView {
     // left, top, zoom
     XYZ { left: Option<f32>, top: Option<f32>, zoom: f32 },
@@ -976,13 +1037,13 @@ pub enum DestView {
     FitBH { top: f32 }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum MaybeNamedDest {
     Named(PdfString),
     Direct(Dest),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct Dest {
     pub page: Option<Ref<Page>>,
     pub view: DestView
@@ -1020,10 +1081,10 @@ impl Dest {
                     ref p => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                 },
                 zoom: match array.get(4) {
-                    Some(&Primitive::Null) => 0.0,
+                    Some(Primitive::Null) => 0.0,
                     Some(&Primitive::Integer(n)) => n as f32,
                     Some(&Primitive::Number(f)) => f,
-                    Some(ref p) => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
+                    Some(p) => return Err(PdfError::UnexpectedPrimitive { expected: "Number | Integer | Null", found: p.get_debug_name() }),
                     None => 0.0,
                 },
             },
@@ -1116,7 +1177,7 @@ impl ObjectWrite for Dest {
 }
 
 /// There is one `NameDictionary` associated with each PDF file.
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct NameDictionary {
     #[pdf(key="Pages")]
     pub pages: Option<NameTree<Primitive>>,
@@ -1156,10 +1217,10 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct FileSpec {
     #[pdf(key="EF")]
-    ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
+    pub ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
     /*
     #[pdf(key="RF")]
     rf: Option<Files<RelatedFilesArray>>,
@@ -1168,34 +1229,47 @@ pub struct FileSpec {
 
 /// Used only as elements in `FileSpec`
 #[derive(Object, ObjectWrite, Debug, Clone)]
-pub struct Files<T: Object + ObjectWrite> {
+pub struct Files<T: Object + ObjectWrite + DataSize> {
     #[pdf(key="F")]
-    f: Option<T>,
+    pub f: Option<T>,
     #[pdf(key="UF")]
-    uf: Option<T>,
+    pub uf: Option<T>,
     #[pdf(key="DOS")]
-    dos: Option<T>,
+    pub dos: Option<T>,
     #[pdf(key="Mac")]
-    mac: Option<T>,
+    pub mac: Option<T>,
     #[pdf(key="Unix")]
-    unix: Option<T>,
+    pub unix: Option<T>,
+}
+impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
+    const IS_DYNAMIC: bool = T::IS_DYNAMIC;
+    const STATIC_HEAP_SIZE: usize = 5 * Option::<T>::STATIC_HEAP_SIZE;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.f.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.uf.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.dos.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.mac.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0) +
+        self.unix.as_ref().map(|t| t.estimate_heap_size()).unwrap_or(0)
+    }
+
 }
 
 /// PDF Embedded File Stream.
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct EmbeddedFile {
     /*
     #[pdf(key="Subtype")]
     subtype: Option<String>,
     */
     #[pdf(key="Params")]
-    params: Option<EmbeddedFileParamDict>,
+    pub params: Option<EmbeddedFileParamDict>,
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size")]
-    size: Option<i32>,
+    pub size: Option<i32>,
     /*
     // TODO need Date type
     #[pdf(key="CreationDate")]
@@ -1209,7 +1283,7 @@ pub struct EmbeddedFileParamDict {
     */
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct OutlineItem {
     #[pdf(key="Title")]
     pub title: Option<PdfString>,
@@ -1245,7 +1319,7 @@ pub struct OutlineItem {
     pub flags: Option<i32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DataSize)]
 pub enum Action {
     Goto(MaybeNamedDest),
     Other(Dictionary)
@@ -1276,7 +1350,7 @@ impl ObjectWrite for Action {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type="Outlines?")]
 pub struct Outlines {
     #[pdf(key="Count", default="0")]
@@ -1290,7 +1364,7 @@ pub struct Outlines {
 
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, DataSize)]
 pub struct Rect {
     pub left:   f32,
     pub bottom: f32,
@@ -1320,7 +1394,7 @@ impl ObjectWrite for Rect {
 
 // Stuff from chapter 10 of the PDF 1.7 ref
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct MarkInformation { // TODO no /Type
     /// indicating whether the document conforms to Tagged PDF conventions
     #[pdf(key="Marked", default="false")]
@@ -1333,29 +1407,29 @@ pub struct MarkInformation { // TODO no /Type
     pub suspects: bool,
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "StructTreeRoot")]
 pub struct StructTreeRoot {
     #[pdf(key="K")]
     pub children: Vec<StructElem>,
 }
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct StructElem {
     #[pdf(key="S")]
-    struct_type: StructType,
+    pub struct_type: StructType,
 
     #[pdf(key="P")]
-    parent: Ref<StructElem>,
+    pub parent: Ref<StructElem>,
 
     #[pdf(key="ID")]
-    id: Option<PdfString>,
+    pub id: Option<PdfString>,
 
     /// `Pg`: A page object representing a page on which some or all of the content items designated by the K entry are rendered.
     #[pdf(key="Pg")]
-    page: Option<Ref<Page>>,
+    pub page: Option<Ref<Page>>,
 }
 
-#[derive(Object, ObjectWrite, Debug)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub enum StructType {
     Document,
     Part,

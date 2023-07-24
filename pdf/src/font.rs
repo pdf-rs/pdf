@@ -6,9 +6,9 @@ use crate::encoding::Encoding;
 use std::collections::HashMap;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
-use std::borrow::Cow;
 use std::sync::Arc;
 use istring::SmallString;
+use datasize::DataSize;
 
 #[allow(non_upper_case_globals, dead_code)]
 mod flags {
@@ -23,7 +23,7 @@ mod flags {
     pub const ForceBold: u32     = 1 << 18;
 }
 
-#[derive(Object, Debug, Copy, Clone)]
+#[derive(Object, Debug, Copy, Clone, DataSize)]
 pub enum FontType {
     Type0,
     Type1,
@@ -34,35 +34,53 @@ pub enum FontType {
     CIDFontType2, // TrueType
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub struct Font {
     pub subtype: FontType,
     pub name: Option<Name>,
-    pub data: Result<FontData>,
+    pub data: FontData,
 
     encoding: Option<Encoding>,
 
-    to_unicode: Option<Stream>,
+    to_unicode: Option<Stream<()>>,
 
     /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
     pub _other: Dictionary
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum FontData {
     Type1(TFont),
     Type0(Type0Font),
     TrueType(TFont),
     CIDFontType0(CIDFont),
-    CIDFontType2(CIDFont, Option<CidToGidMap>),
+    CIDFontType2(CIDFont),
     Other(Dictionary),
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, DataSize)]
 pub enum CidToGidMap {
     Identity,
     Table(Vec<u16>)
+}
+impl Object for CidToGidMap {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        match p {
+            Primitive::Name(name) if name == "Identity" => {
+                Ok(CidToGidMap::Identity)
+            }
+            p @ Primitive::Stream(_) | p @ Primitive::Reference(_) => {
+                let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
+                let data = stream.data(resolve)?;
+                Ok(CidToGidMap::Table(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
+            },
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "/Identity or Stream",
+                found: p.get_debug_name()
+            })
+        }
+    }
 }
 
 impl Object for Font {
@@ -90,30 +108,14 @@ impl Object for Font {
             None => None
         };
         let _other = dict.clone();
-        let data = { ||
-            Ok(match subtype {
-                FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
-                FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
-                FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
-                FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
-                FontType::CIDFontType2 => {
-                    let cid_map = match dict.remove("CIDToGIDMap") {
-                        Some(Primitive::Name(name)) if name == "/Identity" => {
-                            Some(CidToGidMap::Identity)
-                        }
-                        Some(p @ Primitive::Stream(_)) | Some(p @ Primitive::Reference(_)) => {
-                            let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
-                            let data = stream.data(resolve)?;
-                            Some(CidToGidMap::Table(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
-                        },
-                        _ => None
-                    };
-                    let cid_font = CIDFont::from_dict(dict, resolve)?;
-                    FontData::CIDFontType2(cid_font, cid_map)
-                }
-                _ => FontData::Other(dict)
-            })
-        }();
+        let data = match subtype {
+            FontType::Type0 => FontData::Type0(Type0Font::from_dict(dict, resolve)?),
+            FontType::Type1 => FontData::Type1(TFont::from_dict(dict, resolve)?),
+            FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
+            FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
+            FontType::CIDFontType2 => FontData::CIDFontType2(CIDFont::from_dict(dict, resolve)?),
+            _ => FontData::Other(dict)
+        };
 
         Ok(Font {
             subtype,
@@ -123,6 +125,11 @@ impl Object for Font {
             to_unicode,
             _other
         })
+    }
+}
+impl ObjectWrite for Font {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
+        unimplemented!()
     }
 }
 
@@ -149,9 +156,10 @@ impl Widths {
         }
     }
     fn ensure_cid(&mut self, cid: usize) {
-        if cid - self.first_char > self.values.capacity() {
-            let missing = cid - self.values.len();
-            self.values.reserve(missing);
+        if let Some(offset) = cid.checked_sub(self.first_char) { // cid may be < first_char
+            // reserve difference of offset to capacity
+            // if enough capacity to cover offset, saturates to zero, and reserve will do nothing
+            self.values.reserve(offset.saturating_sub(self.values.capacity()));
         }
     }
     #[allow(clippy::float_cmp)]  // TODO
@@ -192,20 +200,20 @@ impl Widths {
 }
 impl Font {
     pub fn embedded_data(&self, resolve: &impl Resolve) -> Option<Result<Arc<[u8]>>> {
-        match self.data.as_ref().ok()? {
+        match self.data {
             FontData::Type0(ref t) => t.descendant_fonts.get(0).and_then(|f| f.embedded_data(resolve)),
-            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c, _) => c.font_descriptor.data(resolve),
+            FontData::CIDFontType0(ref c) | FontData::CIDFontType2(ref c) => c.font_descriptor.data(resolve),
             FontData::Type1(ref t) | FontData::TrueType(ref t) => t.font_descriptor.as_ref().and_then(|d| d.data(resolve)),
             _ => None
         }
     }
     pub fn is_cid(&self) -> bool {
-        matches!(self.data, Ok(FontData::CIDFontType0(_)) | Ok(FontData::CIDFontType2(_, _)))
+        matches!(self.data, FontData::Type0(_) | FontData::CIDFontType0(_) | FontData::CIDFontType2(_))
     }
     pub fn cid_to_gid_map(&self) -> Option<&CidToGidMap> {
-        match self.data.as_ref().ok()? {
+        match self.data {
             FontData::Type0(ref inner) => inner.descendant_fonts.get(0).and_then(|f| f.cid_to_gid_map()),
-            FontData::CIDFontType2(_, ref data) => data.as_ref(),
+            FontData::CIDFontType0(ref f) | FontData::CIDFontType2(ref f) => f.cid_to_gid_map.as_ref(),
             _ => None
         }
     }
@@ -213,7 +221,7 @@ impl Font {
         self.encoding.as_ref()
     }
     pub fn info(&self) -> Option<&TFont> {
-        match self.data.as_ref().ok()? {
+        match self.data {
             FontData::Type1(ref info) => Some(info),
             FontData::TrueType(ref info) => Some(info),
             _ => None
@@ -221,8 +229,8 @@ impl Font {
     }
     pub fn widths(&self, resolve: &impl Resolve) -> Result<Option<Widths>> {
         match self.data {
-            Ok(FontData::Type0(ref t0)) => t0.descendant_fonts[0].widths(resolve),
-            Ok(FontData::Type1(ref info)) | Ok(FontData::TrueType(ref info)) => {
+            FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(resolve),
+            FontData::Type1(ref info) | FontData::TrueType(ref info) => {
                 match *info {
                     TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
                         default: 0.0,
@@ -232,11 +240,11 @@ impl Font {
                     _ => Ok(None)
                 }
             },
-            Ok(FontData::CIDFontType0(ref cid)) | Ok(FontData::CIDFontType2(ref cid, _)) => {
+            FontData::CIDFontType0(ref cid) | FontData::CIDFontType2(ref cid) => {
                 let mut widths = Widths::new(cid.default_width);
                 let mut iter = cid.widths.iter();
                 while let Some(p) = iter.next() {
-                    let c1 = p.as_integer()? as usize;
+                    let c1 = p.as_usize()?;
                     match iter.next() {
                         Some(&Primitive::Array(ref array)) => {
                             widths.ensure_cid(c1 + array.len() - 1);
@@ -273,7 +281,7 @@ impl Font {
         self.to_unicode.as_ref().map(|s| s.data(resolve).and_then(|d| parse_cmap(&d)))
     }
 }
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct TFont {
     #[pdf(key="BaseFont")]
     pub base_font: Option<Name>,
@@ -293,16 +301,16 @@ pub struct TFont {
     pub font_descriptor: Option<FontDescriptor>
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
-    descendant_fonts: Vec<RcRef<Font>>,
+    descendant_fonts: Vec<MaybeRef<Font>>,
 
     #[pdf(key="ToUnicode")]
-    to_unicode: Option<Stream>,
+    to_unicode: Option<Stream<()>>,
 }
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct CIDFont {
     #[pdf(key="CIDSystemInfo")]
     system_info: Dictionary,
@@ -316,12 +324,15 @@ pub struct CIDFont {
     #[pdf(key="W")]
     pub widths: Vec<Primitive>,
 
+    #[pdf(key="CIDToGIDMap")]
+    pub cid_to_gid_map: Option<CidToGidMap>,
+
     #[pdf(other)]
     _other: Dictionary
 }
 
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
     pub font_name: Name,
@@ -376,10 +387,10 @@ pub struct FontDescriptor {
     pub missing_width: f32,
 
     #[pdf(key="FontFile")]
-    pub font_file: Option<Stream>,
+    pub font_file: Option<Stream<()>>,
 
     #[pdf(key="FontFile2")]
-    pub font_file2: Option<Stream>,
+    pub font_file2: Option<Stream<()>>,
 
     #[pdf(key="FontFile3")]
     pub font_file3: Option<Stream<FontStream3>>,
@@ -401,20 +412,20 @@ impl FontDescriptor {
     }
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 #[pdf(key="Subtype")]
 pub enum FontTypeExt {
     Type1C,
     CIDFontType0C,
     OpenType
 }
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct FontStream3 {
     #[pdf(key="Subtype")]
     pub subtype: FontTypeExt
 }
 
-#[derive(Object, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Object, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, DataSize)]
 pub enum FontStretch {
     UltraCondensed,
     ExtraCondensed,
@@ -453,6 +464,9 @@ impl ToUnicodeMap {
     pub fn iter(&self) -> impl Iterator<Item=(u16, &str)> {
         self.inner.iter().map(|(&gid, unicode)| (gid, unicode.as_str()))
     }
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 /// helper function to decode UTF-16-BE data
@@ -463,10 +477,10 @@ pub fn utf16be_to_char(
     char::decode_utf16(data.chunks(2).map(|w| u16::from_be_bytes([w[0], w[1]])))
 }
 /// converts UTF16-BE to a string replacing illegal/unknown characters
-pub fn utf16be_to_string_lossy(data: &[u8]) -> pdf::error::Result<String> {
-    Ok(utf16be_to_char(data)
+pub fn utf16be_to_string_lossy(data: &[u8]) -> String {
+    utf16be_to_char(data)
         .map(|r| r.unwrap_or(std::char::REPLACEMENT_CHARACTER))
-        .collect())
+        .collect()
 }
 /// converts UTF16-BE to a string errors out in illegal/unknonw characters
 pub fn utf16be_to_string(data: &[u8]) -> pdf::error::Result<SmallString> {
@@ -499,7 +513,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         let bytes = unicode_data.as_bytes();
                         match utf16be_to_string(bytes) {
                             Ok(unicode) => map.insert(cid, unicode),
-                            Err(e) => warn!("invalid unicode for cid {cid} {bytes:?}"),
+                            Err(_) => warn!("invalid unicode for cid {cid} {bytes:?}"),
                         }
                     }
                     _ => break,
@@ -525,7 +539,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                         for cid in cid_start..=cid_end {
                             match utf16be_to_string(&unicode_data) {
                                 Ok(unicode) => map.insert(cid, unicode),
-                                Err(e) => warn!("invalid unicode for cid {cid} {unicode_data:?}"),
+                                Err(_) => warn!("invalid unicode for cid {cid} {unicode_data:?}"),
                             }
                             let last = unicode_data.last_mut().unwrap();
                             if *last < 255 {
@@ -547,7 +561,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
                             let bytes = unicode_data.as_string()?.as_bytes();
                             match utf16be_to_string(bytes) {
                                 Ok(unicode) => map.insert(cid, unicode),
-                                Err(e) => warn!("invalid unicode for cid {cid} {bytes:?}"),
+                                Err(_) => warn!("invalid unicode for cid {cid} {bytes:?}"),
                             }
                         }
                     }
@@ -610,6 +624,6 @@ mod tests {
             assert_eq!(r.to_string(), "UTF16 decode error");
         }
         assert_eq!(utf16be_to_string(&v[..8]).unwrap(), String::from("𝄞mu"));
-        assert_eq!(utf16be_to_string_lossy(&v).unwrap(), lossy);
+        assert_eq!(utf16be_to_string_lossy(&v), lossy);
     }
 }

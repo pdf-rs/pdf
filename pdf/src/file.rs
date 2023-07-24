@@ -1,8 +1,7 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
-use std::fs;
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Mutex, Condvar};
+use std::sync::{Arc};
 use std::path::Path;
 use std::io::Write;
 
@@ -19,7 +18,10 @@ use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
-use moka::sync::Cache;
+use datasize::DataSize;
+
+#[cfg(feature="cache")]
+use globalcache::{ValueSize, sync::SyncCache};
 
 #[must_use]
 pub struct PromisedRef<T> {
@@ -35,18 +37,27 @@ impl<T> PromisedRef<T> {
     }
 }
 
-use std::thread::ThreadId;
-#[cfg(feature="sync")]
-#[derive(Default)]
-struct Waiter {
-    mutex: Mutex<HashMap<PlainRef, (ThreadId, Arc<Condvar>)>>,
+pub trait Cache<T: Clone> {
+    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T;
+}
+pub struct NoCache;
+impl<T: Clone> Cache<T> for NoCache {
+    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
+        compute()
+    }
 }
 
-pub struct Storage<B: Backend> {
-    // objects identical to those in the backend
-    cache: Cache<PlainRef, Result<AnySync, Arc<PdfError>>>,
+#[cfg(feature="cache")]
+impl<T: Clone + ValueSize + Send + 'static> Cache<T> for Arc<SyncCache<PlainRef, T>> {
+    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
+        self.get(key, compute)
+    }
+}
 
-    stream_cache: Cache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>,
+pub struct Storage<B, OC, SC> {
+    // objects identical to those in the backend
+    cache: OC,
+    stream_cache: SC,
 
     // objects that differ from the backend
     changes:    HashMap<ObjNr, Primitive>,
@@ -61,14 +72,20 @@ pub struct Storage<B: Backend> {
     // Position of the PDF header in the file.
     start_offset: usize,
 }
-impl<B: Backend> Storage<B> {
-    fn new(backend: B, options: ParseOptions) -> Result<Storage<B>> {
+
+impl<B, OC, SC> Storage<B, OC, SC>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+{
+    pub fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC) -> Result<Self> {
         Ok(Storage {
             start_offset: backend.locate_start_offset()?,
             backend,
             refs: XRefTable::new(0),
-            cache: Cache::new(1024 * 1024),
-            stream_cache: Cache::new(1024 * 1024),
+            cache: object_cache,
+            stream_cache,
             changes: HashMap::new(),
             decoder: None,
             options,
@@ -79,15 +96,53 @@ impl<B: Backend> Storage<B> {
 
         let mut data = Vec::from(data);
         if let Some(ref decoder) = self.decoder {
-            t!(decoder.decrypt(id, &mut data));
+            data = Vec::from(t!(decoder.decrypt(id, &mut data)));
         }
         for filter in filters {
             data = t!(decode(&data, filter), filter);
         }
         Ok(data.into())
     }
+
+    pub fn load_storage_and_trailer(&mut self) -> Result<Dictionary> {
+        self.load_storage_and_trailer_password(b"")
+    }
+
+    pub fn load_storage_and_trailer_password(&mut self, password: &[u8]) -> Result<Dictionary> {
+        let (refs, trailer) = t!(self.backend.read_xref_table_and_trailer(self.start_offset, self));
+        self.refs = refs;
+
+        if let Some(crypt) = trailer.get("Encrypt") {
+            let key = trailer
+                .get("ID")
+                .ok_or(PdfError::MissingEntry {
+                    typ: "Trailer",
+                    field: "ID".into(),
+                })?
+                .as_array()?[0]
+                .as_string()?
+                .as_bytes();
+            let dict = CryptDict::from_primitive(crypt.clone(), self)?;
+            self.decoder = Some(t!(Decoder::from_password(&dict, key, password)));
+            if let Primitive::Reference(reference) = crypt {
+                self.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
+            }
+            if let Some(Primitive::Reference(catalog_ref)) = trailer.get("Root") {
+                let catalog = t!(t!(self.resolve(*catalog_ref)).resolve(self)?.into_dictionary());
+                if let Some(Primitive::Reference(metadata_ref)) = catalog.get("Metadata") {
+                    self.decoder.as_mut().unwrap().metadata_indirect_object = Some(*metadata_ref);
+                }
+            }
+        }
+        Ok(trailer)
+    }
 }
-impl<B: Backend> Resolve for Storage<B> {
+impl<B, OC, SC> Resolve for Storage<B, OC, SC>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+{
     fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(p) => Ok((*p).clone()),
@@ -98,14 +153,17 @@ impl<B: Backend> Resolve for Storage<B> {
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
-                    assert!(flags.contains(ParseFlags::STREAM));
+                    if !flags.contains(ParseFlags::STREAM) {
+                        return Err(PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, allowed: flags });
+                    }
                     if depth == 0 {
                         bail!("too deep");
                     }
                     let obj_stream = t!(self.resolve_flags(PlainRef {id: stream_id, gen: 0 /* TODO what gen nr? */}, flags, depth-1));
                     let obj_stream = t!(ObjectStream::from_primitive(obj_stream, self));
                     let (data, range) = t!(obj_stream.get_object_slice(index, self));
-                    parse(&data[range], self, flags)
+                    let slice = data.get(range.clone()).ok_or_else(|| other!("invalid range {:?}, but only have {} bytes", range, data.len()))?;
+                    parse(slice, self, flags)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
                 XRef::Promised => unimplemented!(),
@@ -114,10 +172,10 @@ impl<B: Backend> Resolve for Storage<B> {
         }
     }
 
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         
-        let res = self.cache.get_or_insert_with(key, || {
+        let res = self.cache.get_or_compute(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(Shared::new(obj).into()),
                 Err(e) => Err(Arc::new(e)),
@@ -132,11 +190,17 @@ impl<B: Backend> Resolve for Storage<B> {
         &self.options
     }
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        self.stream_cache.get_or_insert_with(id, || self.decode(id, range, filters).map_err(Arc::new))
+        self.stream_cache.get_or_compute(id, || self.decode(id, range, filters).map_err(Arc::new))
         .map_err(|e| e.into())
     }
 }
-impl<B: Backend> Updater for Storage<B> {
+
+impl<B, OC, SC> Updater for Storage<B, OC, SC>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+{
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
         let id = self.refs.len() as u64;
         self.refs.push(XRef::Promised);
@@ -181,7 +245,11 @@ impl<B: Backend> Updater for Storage<B> {
     }
 }
 
-impl Storage<Vec<u8>> {
+impl<OC, SC> Storage<Vec<u8>, OC, SC>
+where
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+{
     pub fn save(&mut self, trailer: &mut Trailer) -> Result<&[u8]> {
         let xref_promise = self.promise::<Stream<XRefInfo>>();
 
@@ -195,14 +263,14 @@ impl Storage<Vec<u8>> {
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
             writeln!(self.backend, "{} {} obj", id, 0)?;
-            primitive.serialize(&mut self.backend, 0)?;
+            primitive.serialize(&mut self.backend)?;
             writeln!(self.backend, "endobj")?;
         }
 
         let xref_pos = self.backend.len();
-
+        self.refs.set(xref_promise.get_inner().id, XRef::Raw { pos: xref_pos, gen_nr: 0 });
         // only write up to the xref stream obj id
-        let stream = self.refs.write_stream(xref_promise.get_inner().id as _)?;
+        let stream = self.refs.write_stream(xref_promise.get_inner().id as usize + 1)?;
 
         writeln!(self.backend, "{} {} obj", xref_promise.get_inner().id, 0)?;
         let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
@@ -221,51 +289,27 @@ impl Storage<Vec<u8>> {
     }
 }
 
-pub fn load_storage_and_trailer<B: Backend>(storage: &mut Storage<B>) -> Result<Dictionary> {
-    load_storage_and_trailer_password(storage, b"")
-}
+#[cfg(feature="cache")]
+pub type ObjectCache = Arc<SyncCache<PlainRef, Result<AnySync, Arc<PdfError>>>>;
+#[cfg(feature="cache")]
+pub type StreamCache = Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>>;
+#[cfg(feature="cache")]
+pub type CachedFile<B> = File<B, ObjectCache, StreamCache>;
 
-pub fn load_storage_and_trailer_password<B: Backend>(
-    storage: &mut Storage<B>,
-    password: &[u8],
-) -> Result<Dictionary> {
-    let (refs, trailer) = t!(storage.backend.read_xref_table_and_trailer(storage.start_offset, storage));
-    storage.refs = refs;
-
-    if let Some(crypt) = trailer.get("Encrypt") {
-        let key = trailer
-            .get("ID")
-            .ok_or(PdfError::MissingEntry {
-                typ: "Trailer",
-                field: "ID".into(),
-            })?
-            .as_array()?[0]
-            .as_string()?
-            .as_bytes();
-        let dict = CryptDict::from_primitive(crypt.clone(), storage)?;
-        storage.decoder = Some(t!(Decoder::from_password(&dict, key, password)));
-        if let Primitive::Reference(reference) = crypt {
-            storage.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
-        }
-        if let Some(Primitive::Reference(catalog_ref)) = trailer.get("Root") {
-            let catalog = t!(t!(storage.resolve(*catalog_ref)).resolve(storage)?.into_dictionary());
-            if let Some(Primitive::Reference(metadata_ref)) = catalog.get("Metadata") {
-                storage.decoder.as_mut().unwrap().metadata_indirect_object = Some(*metadata_ref);
-            }
-        }
-    }
-    Ok(trailer)
-}
-
-pub struct File<B: Backend> {
-    storage:    Storage<B>,
+pub struct File<B, OC, SC> {
+    storage:        Storage<B, OC, SC>,
     pub trailer:    Trailer,
 }
-impl<B: Backend> Resolve for File<B> {
+impl<B, OC, SC> Resolve for File<B, OC, SC>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>
+{
     fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
         self.storage.resolve_flags(r, flags, depth)
     }
-    fn get<T: Object>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.storage.get(r)
     }
     fn options(&self) -> &ParseOptions {
@@ -275,7 +319,12 @@ impl<B: Backend> Resolve for File<B> {
         self.storage.get_data_or_decode(id, range, filters)
     }
 }
-impl<B: Backend> Updater for File<B> {
+impl<B, OC, SC> Updater for File<B, OC, SC>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>
+{
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
         self.storage.create(obj)
     }
@@ -290,40 +339,92 @@ impl<B: Backend> Updater for File<B> {
     }
 }
 
-impl File<Vec<u8>> {
-    /// Opens the file at `path` and uses Vec<u8> as backend.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_data(fs::read(path)?)
-    }
-
-    /// Opens the file at `path`, with a password, and uses Vec<u8> as backend.
-    pub fn open_password(path: impl AsRef<Path>, password: &[u8]) -> Result<Self> {
-        Self::from_data_password(fs::read(path)?, password)
-    }
-
+impl<OC, SC> File<Vec<u8>, OC, SC>
+where
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>
+{
     pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<()> {
         std::fs::write(path, self.storage.save(&mut self.trailer)?)?;
         Ok(())
     }
 }
-impl<B: Backend> File<B> {
-    pub fn from_data_password(backend: B, password: &[u8]) -> Result<Self> {
-        Self::load_data(backend, password, ParseOptions::strict())
+
+pub struct FileOptions<'a, OC, SC> {
+    oc: OC,
+    sc: SC,
+    password: &'a [u8],
+    parse_options: ParseOptions,
+}
+impl FileOptions<'static, NoCache, NoCache> {
+    pub fn uncached() -> Self {
+        FileOptions {
+            oc: NoCache,
+            sc: NoCache,
+            password: b"",
+            parse_options: ParseOptions::strict()
+        }
     }
-    pub fn from_data_password_with_options(backend: B, password: &[u8], options: ParseOptions) -> Result<Self> {
-        Self::load_data(backend, password, options)
+}
+
+#[cfg(feature="cache")]
+impl FileOptions<'static, ObjectCache, StreamCache> {
+    pub fn cached() -> Self {
+        FileOptions {
+            oc: SyncCache::new(),
+            sc: SyncCache::new(),
+            password: b"",
+            parse_options: ParseOptions::strict()
+        }
+    }
+}
+impl<'a, OC, SC> FileOptions<'a, OC, SC>
+where
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>
+{
+    pub fn password(self, password: &'a [u8]) -> FileOptions<'a, OC, SC> {
+        FileOptions {
+            password,
+            .. self
+        }
+    }
+    pub fn cache<O, S>(self, oc: O, sc: S) -> FileOptions<'a, O, S> {
+        let FileOptions { oc: _, sc: _, password, parse_options } = self;
+        FileOptions {
+            oc,
+            sc,
+            password,
+            parse_options
+        }
+    }
+    pub fn parse_options(self, parse_options: ParseOptions) -> Self {
+        FileOptions { parse_options, .. self }
     }
 
-    pub fn from_data(backend: B) -> Result<Self> {
-        Self::load_data(backend, b"", ParseOptions::strict())
-    }
-    pub fn from_data_with_options(backend: B, options: ParseOptions) -> Result<Self> {
-        Self::load_data(backend, b"", options)
+    /// open a file
+    pub fn open(self, path: impl AsRef<Path>) -> Result<File<Vec<u8>, OC, SC>> {
+        let data = std::fs::read(path)?;
+        self.load(data)
     }
 
-    fn load_data(backend: B, password: &[u8], options: ParseOptions) -> Result<Self> {
-        let mut storage = Storage::new(backend, options)?;
-        let trailer = load_storage_and_trailer_password(&mut storage, password)?;
+    /// load data from the given backend
+    pub fn load<B: Backend>(self, backend: B) -> Result<File<B, OC, SC>> {
+        let FileOptions { oc, sc, password, parse_options } = self;
+        File::load_data(backend, password, parse_options, oc, sc)
+    }
+}
+
+
+impl<B, OC, SC> File<B, OC, SC>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>
+{
+    fn load_data(backend: B, password: &[u8], options: ParseOptions, object_cache: OC, stream_cache: SC) -> Result<Self> {
+        let mut storage = Storage::with_cache(backend, options, object_cache, stream_cache)?;
+        let trailer = storage.load_storage_and_trailer_password(password)?;
         let trailer = t!(Trailer::from_primitive(
             Primitive::Dictionary(trailer),
             &storage,
@@ -356,8 +457,7 @@ impl<B: Backend> File<B> {
     }
 }
 
-    
-#[derive(Object, ObjectWrite)]
+#[derive(Object, ObjectWrite, DataSize)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub highest_id:         i32,

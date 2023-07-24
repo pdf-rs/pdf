@@ -617,15 +617,10 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
             quote!()
         } else {
             let key = attrs.key();
-            if opt.is_some() {
-                quote! {
-                    if let Some(ref val) = self.#field {
-                        dict.insert(#key, pdf::object::ObjectWrite::to_primitive(val, updater)?);
-                    }
-                }
-            } else {
-                quote! {
-                    dict.insert(#key, pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?);
+            quote! {
+                let val = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
+                if !matches!(val, pdf::primitive::Primitive::Null) {
+                    dict.insert(#key, val);
                 }
             }
         }

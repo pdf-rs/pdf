@@ -1,8 +1,11 @@
+use datasize::DataSize;
+
 use crate as pdf;
 use crate::object::*;
 use crate::primitive::*;
 use crate::error::*;
 use crate::parser::Lexer;
+use crate::enc::{StreamFilter, decode};
 
 use std::ops::{Deref, Range};
 use std::fmt;
@@ -12,20 +15,26 @@ pub (crate) enum StreamData {
     Generated(Arc<[u8]>),
     Original(Range<usize>, PlainRef),
 }
+datasize::non_dynamic_const_heap_size!(StreamData, std::mem::size_of::<StreamData>());
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
-#[derive(Clone)]
-pub struct Stream<I=()> {
+#[derive(Clone, DataSize)]
+pub struct Stream<I> {
     pub info: StreamInfo<I>,
     pub (crate) inner_data: StreamData,
 }
 impl<I: Object + fmt::Debug> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, id, file_range} = s;
+        let PdfStream {info, inner} = s;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream { info, inner_data: StreamData::Original(file_range, id) })
+        let inner_data = match inner {
+            StreamInner::InFile { id, file_range } => StreamData::Original(file_range, id),
+            StreamInner::Pending { data } => StreamData::Generated(data)
+        };
+        Ok(Stream { info, inner_data })
     }
 
+    /// the data is not compressed. the specified filters are to be applied when compressing the data
     pub fn new_with_filters(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
         Stream {
             info: StreamInfo {
@@ -48,10 +57,34 @@ impl<I: Object + fmt::Debug> Stream<I> {
             inner_data: StreamData::Generated(data.into()),
         }
     }
+    /// the data is already compressed with the specified filters
+    pub fn from_compressed(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
+        Stream {
+            info: StreamInfo {
+                filters: filters.clone(),
+                file: None,
+                file_filters: Vec::new(),
+                info: i
+            },
+            inner_data: StreamData::Generated(data.into()),
+        }
+    }
 
     pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
         match self.inner_data {
-            StreamData::Generated(ref data) => Ok(data.clone()),
+            StreamData::Generated(ref data) => {
+                let filters = &self.info.filters;
+                if filters.len() == 0 {
+                    Ok(data.clone())
+                } else {
+                    use std::borrow::Cow;
+                    let mut data: Cow<[u8]> = (&**data).into();
+                    for filter in filters {
+                        data = t!(decode(&data, filter), filter).into();
+                    }
+                    Ok(data.into())
+                }
+            }
             StreamData::Original(ref file_range, id) => {
                 resolve.get_data_or_decode(id, file_range.clone(), &self.info.filters)
             }
@@ -102,6 +135,7 @@ impl<I: ObjectWrite> Stream<I> {
                 StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
                 StreamFilter::JBIG2Decode => "JBIG2Decode",
                 StreamFilter::Crypt => "Crypt",
+                StreamFilter::RunLengthDecode => "RunLengthDecode",
             })
             .map(|s| Primitive::Name(s.into()));
             match self.info.filters.len() {
@@ -118,13 +152,18 @@ impl<I: ObjectWrite> Stream<I> {
             info.insert("DecodeParms", para);
         }
 
-        match self.inner_data {
-            StreamData::Generated(ref data) => unimplemented!(),
+        let inner = match self.inner_data {
+            StreamData::Generated(ref data) => {
+                info.insert("Length", Primitive::Integer(data.len() as _));
+                StreamInner::Pending { data: data.clone() }
+            },
             StreamData::Original(ref file_range, id) => {
                 info.insert("Length", Primitive::Integer(file_range.len() as _));
-                Ok(PdfStream { info, id, file_range: file_range.clone() })
+                StreamInner::InFile { id, file_range: file_range.clone() }
             }
-        }
+        };
+
+        Ok(PdfStream { info, inner })
     }
 }
 impl<I: ObjectWrite> ObjectWrite for Stream<I> {
@@ -142,7 +181,7 @@ impl<I: Object> Deref for Stream<I> {
 
 
 /// General stream type. `I` is the additional information to be read from the stream dict.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub struct StreamInfo<I> {
     // General dictionary entries
     /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and
@@ -257,7 +296,7 @@ impl<T: Object> Object for StreamInfo<T> {
     }
 }
 
-#[derive(Object, Default, Debug)]
+#[derive(Object, Default, Debug, DataSize)]
 #[pdf(Type = "ObjStm")]
 pub struct ObjStmInfo {
     #[pdf(key = "N")]
@@ -270,11 +309,10 @@ pub struct ObjStmInfo {
 
     #[pdf(key = "Extends")]
     /// A reference to an eventual ObjectStream which this ObjectStream extends.
-    pub extends: Option<Ref<Stream>>,
-
+    pub extends: Option<Ref<Stream<()>>>,
 }
 
-
+#[derive(DataSize)]
 pub struct ObjectStream {
     /// Byte offset of each object. Index is the object number.
     offsets:    Vec<usize>,

@@ -2,18 +2,18 @@
 #![allow(dead_code)]  // TODO
 
 use itertools::Itertools;
-use inflate::{inflate_bytes_zlib, inflate_bytes};
-use deflate::deflate_bytes;
 
 use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, Resolve};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::TryInto;
+use std::io::{Read, Write};
 use once_cell::sync::OnceCell;
+use datasize::DataSize;
 
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     pub predictor: i32,
@@ -38,7 +38,7 @@ impl Default for LZWFlateParams {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.
@@ -49,7 +49,7 @@ pub struct DCTDecodeParams {
     pub color_transform: Option<i32>,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct CCITTFaxDecodeParams {
     #[pdf(key="K", default="0")]
     pub k: i32,
@@ -75,7 +75,7 @@ pub struct CCITTFaxDecodeParams {
     #[pdf(key="DamagedRowsBeforeError", default="0")]
     pub damaged_rows_before_error: u32,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DataSize)]
 pub enum StreamFilter {
     ASCIIHexDecode,
     ASCII85Decode,
@@ -85,7 +85,8 @@ pub enum StreamFilter {
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
     JBIG2Decode,
-    Crypt
+    Crypt,
+    RunLengthDecode
 }
 impl StreamFilter {
     pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &impl Resolve) -> Result<StreamFilter> {
@@ -101,6 +102,7 @@ impl StreamFilter {
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
            "JBIG2Decode" => StreamFilter::JBIG2Decode,
            "Crypt" => StreamFilter::Crypt,
+           "RunLengthDecode" => StreamFilter::RunLengthDecode,
            ty => bail!("Unrecognized filter type {:?}", ty),
        } 
        )
@@ -247,19 +249,39 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     buf
 }
 
+fn inflate_bytes_zlib(data: &[u8]) -> Result<Vec<u8>> {
+    use libflate::zlib::{Decoder};
+    let mut decoder = Decoder::new(data)?;
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded)?;
+    Ok(decoded)
+}
+
+fn inflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    use libflate::deflate::{Decoder};
+    let mut decoder = Decoder::new(data);
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded)?;
+    Ok(decoded)
+}
+
 pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+
     let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
     let stride = columns * n_components;
 
+
     // First flate decode
-    let decoded = match inflate_bytes_zlib(data) {
-        Ok(data) => data,
-        Err(_) => {
-            std::fs::write("/tmp/data", data).unwrap();
-            info!("invalid zlib header. trying without");
-            inflate_bytes(data)?
+    let decoded = {
+        if let Ok(data) = inflate_bytes_zlib(data) {
+            data
+        } else if let Ok(data) = inflate_bytes(data) {
+            data
+        } else {
+            dump_data(data);
+            bail!("can't inflate");
         }
     };
     // Then unfilter (PNG)
@@ -304,7 +326,11 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     }
 }
 fn flate_encode(data: &[u8]) -> Vec<u8> {
-    deflate_bytes(data)
+    use libflate::deflate::{Encoder};
+    let mut encoded = Vec::new();
+    let mut encoder = Encoder::new(&mut encoded);
+    encoder.write_all(data).unwrap();
+    encoded
 }
 
 pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
@@ -368,15 +394,42 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
     }
 }
 
+pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
+    // Used <http://benno.id.au/refs/PDFReference15_v5.pdf> as specification
+    let mut buf = Vec::new();
+    let d = data;
+    let mut c = 0;
+
+    while c < data.len() {
+        let length = d[c]; // length is first byte
+        if length < 128 {
+            let start = c + 1;
+            let end = start + length as usize + 1;
+            // copy _following_ length + 1 bytes literally
+            buf.extend_from_slice(&d[start..end]);
+            c = end; // move cursor to next run
+        } else if length >= 129 {
+            let copy = 257 - length as usize; // copy 2 - 128 times
+            let b = d[c + 1]; // copied byte
+            buf.extend(std::iter::repeat(b).take(copy));
+            c = c + 2; // move cursor to next run
+        } else {
+            break; // EOD
+        }
+    }
+
+    Ok(buf)
+}
+
 pub type DecodeFn = dyn Fn(&[u8]) -> Result<Vec<u8>> + Sync + Send + 'static;
 static JPX_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
 static JBIG2_DECODER: OnceCell<Box<DecodeFn>> = OnceCell::new();
 
 pub fn set_jpx_decoder(f: Box<DecodeFn>) {
-    JPX_DECODER.set(f);
+    let _ = JPX_DECODER.set(f);
 }
 pub fn set_jbig2_decoder(f: Box<DecodeFn>) {
-    JBIG2_DECODER.set(f);
+    let _ = JBIG2_DECODER.set(f);
 }
 
 pub fn jpx_decode(data: &[u8]) -> Result<Vec<u8>> {
@@ -392,6 +445,8 @@ pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCII85Decode => decode_85(data),
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
+        StreamFilter::RunLengthDecode => run_length_decode(data),
+        StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
 
         _ => bail!("unimplemented {filter:?}"),
     }
@@ -461,6 +516,9 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
     let len = inp.len();
     assert_eq!(len, out.len());
     assert_eq!(len, prev.len());
+    if bpp > len {
+        return;
+    }
 
     match filter {
         NoFilter => {
@@ -567,5 +625,11 @@ mod tests {
             include_str!("data/t01_plain.txt")
         );
         */
+    }
+
+    #[test]
+    fn run_length_decode_test() {
+        let x = run_length_decode(&[254, b'a', 255, b'b', 2, b'c', b'b', b'c', 254, b'a', 128]).unwrap();
+        assert_eq!(b"aaabbcbcaaa", x.as_slice());
     }
 }

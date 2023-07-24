@@ -9,6 +9,7 @@ pub use self::parse_object::*;
 pub use self::parse_xref::*;
 
 use crate::error::*;
+use crate::primitive::StreamInner;
 use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use self::lexer::{HexStringLexer, StringLexer};
@@ -48,6 +49,7 @@ impl<'a> Context<'a> {
             Ok(data)
         }
     }
+    #[cfg(test)]
     fn fake() -> Self {
         Context {
             decoder: None,
@@ -90,22 +92,27 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     t!(lexer.next_stream());
 
     let length = match dict.get("Length") {
-        Some(&Primitive::Integer(n)) => n,
-        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER, 1)).as_integer()),
-        Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "Integer or Reference", found: other.get_debug_name() }),
+        Some(&Primitive::Integer(n)) if n >= 0 => n as usize,
+        Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER, 1)).as_usize()),
+        Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "unsigned Integer or Reference", found: other.get_debug_name() }),
         None => err!(PdfError::MissingEntry { typ: "<Stream>", field: "Length".into() }),
     };
 
-    let stream_substr = lexer.read_n(length as usize);
-    assert_eq!(stream_substr.len(), length as usize);
+    let stream_substr = lexer.read_n(length);
+
+    if stream_substr.len() != length {
+        err!(PdfError::EOF)
+    }
 
     // Finish
     t!(lexer.next_expect("endstream"));
 
     Ok(PdfStream {
-        file_range: stream_substr.file_range(),
+        inner: StreamInner::InFile {
+            id: ctx.id,
+            file_range: stream_substr.file_range(),
+        },
         info: dict,
-        id: ctx.id,
     })
 }
 
@@ -143,7 +150,8 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
         let dict = t!(parse_dictionary_object(lexer, r, ctx, max_depth-1));
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
-            Primitive::Stream(t!(parse_stream_object(dict, lexer, r, ctx.unwrap())))
+            let ctx = ctx.ok_or(PdfError::PrimitiveNotAllowed { allowed: ParseFlags::STREAM, found: flags })?;
+            Primitive::Stream(t!(parse_stream_object(dict, lexer, r, ctx)))
         } else {
             Primitive::Dictionary(dict)
         }
@@ -234,10 +242,10 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
             for character in string_lexer.iter() {
                 string.push(t!(character));
             }
-            string_lexer.get_offset() as i64
+            string_lexer.get_offset()
         };
         // Advance to end of string
-        lexer.offset_pos(bytes_traversed as usize);
+        lexer.offset_pos(bytes_traversed);
         // decrypt it
         if let Some(ctx) = ctx {
             string = t!(ctx.decrypt(&mut string)).into();
@@ -378,7 +386,7 @@ mod tests {
     fn compact_array() {
         use crate::object::NoResolve;
         use crate::primitive::{Primitive, PdfString};
-        use super::lexer::{Substr, Lexer};
+        use super::lexer::{Lexer};
         use super::*;
         let mut lx = Lexer::new(b"[(Complete L)20(egend for Physical and P)20(olitical Maps)]TJ");
         assert_eq!(parse_with_lexer(&mut lx, &NoResolve, ParseFlags::ANY).unwrap(),

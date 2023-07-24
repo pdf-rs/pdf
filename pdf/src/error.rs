@@ -3,6 +3,7 @@ use std::io;
 use std::error::Error;
 use crate::parser::ParseFlags;
 use std::sync::Arc;
+use datasize::{DataSize, data_size};
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -93,7 +94,7 @@ pub enum PdfError {
     #[snafu(display("Tried to dereference non-existing object nr {}.", obj_nr))]
     NullRef {obj_nr: u64},
 
-    #[snafu(display("Expected primitive {}, found primive {} instead.", expected, found))]
+    #[snafu(display("Expected primitive {}, found primitive {} instead.", expected, found))]
     UnexpectedPrimitive {expected: &'static str, found: &'static str},
     /*
     WrongObjectType {expected: &'static str, found: &'static str} {
@@ -167,6 +168,16 @@ impl PdfError {
         }
     }
 }
+datasize::non_dynamic_const_heap_size!(PdfError, 0);
+
+#[cfg(feature="cache")]
+impl globalcache::ValueSize for PdfError {
+    #[inline]
+    fn size(&self) -> usize {
+        data_size(self)
+    }
+}
+
 fn trace(err: &dyn Error, depth: usize) {
     println!("{}: {}", depth, err);
     if let Some(source) = err.source() {

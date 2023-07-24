@@ -1,6 +1,7 @@
 use crate::object::*;
 use crate::content::*;
 use crate::error::Result;
+use crate::primitive::Primitive;
 
 #[derive(Default)]
 pub struct PageBuilder {
@@ -10,6 +11,9 @@ pub struct PageBuilder {
     pub trim_box: Option<Rect>,
     pub resources: Option<MaybeRef<Resources>>,
     pub rotate: i32,
+    pub metadata: Option<Primitive>,
+    pub lgi: Option<Primitive>,
+    pub vp: Option<Primitive>,
 }
 impl PageBuilder {
     pub fn from_content(content: Content) -> PageBuilder {
@@ -26,6 +30,9 @@ impl PageBuilder {
             trim_box: page.trim_box,
             resources: Some(page.resources()?.clone()),
             rotate: page.rotate,
+            metadata: page.metadata.clone(),
+            lgi: page.lgi.clone(),
+            vp: page.vp.clone(),
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
@@ -76,6 +83,9 @@ impl CatalogBuilder {
                 trim_box: page.trim_box,
                 resources: page.resources,
                 rotate: page.rotate,
+                metadata: page.metadata,
+                lgi: page.lgi,
+                vp: page.vp,
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }

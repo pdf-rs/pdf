@@ -1,8 +1,9 @@
+use datasize::DataSize;
 use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 
-#[derive(Object, Debug)]
+#[derive(Object, Debug, DataSize)]
 pub struct IccInfo {
     #[pdf(key="N")]
     pub components: u32,
@@ -30,9 +31,39 @@ pub enum ColorSpace {
     Separation(Name, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
     Pattern,
+    Named(Name),
     Other(Vec<Primitive>)
 }
+impl DataSize for ColorSpace {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = 0;
 
+    #[inline]
+    fn estimate_heap_size(&self) -> usize {
+        match *self {
+            ColorSpace::DeviceGray | ColorSpace::DeviceRGB | ColorSpace::DeviceCMYK => 0,
+            ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
+                names.estimate_heap_size() +
+                alt.estimate_heap_size() +
+                tint.estimate_heap_size() +
+                attr.estimate_heap_size()
+            }
+            ColorSpace::CalGray(ref d) | ColorSpace::CalRGB(ref d) | ColorSpace::CalCMYK(ref d) => {
+                d.estimate_heap_size()
+            }
+            ColorSpace::Indexed(ref cs, ref data) => {
+                cs.estimate_heap_size() + data.estimate_heap_size()
+            }
+            ColorSpace::Separation(ref name, ref cs, ref f) => {
+                name.estimate_heap_size() + cs.estimate_heap_size() + f.estimate_heap_size()
+            }
+            ColorSpace::Icc(ref s) => s.estimate_heap_size(),
+            ColorSpace::Pattern => 0,
+            ColorSpace::Other(ref v) => v.estimate_heap_size(),
+            ColorSpace::Named(ref n) => n.estimate_heap_size()
+        }
+    }
+}
 
 fn get_index(arr: &[Primitive], idx: usize) -> Result<&Primitive> {
      arr.get(idx).ok_or(PdfError::Bounds { index: idx, len: arr.len() })
@@ -52,7 +83,7 @@ impl ColorSpace {
                 "DeviceRGB" => ColorSpace::DeviceRGB,
                 "DeviceCMYK" => ColorSpace::DeviceCMYK,
                 "Pattern" => ColorSpace::Pattern,
-                _ => bail!("unimplemented color space {}", name)
+                name => ColorSpace::Named(name.into()),
             };
             return Ok(cs);
         }
@@ -114,6 +145,9 @@ impl ColorSpace {
             "CalCMYK" => {
                 let dict = Dictionary::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
                 Ok(ColorSpace::CalCMYK(dict))
+            }
+            "Pattern" => {
+                Ok(ColorSpace::Pattern)
             }
             _ => Ok(ColorSpace::Other(arr))
         }

@@ -1,15 +1,17 @@
 use std::any::TypeId;
 use std::rc::Rc;
 use std::sync::Arc;
+use datasize::DataSize;
 use crate::object::{Object};
 use crate::error::{Result, PdfError};
 
 pub trait AnyObject {
     fn type_name(&self) -> &'static str;
     fn type_id(&self) -> TypeId;
+    fn size(&self) -> usize;
 }
 impl<T> AnyObject for T
-    where T: Object + 'static
+    where T: Object + 'static + DataSize
 {
     fn type_name(&self) -> &'static str {
         std::any::type_name::<T>()
@@ -17,9 +19,12 @@ impl<T> AnyObject for T
     fn type_id(&self) -> TypeId {
         TypeId::of::<T>()
     }
+    fn size(&self) -> usize {
+        datasize::data_size(self)
+    }
 }
 
-#[derive(Clone)]
+#[derive(DataSize)]
 pub struct Any(Rc<dyn AnyObject>);
 
 impl Any {
@@ -50,8 +55,16 @@ impl<T: AnyObject + 'static> From<Rc<T>> for Any {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, DataSize)]
 pub struct AnySync(Arc<dyn AnyObject+Sync+Send>);
+
+#[cfg(feature="cache")]
+impl globalcache::ValueSize for AnySync {
+    #[inline]
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+}
 
 impl AnySync {
     pub fn downcast<T>(self) -> Result<Arc<T>> 

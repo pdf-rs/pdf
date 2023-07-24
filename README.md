@@ -1,7 +1,7 @@
 # pdf-rs [![test](https://github.com/pdf-rs/pdf/actions/workflows/test.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/test.yml) [![clippy&fmt](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml)
 Read, alter and write PDF files.
 
-**At the moment, you can only read PDF files.**
+Modifying and writing PDFs is still experimental.
 
 One easy way you can contribute is to add different PDF files to `tests/files` and see if they pass the tests (`cargo test`).
 

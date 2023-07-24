@@ -2,15 +2,19 @@
 
 use crate as pdf;
 use aes::cipher::generic_array::{sequence::Split, GenericArray};
-use aes::{Aes128, Aes256, NewBlockCipher};
-use block_modes::block_padding::{NoPadding, Pkcs7};
-use block_modes::{BlockMode, Cbc};
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::cipher::block_padding::{NoPadding, Pkcs7};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
 use std::collections::HashMap;
+use datasize::DataSize;
 use crate::object::PlainRef;
 use crate::primitive::{Dictionary, PdfString, Name};
 use crate::error::{PdfError, Result};
+
+type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
+type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
+type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
 const PADDING: [u8; 32] = [
     0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41,
@@ -57,7 +61,7 @@ impl Rc4 {
 }
 
 /// 7.6.1 Table 20 + 7.6.3.2 Table 21
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 pub struct CryptDict {
     #[pdf(key="O")]
     o: PdfString,
@@ -96,7 +100,7 @@ pub struct CryptDict {
     _other: Dictionary
 }
 
-#[derive(Object, Debug, Clone, Copy)]
+#[derive(Object, Debug, Clone, Copy, DataSize)]
 pub enum CryptMethod {
     None,
     V2,
@@ -104,13 +108,13 @@ pub enum CryptMethod {
     AESV3,
 }
 
-#[derive(Object, Debug, Clone, Copy)]
+#[derive(Object, Debug, Clone, Copy, DataSize)]
 pub enum AuthEvent {
     DocOpen,
     EFOpen
 }
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, DataSize)]
 #[pdf(Type="CryptFilter?")]
 pub struct CryptFilter {
     #[pdf(key="CFM", default="CryptMethod::None")]
@@ -149,7 +153,7 @@ impl Decoder {
     }
 
     fn key(&self) -> &[u8] {
-        &self.key[.. self.key_size]
+        &self.key[.. std::cmp::min(self.key_size, 16)]
     }
 
     pub fn new(key: [u8; 32], key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
@@ -175,7 +179,7 @@ impl Decoder {
             compute_u_rev_2(key) == document_u
         }
 
-        fn compute_u_rev_3_4(id: &[u8], key: &[u8]) -> Vec<u8> {
+        fn compute_u_rev_3_4(id: &[u8], key: &[u8]) -> [u8; 16] {
             // algorithm 5
             // a) we derived the key already.
 
@@ -200,11 +204,11 @@ impl Decoder {
             }
 
             // f)
-            data.to_vec()
+            data
         }
 
         fn check_password_rev_3_4(document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
-            compute_u_rev_3_4(id, key) == document_u[..16]
+            document_u.starts_with(&compute_u_rev_3_4(id, key))
         }
 
         fn check_password_rc4(revision: u32, document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
@@ -254,7 +258,7 @@ impl Decoder {
             // h)
             if revision >= 3 {
                 for _ in 0..50 {
-                    data = *md5::compute(&data[..key_size]);
+                    data = *md5::compute(&data[..std::cmp::min(key_size, 16)]);
                 }
             }
 
@@ -268,6 +272,10 @@ impl Decoder {
             key_size: usize,
             pass: &[u8],
         ) -> Result<Vec<u8>> {
+            if key_size > 16 {
+                bail!("key size > 16");
+            }
+
             let mut hash = md5::Context::new();
             if pass.len() < 32 {
                 hash.consume(pass);
@@ -295,7 +303,7 @@ impl Decoder {
                     .crypt_filters
                     .get(try_opt!(dict.default_crypt_filter.as_ref()).as_str())
                     .ok_or_else(|| other!("missing crypt filter entry {:?}", dict.default_crypt_filter.as_ref()))?;
-                
+
                 match default.method {
                     CryptMethod::V2 | CryptMethod::AESV2 => (
                         default.length.map(|n| 8 * n).unwrap_or(dict.bits),
@@ -310,6 +318,9 @@ impl Decoder {
             }
             v => err!(other!("unsupported V value {}", v)),
         };
+        if key_bits < 1 || key_bits > 256 {
+            bail!("key bits must be between 1 and 256");
+        }
         let level = dict.r;
         if !(2..=6).contains(&level) {
             err!(other!("unsupported standard security handler revision {}", level))
@@ -318,7 +329,7 @@ impl Decoder {
             let key_size = key_bits as usize / 8;
             let key = key_derivation_user_password_rc4(level, key_size, dict, id, pass);
 
-            if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size]) {
+            if check_password_rc4(level, dict.u.as_bytes(), id, &key[..std::cmp::min(key_size, 16)]) {
                 let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
                 Ok(decoder)
             } else {
@@ -449,10 +460,8 @@ impl Decoder {
             };
 
             let zero_iv = GenericArray::from_slice(&[0u8; 16]);
-            let key_unwrap_cipher: Cbc<Aes256, NoPadding> =
-                Cbc::new(Aes256::new(&intermediate_key), zero_iv);
-            let key_slice = t!(key_unwrap_cipher
-                .decrypt(&mut wrapped_key)
+            let key_slice = t!(Aes256CbcDec::new(&intermediate_key, zero_iv)
+                .decrypt_padded_mut::<NoPadding>(&mut wrapped_key)
                 .map_err(|_| PdfError::InvalidPassword));
             let mut key = [0u8; 32];
             key.copy_from_slice(key_slice);
@@ -485,8 +494,7 @@ impl Decoder {
 
         let mut i = 0;
         while i < 64 || i < data[data_total_len - 1] as usize + 32 {
-            let aes: Cbc<Aes128, NoPadding> = Cbc::new(Aes128::new(&key), &iv);
-
+            let aes = Aes128CbcEnc::new(&key, &iv);
             let data_repeat_len = password.len() + block_size + u.len();
             data[..password.len()].copy_from_slice(password);
             data[password.len()..password.len() + block_size].copy_from_slice(&block[..block_size]);
@@ -498,7 +506,7 @@ impl Decoder {
 
             // The plaintext length will always be a multiple of the block size, unwrap is okay
             let encrypted = aes
-                .encrypt(&mut data[..data_total_len], data_total_len)
+                .encrypt_padded_mut::<NoPadding>(&mut data[..data_total_len], data_total_len)
                 .unwrap();
 
             let sum: usize = encrypted[..16].iter().map(|byte| *byte as usize).sum();
@@ -568,7 +576,7 @@ impl Decoder {
             CryptMethod::AESV2 => {
                 // b)
                 let mut key = [0; 32 + 5 + 4];
-                let n = self.key_size;
+                let n = std::cmp::min(self.key_size, 16);
                 key[..n].copy_from_slice(self.key());
                 key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
                 key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
@@ -578,28 +586,26 @@ impl Decoder {
                 let key = *md5::compute(&key[..n + 9]);
 
                 // d)
-                type Aes128Cbc = Cbc<Aes128, Pkcs7>;
                 let key = &key[..(n + 5).min(16)];
                 if data.len() < 16 {
                     return Err(PdfError::DecryptionFailure);
                 }
                 let (iv, ciphertext) = data.split_at_mut(16);
                 let cipher =
-                    t!(Aes128Cbc::new_from_slices(key, iv).map_err(|_| PdfError::DecryptionFailure));
+                    t!(Aes128CbcDec::new_from_slices(key, iv).map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
-                    .decrypt(ciphertext)
+                    .decrypt_padded_mut::<Pkcs7>(ciphertext)
                     .map_err(|_| PdfError::DecryptionFailure)))
             }
             CryptMethod::AESV3 => {
-                type Aes256Cbc = Cbc<Aes256, Pkcs7>;
                 if data.len() < 16 {
                     return Err(PdfError::DecryptionFailure);
                 }
                 let (iv, ciphertext) = data.split_at_mut(16);
                 let cipher =
-                    t!(Aes256Cbc::new_from_slices(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
+                    t!(Aes256CbcDec::new_from_slices(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
-                    .decrypt(ciphertext)
+                    .decrypt_padded_mut::<Pkcs7>(ciphertext)
                     .map_err(|_| PdfError::DecryptionFailure)))
             }
         }
@@ -676,7 +682,7 @@ mod tests {
             .unwrap();
         data.append(&mut format!("{}\n%%EOF", xref_offset).into_bytes());
 
-        let file = crate::file::File::from_data(data).unwrap();
+        let file = crate::file::FileOptions::uncached().load(data).unwrap();
 
         // PDF reference says strings in the encryption dictionary are "not
         // encrypted by the usual methods."
