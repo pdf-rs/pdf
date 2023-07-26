@@ -57,6 +57,7 @@ impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
         let mut entries = Vec::new();
         entries.resize(num_objects as usize, XRef::Invalid);
+        entries.push(XRef::Free { next_obj_nr: 0, gen_nr: 0xffff });
         XRefTable {
             entries,
         }

@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
+use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater, RcRef};
 
 use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
@@ -8,6 +8,7 @@ use std::ops::{Index, Range};
 use std::ops::Deref;
 use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
+use indexmap::IndexMap;
 use itertools::Itertools;
 use istring::{SmallString, IBytes};
 use datasize::DataSize;
@@ -112,13 +113,13 @@ pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
 }
 
 /// Primitive Dictionary type.
-#[derive(Default, Clone, PartialEq, DataSize)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Dictionary {
-    dict: BTreeMap<Name, Primitive>
+    dict: IndexMap<Name, Primitive>
 }
 impl Dictionary {
     pub fn new() -> Dictionary {
-        Dictionary { dict: BTreeMap::new()}
+        Dictionary { dict: IndexMap::new()}
     }
     pub fn len(&self) -> usize {
         self.dict.len()
@@ -129,10 +130,10 @@ impl Dictionary {
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }
-    pub fn insert(&mut self, key: impl Into<Name>, val: Primitive) -> Option<Primitive> {
-        self.dict.insert(key.into(), val)
+    pub fn insert(&mut self, key: impl Into<Name>, val: impl Into<Primitive>) -> Option<Primitive> {
+        self.dict.insert(key.into(), val.into())
     }
-    pub fn iter(&self) -> btree_map::Iter<Name, Primitive> {
+    pub fn iter(&self) -> impl Iterator<Item=(&Name, &Primitive)> {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
@@ -168,14 +169,21 @@ impl Dictionary {
         }
     }
 }
+impl DataSize for Dictionary {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = std::mem::size_of::<Self>();
+    fn estimate_heap_size(&self) -> usize {
+        self.iter().map(|(k, v)| 16 + k.estimate_heap_size() + v.estimate_heap_size()).sum()
+    }
+}
 impl ObjectWrite for Dictionary {
     fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         Ok(Primitive::Dictionary(self.clone()))
     }
 }
 impl Deref for Dictionary {
-    type Target = BTreeMap<Name, Primitive>;
-    fn deref(&self) -> &BTreeMap<Name, Primitive> {
+    type Target = IndexMap<Name, Primitive>;
+    fn deref(&self) -> &IndexMap<Name, Primitive> {
         &self.dict
     }
 }
@@ -213,14 +221,14 @@ impl<'a> Index<&'a str> for Dictionary {
 }
 impl IntoIterator for Dictionary {
     type Item = (Name, Primitive);
-    type IntoIter = btree_map::IntoIter<Name, Primitive>;
+    type IntoIter = indexmap::map::IntoIter<Name, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         self.dict.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a Dictionary {
     type Item = (&'a Name, &'a Primitive);
-    type IntoIter = btree_map::Iter<'a, Name, Primitive>;
+    type IntoIter = indexmap::map::Iter<'a, Name, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         self.dict.iter()
     }
@@ -435,7 +443,11 @@ impl PdfString {
         }
     }
 }
-
+impl<'a> From<&'a str> for PdfString {
+    fn from(value: &'a str) -> Self {
+        PdfString { data: value.into() }
+    }
+}
 
 // TODO:
 // Noticed some inconsistency here.. I think to_* and as_* should not take Resolve, and not accept

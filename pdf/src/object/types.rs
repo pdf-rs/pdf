@@ -103,8 +103,11 @@ impl ObjectWrite for PagesRc {
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
+#[pdf(Type = "Catalog?")]
 pub struct Catalog {
-// Version: Name,
+    #[pdf(key="Version")]
+    pub version: Option<Name>,
+
     #[pdf(key="Pages")]
     pub pages: PagesRc,
 
@@ -244,7 +247,7 @@ pub struct Page {
     #[pdf(key="Parent")]
     pub parent: PagesRc,
 
-    #[pdf(key="Resources")]
+    #[pdf(key="Resources", indirect)]
     pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
@@ -336,7 +339,7 @@ pub struct PageLabel {
     pub start:  Option<usize>
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<Name, GraphicsStateParameters>,

@@ -91,6 +91,7 @@ impl CatalogBuilder {
         }
 
         Ok(Catalog {
+            version: Some("1.7".into()),
             pages: tree,
             names: None,
             dests: None,

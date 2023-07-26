@@ -218,6 +218,11 @@ pub struct RcRef<T> {
     inner: PlainRef,
     data: Shared<T>
 }
+impl<T> From<RcRef<T>> for Primitive {
+    fn from(value: RcRef<T>) -> Self {
+        Primitive::Reference(value.inner)
+    }
+}
 
 impl<T> RcRef<T> {
     pub fn new(inner: PlainRef, data: Shared<T>) -> RcRef<T> {
