@@ -14,7 +14,7 @@ use pdf::primitive::PdfString;
 fn main() -> Result<(), PdfError> {
     let path = PathBuf::from(env::args_os().nth(1).expect("no file given"));
     
-    let mut storage = FileOptions::cached().storage();
+    let mut builder = PdfBuilder::new(FileOptions::cached());
 
     let mut pages = Vec::new();
 
@@ -37,21 +37,12 @@ fn main() -> Result<(), PdfError> {
     new_page.resources = Some(MaybeRef::Direct(Arc::new(resources)));
     pages.push(new_page);
     
-    let catalog = CatalogBuilder::from_pages(pages)
-        .build(&mut storage).unwrap();
+    let catalog = CatalogBuilder::from_pages(pages);
     
-    let mut info = Dictionary::new();
-    info.insert("Title", PdfString::from("test"));
+    let mut info = InfoDict::default();
+    info.title = Some(PdfString::from("test"));
     
-    let mut trailer = Trailer {
-        root: storage.create(catalog)?,
-        encrypt_dict: None,
-        size: 0,
-        id: vec!["foo".into(), "bar".into()],
-        info_dict: Some(info),
-        prev_trailer_pos: None,
-    };
-    let data = storage.save(&mut trailer)?;
+    let data = builder.info(info).build(catalog)?;
 
     std::fs::write(path, data)?;
 
