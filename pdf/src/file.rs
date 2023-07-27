@@ -109,6 +109,9 @@ where
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log,
 {
+    pub fn into_inner(self) -> B {
+        self.backend
+    }
     pub fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
         Ok(Storage {
             start_offset: backend.locate_start_offset()?,
@@ -594,7 +597,7 @@ pub struct Trailer {
     pub encrypt_dict:       Option<RcRef<CryptDict>>,
 
     #[pdf(key = "Info", indirect)]
-    pub info_dict:          Option<Dictionary>,
+    pub info_dict:          Option<InfoDict>,
 
     #[pdf(key = "ID")]
     pub id:                 Vec<PdfString>,

@@ -1488,6 +1488,43 @@ pub enum StructType {
     Other(String),
 }
 
+#[derive(Object, ObjectWrite, Debug, DataSize)]
+pub enum Trapped {
+    True,
+    False,
+    Unknown,
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
+pub struct InfoDict {
+    #[pdf(key="Title")]
+    pub title: Option<PdfString>,
+
+    #[pdf(key="Author")]
+    pub author: Option<PdfString>,
+
+    #[pdf(key="Subject")]
+    pub subject: Option<PdfString>,
+
+    #[pdf(key="Keywords")]
+    pub keywords: Option<PdfString>,
+
+    #[pdf(key="Creator")]
+    pub creator: Option<PdfString>,
+
+    #[pdf(key="Author")]
+    pub producer: Option<PdfString>,
+
+    #[pdf(key="CreationDate")]
+    pub creation_date: Option<Date>,
+
+    #[pdf(key="ModDate")]
+    pub mod_date: Option<Date>,
+
+    #[pdf(key="Trapped")]
+    pub trapped: Option<Trapped>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
