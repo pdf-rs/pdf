@@ -694,7 +694,7 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Date {
     pub year: u16,
     pub month: u8,
@@ -702,8 +702,16 @@ pub struct Date {
     pub hour: u8,
     pub minute: u8,
     pub second: u8,
+    pub rel: TimeRel,
     pub tz_hour: u8,
     pub tz_minute: u8,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub enum TimeRel {
+    Earlier,
+    Later,
+    Universal
 }
 datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
 
@@ -721,18 +729,33 @@ impl Object for Date {
                         }
                         None => bail!("Missing obligatory year in date")
                     };
-                    let month = parse_or(s, 6..8, 1);
-                    let day = parse_or(s, 8..10, 1);
-                    let hour = parse_or(s, 10..12, 0);
-                    let minute = parse_or(s, 12..14, 0);
-                    let second = parse_or(s, 14..16, 0);
-                    let tz_hour = parse_or(s, 16..18, 0);
-                    let tz_minute = parse_or(s, 19..21, 0);
+                    
+                    let (time, rel, zone) = match s.find(['+', '-', 'Z']) {
+                        Some(p) => {
+                            let rel = match &s[p..p+1] {
+                                "-" => TimeRel::Earlier,
+                                "+" => TimeRel::Later,
+                                "Z" => TimeRel::Universal,
+                                _ => unreachable!()
+                            };
+                            (&s[..p], rel, &s[p+1..])
+                        }
+                        None => (s, TimeRel::Universal, "")
+                    };
+
+                    let month = parse_or(time, 6..8, 1);
+                    let day = parse_or(time, 8..10, 1);
+                    let hour = parse_or(time, 10..12, 0);
+                    let minute = parse_or(time, 12..14, 0);
+                    let second = parse_or(time, 14..16, 0);
+                    let tz_hour = parse_or(zone, 0..2, 0);
+                    let tz_minute = parse_or(zone, 3..5, 0);
                     
                     Ok(Date {
                         year, month, day,
                         hour, minute, second,
                         tz_hour, tz_minute,
+                        rel
                     })
                 } else {
                     bail!("Failed parsing date");
@@ -743,9 +766,32 @@ impl Object for Date {
     }
 }
 
+impl ObjectWrite for Date {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let Date {
+            year, month, day,
+            hour, minute, second,
+            tz_hour, tz_minute, rel,
+        } = *self;
+        if year > 9999 || day > 99 || hour > 23 || minute >= 60 || second >= 60 || tz_hour >= 24 || tz_minute >= 60 {
+            bail!("not a valid date");
+        }
+        let o = match rel {
+            TimeRel::Earlier => "-",
+            TimeRel::Later => "+",
+            TimeRel::Universal => "Z"
+        };
+        
+        let s = format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}{o}{tz_hour:02}'{tz_minute:02}");
+        Ok(Primitive::String(PdfString { data: s.into() }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::primitive::PdfString;
+    use crate::{primitive::{PdfString, TimeRel}, object::{NoResolve, Object}};
+
+    use super::Date;
     #[test]
     fn utf16be_string() {
         let s = PdfString::new([0xfe, 0xff, 0x20, 0x09].as_slice().into());
@@ -785,5 +831,24 @@ mod tests {
         let repl_ch = ['m', 'i', 't', std::char::REPLACEMENT_CHARACTER].iter().collect::<String>();
         assert_eq!(s.to_string_lossy(), repl_ch);
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
+    }
+
+    #[test]
+    fn date() {
+        let p = PdfString::from("D:199812231952-08'00");
+        let d = Date::from_primitive(p.into(), &NoResolve);
+        
+        let d2 = Date {
+            year: 1998,
+            month: 12,
+            day: 23,
+            hour: 19,
+            minute: 52,
+            second: 00,
+            rel: TimeRel::Earlier,
+            tz_hour: 8,
+            tz_minute: 0
+        };
+        assert_eq!(d.unwrap(), d2);
     }
 }
