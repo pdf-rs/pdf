@@ -6,6 +6,9 @@ use pdf::error::PdfError;
 use pdf::content::*;
 use pdf::file::FileOptions;
 use pdf::file::Trailer;
+use pdf::font::Font;
+use pdf::font::FontData;
+use pdf::font::TFont;
 use pdf::object::*;
 use pdf::build::*;
 use pdf::primitive::Dictionary;
@@ -21,8 +24,8 @@ fn main() -> Result<(), PdfError> {
     let content = Content::from_ops(vec![
         Op::MoveTo { p: Point { x: 100., y: 100. } },
         Op::LineTo { p: Point { x: 100., y: 200. } },
-        Op::LineTo { p: Point { x: 200., y: 100. } },
         Op::LineTo { p: Point { x: 200., y: 200. } },
+        Op::LineTo { p: Point { x: 200., y: 100. } },
         Op::Close,
         Op::Stroke,
     ]);
@@ -34,7 +37,19 @@ fn main() -> Result<(), PdfError> {
         right: 400.0
     });
     let resources = Resources::default();
-    new_page.resources = Some(MaybeRef::Direct(Arc::new(resources)));
+    /*
+    let font = Font {
+        name: Some("Test".into()),
+        subtype: pdf::font::FontType::TrueType,
+        data: FontData::TrueType(TFont {
+            base_font: None,
+            
+        })
+    }
+    resources.fonts.insert("f1", font);
+    */
+
+    new_page.resources = Some(MaybeRef::Indirect(builder.storage.create(resources)?));
     pages.push(new_page);
     
     let catalog = CatalogBuilder::from_pages(pages);

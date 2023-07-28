@@ -12,11 +12,7 @@ fn main() -> Result<(), PdfError> {
 
     let file = FileOptions::cached().open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
-        info.iter()
-            .filter(|(_, primitive)| primitive.to_string_lossy().is_ok())
-            .for_each(|(key, value)| {
-                eprintln!("{:>15}: {}", key, value.to_string_lossy().unwrap());
-            });
+        dbg!(info);
     }
 
     if let Some(ref forms) = file.get_root().forms {

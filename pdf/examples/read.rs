@@ -19,8 +19,8 @@ fn main() -> Result<(), PdfError> {
 
     let file = FileOptions::cached().open(&path).unwrap();
     if let Some(ref info) = file.trailer.info_dict {
-        let title = info.get("Title").and_then(|p| p.to_string_lossy().ok());
-        let author = info.get("Author").and_then(|p| p.to_string_lossy().ok());
+        let title = info.title.as_ref().map(|p| p.to_string_lossy());
+        let author = info.author.as_ref().map(|p| p.to_string_lossy());
 
         let descr = match (title, author) {
             (Some(title), None) => title,
