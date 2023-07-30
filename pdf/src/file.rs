@@ -1,7 +1,8 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
+use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex};
 use std::path::Path;
 use std::io::Write;
 
@@ -56,6 +57,7 @@ impl<T: Clone + ValueSize + Send + 'static> Cache<T> for Arc<SyncCache<PlainRef,
 
 pub trait Log {
     fn load_object(&self, r: PlainRef) {}
+    fn log_get(&self, r: PlainRef) {}
 }
 pub struct NoLog;
 impl Log for NoLog {}
@@ -143,7 +145,9 @@ where
     }
 
     pub fn load_storage_and_trailer_password(&mut self, password: &[u8]) -> Result<Dictionary> {
-        let (refs, trailer) = t!(self.backend.read_xref_table_and_trailer(self.start_offset, self));
+
+        let resolver = StorageResolver::new(self);
+        let (refs, trailer) = t!(self.backend.read_xref_table_and_trailer(self.start_offset, &resolver));
         self.refs = refs;
 
         if let Some(crypt) = trailer.get("Encrypt") {
@@ -156,13 +160,17 @@ where
                 .as_array()?[0]
                 .as_string()?
                 .as_bytes();
-            let dict = CryptDict::from_primitive(crypt.clone(), self)?;
+
+            let resolver = StorageResolver::new(self);
+            let dict = CryptDict::from_primitive(crypt.clone(), &resolver)?;
+
             self.decoder = Some(t!(Decoder::from_password(&dict, key, password)));
             if let Primitive::Reference(reference) = crypt {
                 self.decoder.as_mut().unwrap().encrypt_indirect_object = Some(*reference);
             }
             if let Some(Primitive::Reference(catalog_ref)) = trailer.get("Root") {
-                let catalog = t!(t!(self.resolve(*catalog_ref)).resolve(self)?.into_dictionary());
+                let resolver = StorageResolver::new(self);
+                let catalog = t!(t!(resolver.resolve(*catalog_ref)).resolve(&resolver)?.into_dictionary());
                 if let Some(Primitive::Reference(metadata_ref)) = catalog.get("Metadata") {
                     self.decoder.as_mut().unwrap().metadata_indirect_object = Some(*metadata_ref);
                 }
@@ -182,10 +190,11 @@ where
             Ok(())
         }
 
+        let resolver = StorageResolver::new(self);
         std::iter::from_fn(move || {
             loop {
                 let pos = lexer.get_pos();
-                match parse_indirect_object(&mut lexer, self, self.decoder.as_ref(), ParseFlags::all()) {
+                match parse_indirect_object(&mut lexer, &resolver, self.decoder.as_ref(), ParseFlags::all()) {
                     Ok((r, p)) => return Some(Ok(ScanItem::Object(r, p))),
                     Err(e) if e.is_eof() => return None,
                     Err(e) => {
@@ -212,44 +221,25 @@ where
             }
         })
     }
-}
-
-pub enum ScanItem {
-    Object(PlainRef, Primitive),
-    Trailer(Dictionary)
-}
-
-impl<B, OC, SC, L> Resolve for Storage<B, OC, SC, L>
-where
-    B: Backend,
-    OC: Cache<Result<AnySync, Arc<PdfError>>>,
-    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
-    L: Log
-{
-    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
-        self.log.load_object(r);
-
+    fn resolve_ref(&self, r: PlainRef, flags: ParseFlags, resolve: &impl Resolve) -> Result<Primitive> {
         match self.changes.get(&r.id) {
             Some(p) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
                     let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..)), self.start_offset + pos);
-                    let p = t!(parse_indirect_object(&mut lexer, self, self.decoder.as_ref(), flags)).1;
+                    let p = t!(parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)).1;
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
                     if !flags.contains(ParseFlags::STREAM) {
                         return Err(PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, allowed: flags });
                     }
-                    if depth == 0 {
-                        bail!("too deep");
-                    }
                     // use get to cache the object stream
-                    let obj_stream = self.get::<ObjectStream>(Ref::from_id(stream_id))?;
+                    let obj_stream = resolve.get::<ObjectStream>(Ref::from_id(stream_id))?;
 
-                    let (data, range) = t!(obj_stream.get_object_slice(index, self));
+                    let (data, range) = t!(obj_stream.get_object_slice(index, resolve));
                     let slice = data.get(range.clone()).ok_or_else(|| other!("invalid range {:?}, but only have {} bytes", range, data.len()))?;
-                    parse(slice, self, flags)
+                    parse(slice, resolve, flags)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
                 XRef::Promised => unimplemented!(),
@@ -257,11 +247,66 @@ where
             }
         }
     }
+}
+
+pub enum ScanItem {
+    Object(PlainRef, Primitive),
+    Trailer(Dictionary)
+}
+
+struct StorageResolver<'a, B, OC, SC, L> {
+    storage: &'a Storage<B, OC, SC, L>,
+    chain: Mutex<Vec<PlainRef>>,
+}
+impl<'a, B, OC, SC, L> StorageResolver<'a, B, OC, SC, L> {
+    pub fn new(storage: &'a Storage<B, OC, SC, L>) -> Self {
+        StorageResolver {
+            storage,
+            chain: Mutex::new(vec![])
+        }
+    }
+}
+
+struct Defer<F: FnMut()>(F);
+impl<F: FnMut()> Drop for Defer<F> {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
+impl<'a, B, OC, SC, L> Resolve for StorageResolver<'a, B, OC, SC, L>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+    L: Log
+{
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
+        let storage = self.storage;
+        storage.log.load_object(r);
+
+        storage.resolve_ref(r, flags, self)
+    }
 
     fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
+        self.storage.log.log_get(key);
         
-        let res = self.cache.get_or_compute(key, || {
+        {
+            println!("enter {key:?}");
+            let mut chain = self.chain.lock().unwrap();
+            if chain.contains(&key) {
+                bail!("Recursive reference");
+            }
+            chain.push(key);
+        }
+        let _defer = Defer(|| {
+            println!("exit {key:?}");
+            let mut chain = self.chain.lock().unwrap();
+            assert_eq!(chain.pop(), Some(key));
+        });
+        
+        let res = self.storage.cache.get_or_compute(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(Shared::new(obj).into()),
                 Err(e) => Err(Arc::new(e)),
@@ -273,10 +318,10 @@ where
         }
     }
     fn options(&self) -> &ParseOptions {
-        &self.options
+        &self.storage.options
     }
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        self.stream_cache.get_or_compute(id, || self.decode(id, range, filters).map_err(Arc::new))
+        self.storage.stream_cache.get_or_compute(id, || self.storage.decode(id, range, filters).map_err(Arc::new))
         .map_err(|e| e.into())
     }
 }
@@ -389,26 +434,6 @@ pub type CachedFile<B> = File<B, ObjectCache, StreamCache, NoLog>;
 pub struct File<B, OC, SC, L> {
     storage:        Storage<B, OC, SC, L>,
     pub trailer:    Trailer,
-}
-impl<B, OC, SC, L> Resolve for File<B, OC, SC, L>
-where
-    B: Backend,
-    OC: Cache<Result<AnySync, Arc<PdfError>>>,
-    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
-    L: Log,
-{
-    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
-        self.storage.resolve_flags(r, flags, depth)
-    }
-    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
-        self.storage.get(r)
-    }
-    fn options(&self) -> &ParseOptions {
-        self.storage.options()
-    }
-    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
-        self.storage.get_data_or_decode(id, range, filters)
-    }
 }
 impl<B, OC, SC, L> Updater for File<B, OC, SC, L>
 where
@@ -539,14 +564,19 @@ where
     fn load_data(backend: B, password: &[u8], options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
         let mut storage = Storage::with_cache(backend, options, object_cache, stream_cache, log)?;
         let trailer = storage.load_storage_and_trailer_password(password)?;
+
+        let resolver = StorageResolver::new(&storage);
         let trailer = t!(Trailer::from_primitive(
             Primitive::Dictionary(trailer),
-            &storage,
+            &resolver,
         ));
         Ok(File { storage, trailer })
     }
     pub fn new(storage: Storage<B, OC, SC, L>, trailer: Trailer) -> Self {
         File { storage, trailer }
+    }
+    pub fn resolver(&self) -> impl Resolve + '_ {
+        StorageResolver::new(&self.storage)
     }
 
     pub fn get_root(&self) -> &Catalog {
@@ -561,7 +591,8 @@ where
     }
 
     pub fn get_page(&self, n: u32) -> Result<PageRc> {
-        self.trailer.root.pages.page(self, n)
+        let resolver = StorageResolver::new(&self.storage);
+        self.trailer.root.pages.page(&resolver, n)
     }
 
     pub fn update_catalog(&mut self, catalog: Catalog) -> Result<()> {
