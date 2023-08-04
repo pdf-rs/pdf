@@ -293,7 +293,7 @@ where
         self.storage.log.log_get(key);
         
         {
-            println!("enter {key:?}");
+            debug!("get {key:?} as {}", std::any::type_name::<T>());
             let mut chain = self.chain.lock().unwrap();
             if chain.contains(&key) {
                 bail!("Recursive reference");
@@ -301,7 +301,6 @@ where
             chain.push(key);
         }
         let _defer = Defer(|| {
-            println!("exit {key:?}");
             let mut chain = self.chain.lock().unwrap();
             assert_eq!(chain.pop(), Some(key));
         });
@@ -309,7 +308,11 @@ where
         let res = self.storage.cache.get_or_compute(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(Shared::new(obj).into()),
-                Err(e) => Err(Arc::new(e)),
+                Err(e) => {
+                    let p = self.resolve(key);
+                    warn!("failed to decode {p:?} as {}", std::any::type_name::<T>());
+                    Err(Arc::new(e))
+                }
             }
         });
         match res {

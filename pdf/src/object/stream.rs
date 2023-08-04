@@ -250,7 +250,7 @@ impl<T: Object> Object for StreamInfo<T> {
             dict.remove("Filter").unwrap_or(Primitive::Null),
             resolve)?;
 
-        let decode_params = Vec::<Dictionary>::from_primitive(
+        let decode_params = Vec::<Option<Dictionary>>::from_primitive(
             dict.remove("DecodeParms").unwrap_or(Primitive::Null),
             resolve)?;
 
@@ -272,8 +272,8 @@ impl<T: Object> Object for StreamInfo<T> {
 
         for (i, filter) in filters.iter().enumerate() {
             let params = match decode_params.get(i) {
-                Some(params) => params.clone(),
-                None => Dictionary::default(),
+                Some(Some(params)) => params.clone(),
+                _ => Dictionary::default(),
             };
             new_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve)?);
         }
