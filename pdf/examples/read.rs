@@ -68,7 +68,7 @@ fn main() -> Result<(), PdfError> {
         let (data, filter) = img.raw_image_data(&resolver)?;
         let ext = match filter {
             Some(StreamFilter::DCTDecode(_)) => "jpeg",
-            Some(StreamFilter::JBIG2Decode) => "jbig2",
+            Some(StreamFilter::JBIG2Decode(_)) => "jbig2",
             Some(StreamFilter::JPXDecode) => "jp2k",
             _ => continue,
         };
