@@ -133,7 +133,7 @@ impl<I: ObjectWrite> Stream<I> {
                 StreamFilter::JPXDecode => "JPXDecode",
                 StreamFilter::DCTDecode(ref _p) => "DCTDecode",
                 StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
-                StreamFilter::JBIG2Decode => "JBIG2Decode",
+                StreamFilter::JBIG2Decode(ref _p) => "JBIG2Decode",
                 StreamFilter::Crypt => "Crypt",
                 StreamFilter::RunLengthDecode => "RunLengthDecode",
             })

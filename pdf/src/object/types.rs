@@ -583,7 +583,7 @@ impl ImageXObject {
                     [StreamFilter::DCTDecode(_)] |
                     [StreamFilter::CCITTFaxDecode(_)] |
                     [StreamFilter::JPXDecode] |
-                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&image_filters[0]))),
+                    [StreamFilter::JBIG2Decode(_)] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters)
                 }
             }
@@ -610,7 +610,7 @@ impl ImageXObject {
             }
             StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
             StreamFilter::JPXDecode => jpx_decode(&data)?,
-            StreamFilter::JBIG2Decode => jbig2_decode(&data)?,
+            StreamFilter::JBIG2Decode(ref p) => jbig2_decode(&data, &p.globals.data(resolve)?)?,
             _ => unreachable!()
         };
         Ok(data.into())
