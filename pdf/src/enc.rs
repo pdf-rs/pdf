@@ -79,7 +79,7 @@ pub struct CCITTFaxDecodeParams {
 #[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct JBIG2DecodeParams {
     #[pdf(key="JBIG2Globals")]
-    pub globals: Stream<()>
+    pub globals: Option<Stream<()>>
 }
 #[derive(Debug, Clone, DataSize)]
 pub enum StreamFilter {

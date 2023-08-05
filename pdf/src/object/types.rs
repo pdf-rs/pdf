@@ -610,7 +610,10 @@ impl ImageXObject {
             }
             StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
             StreamFilter::JPXDecode => jpx_decode(&data)?,
-            StreamFilter::JBIG2Decode(ref p) => jbig2_decode(&data, &p.globals.data(resolve)?)?,
+            StreamFilter::JBIG2Decode(ref p) => {
+                let global_data = p.globals.as_ref().map(|s| s.data(resolve)).transpose()?;
+                jbig2_decode(&data, global_data.as_deref().unwrap_or_default())?
+            },
             _ => unreachable!()
         };
         Ok(data.into())
