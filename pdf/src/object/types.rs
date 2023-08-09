@@ -553,6 +553,7 @@ pub enum ImageFormat {
 
 impl ImageXObject {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
+        dbg!(&s.info);
         let inner = Stream::from_stream(s, resolve)?;
         Ok(ImageXObject { inner })
     }
@@ -596,7 +597,7 @@ impl ImageXObject {
             Some(f) => f,
             None => return Ok(data)
         };
-        let data = match filter {
+        let mut data = match filter {
             StreamFilter::CCITTFaxDecode(ref params) => {
                 if self.inner.info.width != params.columns {
                     bail!("image width mismatch {} != {}", self.inner.info.width, params.columns);
@@ -616,6 +617,13 @@ impl ImageXObject {
             },
             _ => unreachable!()
         };
+        if let Some(ref decode) = self.decode {
+            if &*decode == &[1.0, 0.0] {
+                if self.bits_per_component == Some(1) {
+                    data.iter_mut().for_each(|b| *b = !*b);
+                }
+            }
+        }
         Ok(data.into())
     }
 }
