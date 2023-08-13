@@ -298,6 +298,12 @@ impl Deref for Name {
         &self.0
     }
 }
+impl From<String> for Name {
+    #[inline]
+    fn from(s: String) -> Name {
+        Name(s.into())
+    }
+}
 impl From<SmallString> for Name {
     #[inline]
     fn from(s: SmallString) -> Name {
