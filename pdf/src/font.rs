@@ -46,7 +46,7 @@ pub struct Font {
     pub encoding: Option<Encoding>,
 
     // FIXME: Should use RcRef<Stream>
-    pub to_unicode: Option<Stream<()>>,
+    pub to_unicode: Option<RcRef<Stream<()>>>,
 
     /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
     pub _other: Dictionary
@@ -119,7 +119,7 @@ impl Object for Font {
         let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
 
         let to_unicode = match dict.remove("ToUnicode") {
-            Some(p) => Some(Stream::<()>::from_primitive(p, resolve)?),
+            Some(p) => Some(Object::from_primitive(p, resolve)?),
             None => None
         };
         let _other = dict.clone();
@@ -160,6 +160,17 @@ impl ObjectWrite for Font {
         if let Some(ref name) = self.name {
             dict.insert("BaseFont", name.to_primitive(update)?);
         }
+
+        let subtype = match self.data {
+            FontData::Type0(_) => FontType::Type0,
+            FontData::Type1(_) => FontType::Type1,
+            FontData::TrueType(_) => FontType::TrueType,
+            FontData::CIDFontType0(_) => FontType::CIDFontType0,
+            FontData::CIDFontType2(_) => FontType::CIDFontType2,
+            FontData::Other(_) => bail!("unimplemented")
+        };
+        dict.insert("Subtype", subtype.to_primitive(update)?);
+        dict.insert("Type", Name::from("Font"));
 
         Ok(Primitive::Dictionary(dict))
     }
@@ -310,7 +321,7 @@ impl Font {
         }
     }
     pub fn to_unicode(&self, resolve: &impl Resolve) -> Option<Result<ToUnicodeMap>> {
-        self.to_unicode.as_ref().map(|s| s.data(resolve).and_then(|d| parse_cmap(&d)))
+        self.to_unicode.as_ref().map(|s| (**s).data(resolve).and_then(|d| parse_cmap(&d)))
     }
 }
 #[derive(Object, ObjectWrite, Debug, DataSize)]
@@ -339,7 +350,7 @@ pub struct Type0Font {
     pub descendant_fonts: Vec<MaybeRef<Font>>,
 
     #[pdf(key="ToUnicode")]
-    pub to_unicode: Option<Stream<()>>,
+    pub to_unicode: Option<RcRef<Stream<()>>>,
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
@@ -419,13 +430,13 @@ pub struct FontDescriptor {
     pub missing_width: f32,
 
     #[pdf(key="FontFile")]
-    pub font_file: Option<Stream<()>>,
+    pub font_file: Option<RcRef<Stream<()>>>,
 
     #[pdf(key="FontFile2")]
-    pub font_file2: Option<Stream<()>>,
+    pub font_file2: Option<RcRef<Stream<()>>>,
 
     #[pdf(key="FontFile3")]
-    pub font_file3: Option<Stream<FontStream3>>,
+    pub font_file3: Option<RcRef<Stream<FontStream3>>>,
 
     #[pdf(key="CharSet")]
     pub char_set: Option<PdfString>
@@ -433,11 +444,11 @@ pub struct FontDescriptor {
 impl FontDescriptor {
     pub fn data(&self, resolve: &impl Resolve) -> Option<Result<Arc<[u8]>>> {
         if let Some(ref s) = self.font_file {
-            Some(s.data(resolve))
+            Some((**s).data(resolve))
         } else if let Some(ref s) = self.font_file2 {
-            Some(s.data(resolve))
+            Some((**s).data(resolve))
         } else if let Some(ref s) = self.font_file3 {
-            Some(s.data(resolve))
+            Some((**s).data(resolve))
         } else {
             None
         }
