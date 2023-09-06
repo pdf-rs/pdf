@@ -1,5 +1,4 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
-use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -43,7 +42,7 @@ pub trait Cache<T: Clone> {
 }
 pub struct NoCache;
 impl<T: Clone> Cache<T> for NoCache {
-    fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
+    fn get_or_compute(&self, _key: PlainRef, compute: impl FnOnce() -> T) -> T {
         compute()
     }
 }
@@ -56,8 +55,8 @@ impl<T: Clone + ValueSize + Send + 'static> Cache<T> for Arc<SyncCache<PlainRef,
 }
 
 pub trait Log {
-    fn load_object(&self, r: PlainRef) {}
-    fn log_get(&self, r: PlainRef) {}
+    fn load_object(&self, _r: PlainRef) {}
+    fn log_get(&self, _r: PlainRef) {}
 }
 pub struct NoLog;
 impl Log for NoLog {}
@@ -210,7 +209,7 @@ where
                                 }
                             }
                             else if s == "startxref" {
-                                if let Ok(offset) = lexer.next() {
+                                if let Ok(_) = lexer.next() {
                                     continue;
                                 }
                             }
@@ -281,7 +280,7 @@ where
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log
 {
-    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, _depth: usize) -> Result<Primitive> {
         let storage = self.storage;
         storage.log.load_object(r);
 
@@ -545,7 +544,7 @@ where
         self.load(data)
     }
     pub fn storage(self) -> Storage<Vec<u8>, OC, SC, L> {
-        let FileOptions { oc, sc, password, parse_options, log } = self;
+        let FileOptions { oc, sc, log, .. } = self;
         Storage::empty(oc, sc, log)
     }
 

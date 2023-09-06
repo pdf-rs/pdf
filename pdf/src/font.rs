@@ -4,7 +4,6 @@ use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
 use std::collections::HashMap;
-use std::fmt;
 use std::fmt::Write;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
@@ -660,7 +659,7 @@ pub fn write_cmap(map: &ToUnicodeMap) -> String {
                     write_cid(&mut buf, cid);
                     write!(buf, " ").unwrap();
                     write_unicode(&mut buf, uni);
-                    writeln!(buf);
+                    writeln!(buf).unwrap();
                 }
             }
             writeln!(buf, "endbfchar").unwrap();
@@ -671,13 +670,13 @@ pub fn write_cmap(map: &ToUnicodeMap) -> String {
                 write!(buf, " ").unwrap();
                 write_cid(&mut buf, block.last().unwrap().0);
                 write!(buf, " [").unwrap();
-                for (i, &(cid, u)) in block.iter().enumerate() {
+                for (i, &(_cid, u)) in block.iter().enumerate() {
                     if i > 0 {
                         write!(buf, ", ").unwrap();
                     }
                     write_unicode(&mut buf, u);
                 }
-                writeln!(buf, "]");
+                writeln!(buf, "]").unwrap();
             }    
             writeln!(buf, "endbfrange").unwrap();
         }

@@ -92,7 +92,7 @@ pub trait Backend: Sized {
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
             
             for section in xref_sections {
-                refs.add_entries_from(section);
+                refs.add_entries_from(section)?;
             }
             
             prev_trailer = {

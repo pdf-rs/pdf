@@ -618,10 +618,8 @@ impl ImageXObject {
             _ => unreachable!()
         };
         if let Some(ref decode) = self.decode {
-            if &*decode == &[1.0, 0.0] {
-                if self.bits_per_component == Some(1) {
-                    data.iter_mut().for_each(|b| *b = !*b);
-                }
+            if &*decode == &[1.0, 0.0] && self.bits_per_component == Some(1) {
+                data.iter_mut().for_each(|b| *b = !*b);
             }
         }
         Ok(data.into())

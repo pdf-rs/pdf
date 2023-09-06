@@ -1,7 +1,6 @@
 use crate::error::*;
-use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater, RcRef};
+use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
 
-use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
@@ -261,7 +260,7 @@ impl PdfStream {
 
         writeln!(out, "stream")?;
         match self.inner {
-            StreamInner::InFile { id, ref file_range } => {
+            StreamInner::InFile { .. } => {
                 unimplemented!()
             }
             StreamInner::Pending { ref data } => {
@@ -780,7 +779,7 @@ impl Object for Date {
 }
 
 impl ObjectWrite for Date {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         let Date {
             year, month, day,
             hour, minute, second,

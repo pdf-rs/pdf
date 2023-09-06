@@ -571,7 +571,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         quote! { #name: #name, }
     });
 
-    let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks: Vec<_> = attrs.checks.iter().map(|(key, val)|
         quote! {
             dict.expect(#typ, #key, #val, true)?;
         }
@@ -615,7 +615,7 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
     }).collect();
 
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref attrs, ref opt)|
+    .map( |(field, attrs, _opt)|
         if attrs.skip | attrs.other {
             quote!()
         } else {
@@ -640,7 +640,7 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
             }
         }
     );
-    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks_code = attrs.checks.iter().map(|(key, val)|
         quote! {
             dict.insert(#key, pdf::primitive::Primitive::Name(#val.into()));
         }

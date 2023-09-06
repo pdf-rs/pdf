@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
-use datasize::{DataSize};
+use datasize::DataSize;
 
 pub type ObjNr = u64;
 pub type GenNr = u64;
