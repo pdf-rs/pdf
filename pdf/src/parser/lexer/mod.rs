@@ -426,7 +426,7 @@ impl<'a> Substr<'a> {
             }
             slice = &slice[i+1..];
         }
-        if let Some(len) = slice.iter().position(|&b| !matches!(b, b'0'..=b'9')) {
+        if let Some(len) = slice.iter().position(|&b| !b.is_ascii_digit()) {
             if len == 0 {
                 return None;
             }
@@ -465,7 +465,7 @@ impl<'a> Substr<'a> {
 
 #[inline]
 fn is_int(b: &[u8]) -> bool {
-    b.iter().all(|&b| matches!(b, b'0'..=b'9'))
+    b.iter().all(|&b| b.is_ascii_digit())
 }
 impl<'a> Deref for Substr<'a> {
     type Target = [u8];
@@ -491,17 +491,17 @@ mod tests {
 
     #[test]
     fn test_boundary_rev() {
-        assert_eq!(boundary_rev(&*b" hello", 3, not(is_whitespace)), 1);
-        assert_eq!(boundary_rev(&*b" hello", 3, is_whitespace), 3);
+        assert_eq!(boundary_rev(b" hello", 3, not(is_whitespace)), 1);
+        assert_eq!(boundary_rev(b" hello", 3, is_whitespace), 3);
     }
 
     #[test]
     fn test_boundary() {
-        assert_eq!(boundary(&*b" hello ", 3, not(is_whitespace)), 6);
-        assert_eq!(boundary(&*b" hello ", 3, is_whitespace), 3);
-        assert_eq!(boundary(&*b"01234  7orld", 5, is_whitespace), 7);
-        assert_eq!(boundary(&*b"01234  7orld", 7, is_whitespace), 7);
-        assert_eq!(boundary(&*b"q\n", 1, is_whitespace), 2);
+        assert_eq!(boundary(b" hello ", 3, not(is_whitespace)), 6);
+        assert_eq!(boundary(b" hello ", 3, is_whitespace), 3);
+        assert_eq!(boundary(b"01234  7orld", 5, is_whitespace), 7);
+        assert_eq!(boundary(b"01234  7orld", 7, is_whitespace), 7);
+        assert_eq!(boundary(b"q\n", 1, is_whitespace), 2);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use std::str;
-use pdf::file::{File, FileOptions};
+use pdf::file::FileOptions;
 use pdf::object::*;
 use pdf::parser::{parse, ParseFlags};
 use glob::glob;

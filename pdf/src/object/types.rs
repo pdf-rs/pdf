@@ -304,14 +304,14 @@ impl Page {
     pub fn media_box(&self) -> Result<Rect> {
         match self.media_box {
             Some(b) => Ok(b),
-            None => inherit(&*self.parent, |pt| pt.media_box)?
+            None => inherit(&self.parent, |pt| pt.media_box)?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
         }
     }
     pub fn crop_box(&self) -> Result<Rect> {
         match self.crop_box {
             Some(b) => Ok(b),
-            None => match inherit(&*self.parent, |pt| pt.crop_box)? {
+            None => match inherit(&self.parent, |pt| pt.crop_box)? {
                 Some(b) => Ok(b),
                 None => self.media_box()
             }
@@ -320,7 +320,7 @@ impl Page {
     pub fn resources(&self) -> Result<&MaybeRef<Resources>> {
         match self.resources {
             Some(ref r) => Ok(r),
-            None => inherit(&*self.parent, |pt| pt.resources.as_ref())?
+            None => inherit(&self.parent, |pt| pt.resources.as_ref())?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
@@ -618,7 +618,7 @@ impl ImageXObject {
             _ => unreachable!()
         };
         if let Some(ref decode) = self.decode {
-            if &*decode == &[1.0, 0.0] && self.bits_per_component == Some(1) {
+            if decode == &[1.0, 0.0] && self.bits_per_component == Some(1) {
                 data.iter_mut().for_each(|b| *b = !*b);
             }
         }

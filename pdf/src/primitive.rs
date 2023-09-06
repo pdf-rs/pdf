@@ -264,7 +264,7 @@ impl PdfStream {
                 unimplemented!()
             }
             StreamInner::Pending { ref data } => {
-                out.write_all(&data)?;
+                out.write_all(data)?;
             }
         }
         writeln!(out, "\nendstream")?;
@@ -488,7 +488,7 @@ impl Primitive {
     }
     pub fn as_u8(&self) -> Result<u8> {
         match *self {
-            Primitive::Integer(n) if n >= 0 && n < 256 => Ok(n as u8),
+            Primitive::Integer(n) if (0..256).contains(&n) => Ok(n as u8),
             Primitive::Integer(_) => bail!("invalid integer"),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
@@ -646,7 +646,7 @@ impl<'a> TryInto<Name> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<Name> {
         match self {
-            &Primitive::Name(ref s) => Ok(Name(s.clone())),
+            Primitive::Name(s) => Ok(Name(s.clone())),
             p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name",
                 found: p.get_debug_name()
@@ -677,7 +677,7 @@ impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<Cow<'a, str>> {
         match *self {
-            Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
+            Primitive::Name(ref s) => Ok(Cow::Borrowed(s)),
             Primitive::String(ref s) => Ok(Cow::Owned(s.to_string_lossy())),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",

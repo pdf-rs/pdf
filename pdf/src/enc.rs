@@ -256,7 +256,7 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
 }
 
 fn inflate_bytes_zlib(data: &[u8]) -> Result<Vec<u8>> {
-    use libflate::zlib::{Decoder};
+    use libflate::zlib::Decoder;
     let mut decoder = Decoder::new(data)?;
     let mut decoded = Vec::new();
     decoder.read_to_end(&mut decoded)?;
@@ -264,7 +264,7 @@ fn inflate_bytes_zlib(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn inflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
-    use libflate::deflate::{Decoder};
+    use libflate::deflate::Decoder;
     let mut decoder = Decoder::new(data);
     let mut decoded = Vec::new();
     decoder.read_to_end(&mut decoded)?;
@@ -332,7 +332,7 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     }
 }
 fn flate_encode(data: &[u8]) -> Vec<u8> {
-    use libflate::deflate::{Encoder};
+    use libflate::deflate::Encoder;
     let mut encoded = Vec::new();
     let mut encoder = Encoder::new(&mut encoded);
     encoder.write_all(data).unwrap();
@@ -418,7 +418,7 @@ pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
             let copy = 257 - length as usize; // copy 2 - 128 times
             let b = d[c + 1]; // copied byte
             buf.extend(std::iter::repeat(b).take(copy));
-            c = c + 2; // move cursor to next run
+            c += 2; // move cursor to next run
         } else {
             break; // EOD
         }

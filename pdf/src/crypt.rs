@@ -185,7 +185,7 @@ impl Decoder {
 
             // b)
             let mut hash = md5::Context::new();
-            hash.consume(&PADDING);
+            hash.consume(PADDING);
 
             // c)
             hash.consume(id);

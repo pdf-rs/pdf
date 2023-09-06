@@ -124,7 +124,7 @@ where
     OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log,
 {
-    pub fn new<'a>(fileoptions: FileOptions<'a, SC, OC, L>) -> Self {
+    pub fn new(fileoptions: FileOptions<'_, SC, OC, L>) -> Self {
         let storage = fileoptions.storage();
         PdfBuilder {
             storage,

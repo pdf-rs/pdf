@@ -1,17 +1,17 @@
 use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
+
 
 use pdf::error::PdfError;
 use pdf::content::*;
 use pdf::file::FileOptions;
-use pdf::file::Trailer;
-use pdf::font::Font;
-use pdf::font::FontData;
-use pdf::font::TFont;
+
+
+
+
 use pdf::object::*;
 use pdf::build::*;
-use pdf::primitive::Dictionary;
+
 use pdf::primitive::PdfString;
 
 fn main() -> Result<(), PdfError> {

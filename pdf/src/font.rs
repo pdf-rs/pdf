@@ -288,7 +288,7 @@ impl Font {
                 while let Some(p) = iter.next() {
                     let c1 = p.as_usize()?;
                     match iter.next() {
-                        Some(&Primitive::Array(ref array)) => {
+                        Some(Primitive::Array(array)) => {
                             widths.ensure_cid(c1 + array.len() - 1);
                             for (i, w) in array.iter().enumerate() {
                                 widths.set(c1 + i, w.as_number()?);
@@ -307,7 +307,7 @@ impl Font {
                         }
                         Some(&Primitive::Integer(c2)) => {
                             let w = try_opt!(iter.next()).as_number()?;
-                            for c in (c1 as usize) ..= (c2 as usize) {
+                            for c in c1 ..= (c2 as usize) {
                                 widths.set(c, w);
                             }
                         },

@@ -95,9 +95,9 @@ impl XRefTable {
         let mut max_b = 0;
         for &e in &self.entries {
             let (a, b) = match e {
-                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr as u64),
-                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr as u64),
-                XRef::Stream { stream_id, index } => (stream_id as u64, index as u64),
+                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr),
+                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr),
+                XRef::Stream { stream_id, index } => (stream_id, index as u64),
                 _ => continue
             };
             max_a = max_a.max(a);
@@ -133,9 +133,9 @@ impl XRefTable {
         let mut data = Vec::with_capacity((1 + a_w + b_w) * size);
         for &x in self.entries.iter().take(size) {
             let (t, a, b) = match x {
-                XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr as u64),
-                XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr as u64),
-                XRef::Stream { stream_id, index } => (2, stream_id as u64, index as u64),
+                XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr),
+                XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr),
+                XRef::Stream { stream_id, index } => (2, stream_id, index as u64),
                 x => bail!("invalid xref entry: {:?}", x)
             };
             data.push(t);

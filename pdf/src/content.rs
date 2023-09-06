@@ -31,7 +31,7 @@ impl Content {
 
 pub fn parse_ops(data: &[u8], resolve: &impl Resolve) -> Result<Vec<Op>> {
     let mut ops = OpBuilder::new();
-    ops.parse(&data, resolve)?;
+    ops.parse(data, resolve)?;
     Ok(ops.ops)
 }
 
