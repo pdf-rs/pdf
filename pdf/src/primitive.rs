@@ -487,6 +487,13 @@ impl Primitive {
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
+    pub fn as_u8(&self) -> Result<u8> {
+        match *self {
+            Primitive::Integer(n) if n >= 0 && n < 256 => Ok(n as u8),
+            Primitive::Integer(_) => bail!("invalid integer"),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name())
+        }
+    }
     pub fn as_u32(&self) -> Result<u32> {
         match *self {
             Primitive::Integer(n) if n >= 0 => Ok(n as u32),
