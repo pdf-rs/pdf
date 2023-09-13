@@ -12,7 +12,6 @@ use crate::error::*;
 use crate::primitive::StreamInner;
 use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
-use self::lexer::{HexStringLexer, StringLexer};
 use crate::crypt::Decoder;
 use bitflags::bitflags;
 use istring::{SmallBytes, SmallString, IBytes};
@@ -386,7 +385,7 @@ mod tests {
     fn compact_array() {
         use crate::object::NoResolve;
         use crate::primitive::{Primitive, PdfString};
-        use super::lexer::{Lexer};
+        use super::lexer::Lexer;
         use super::*;
         let mut lx = Lexer::new(b"[(Complete L)20(egend for Physical and P)20(olitical Maps)]TJ");
         assert_eq!(parse_with_lexer(&mut lx, &NoResolve, ParseFlags::ANY).unwrap(),

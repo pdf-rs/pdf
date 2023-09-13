@@ -150,10 +150,7 @@ pub struct Ref<T> {
 }
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Ref<T> {
-        Ref {
-            inner: self.inner,
-            _marker: PhantomData
-        }
+        *self
     }
 }
 impl<T> Copy for Ref<T> {}

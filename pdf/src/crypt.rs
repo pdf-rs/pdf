@@ -298,7 +298,7 @@ impl Decoder {
         let (key_bits, method) = match dict.v {
             1 => (40, CryptMethod::V2),
             2 => (dict.bits, CryptMethod::V2),
-            4 | 5 | 6 => {
+            4 ..= 6 => {
                 let default = dict
                     .crypt_filters
                     .get(try_opt!(dict.default_crypt_filter.as_ref()).as_str())

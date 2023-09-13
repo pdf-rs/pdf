@@ -200,18 +200,19 @@ where
                         lexer.set_pos(pos);
                         if let Ok(s) = lexer.next() {
                             debug!("next: {:?}", String::from_utf8_lossy(s.as_slice()));
-                            if s == "xref" {
-                                if let Err(e) = skip_xref(&mut lexer) {
-                                    return Some(Err(e));
+                            match &*s {
+                                b"xref" => {
+                                    if let Err(e) = skip_xref(&mut lexer) {
+                                        return Some(Err(e));
+                                    }
+                                    if let Ok(trailer) = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::DICT).and_then(|p| p.into_dictionary()) {
+                                        return Some(Ok(ScanItem::Trailer(trailer)));
+                                    }
                                 }
-                                if let Ok(trailer) = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::DICT).and_then(|p| p.into_dictionary()) {
-                                    return Some(Ok(ScanItem::Trailer(trailer)));
-                                }
-                            }
-                            else if s == "startxref" {
-                                if let Ok(_) = lexer.next() {
+                                b"startxref" if lexer.next().is_ok() => {
                                     continue;
                                 }
+                                _ => {}
                             }
                         }
                         return Some(Err(e));

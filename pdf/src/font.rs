@@ -480,16 +480,14 @@ pub enum FontStretch {
     UltraExpanded
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ToUnicodeMap {
     // todo: reduce allocations
     inner: HashMap<u16, SmallString>
 }
 impl ToUnicodeMap {
     pub fn new() -> Self {
-        ToUnicodeMap {
-            inner: HashMap::new()
-        }
+        Self::default()
     }
     /// Create a new ToUnicodeMap from key/value pairs.
     ///
@@ -508,6 +506,9 @@ impl ToUnicodeMap {
     }
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 }
 
@@ -545,7 +546,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
         match substr.as_slice() {
             b"beginbfchar" => loop {
                 let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
-                if let Err(_) = a {
+                if a.is_err() {
                     break;
                 }
                 let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
@@ -563,7 +564,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
             },
             b"beginbfrange" => loop {
                 let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
-                if let Err(_) = a {
+                if a.is_err() {
                     break;
                 }
                 let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);

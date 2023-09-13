@@ -176,7 +176,7 @@ impl FieldAttrs {
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("skip") => attrs.skip = true,
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("other") => attrs.other = true,
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("indirect") => attrs.indirect = true,
-                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code", skip, other, indirect`."##)
+                    _ => panic!(r#"Derive error - Supported derive attributes: `key="Key"`, `default="some code", skip, other, indirect`."#)
                 }
             }
         }
