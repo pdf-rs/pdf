@@ -132,7 +132,8 @@ struct FieldAttrs {
     default: Option<LitStr>,
     name: Option<LitStr>,
     skip: bool,
-    other: bool
+    other: bool,
+    indirect: bool,
 }
 impl FieldAttrs {
     fn new() -> FieldAttrs {
@@ -141,7 +142,8 @@ impl FieldAttrs {
             default: None,
             name: None,
             skip: false,
-            other: false
+            other: false,
+            indirect: false,
         }
     }
     fn key(&self) -> &LitStr {
@@ -173,7 +175,8 @@ impl FieldAttrs {
                     },
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("skip") => attrs.skip = true,
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("other") => attrs.other = true,
-                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
+                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("indirect") => attrs.indirect = true,
+                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code", skip, other, indirect`."##)
                 }
             }
         }
@@ -185,7 +188,7 @@ impl FieldAttrs {
 
 
 /// Just the attributes for the whole struct
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct GlobalAttrs {
     /// List of checks to do in the dictionary (LHS is the key, RHS is the expected value)
     checks: Vec<(String, String)>,
@@ -568,7 +571,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         quote! { #name: #name, }
     });
 
-    let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks: Vec<_> = attrs.checks.iter().map(|(key, val)|
         quote! {
             dict.expect(#typ, #key, #val, true)?;
         }
@@ -612,25 +615,32 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
     }).collect();
 
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref attrs, ref opt)|
+    .map( |(field, attrs, _opt)|
         if attrs.skip | attrs.other {
             quote!()
         } else {
             let key = attrs.key();
-            if opt.is_some() {
+            let tr = if attrs.indirect {
                 quote! {
-                    if let Some(ref val) = self.#field {
-                        dict.insert(#key, pdf::object::ObjectWrite::to_primitive(val, updater)?);
+                    match val {
+                       pdf::primitive::Primitive::Reference(r) => val,
+                       p => updater.create(p)?.into(),
                     }
                 }
             } else {
-                quote! {
-                    dict.insert(#key, pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?);
+                quote! { val }
+            };
+
+            quote! {
+                let val = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
+                if !matches!(val, pdf::primitive::Primitive::Null) {
+                    let val2 = #tr;
+                    dict.insert(#key, val2);
                 }
             }
         }
     );
-    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks_code = attrs.checks.iter().map(|(key, val)|
         quote! {
             dict.insert(#key, pdf::primitive::Primitive::Name(#val.into()));
         }

@@ -103,8 +103,11 @@ impl ObjectWrite for PagesRc {
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
+#[pdf(Type = "Catalog?")]
 pub struct Catalog {
-// Version: Name,
+    #[pdf(key="Version")]
+    pub version: Option<Name>,
+
     #[pdf(key="Pages")]
     pub pages: PagesRc,
 
@@ -135,6 +138,7 @@ pub struct Catalog {
 
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
+
 // MarkInfo: dict
 // Lang: text string
 // SpiderInfo: dict
@@ -243,7 +247,7 @@ pub struct Page {
     #[pdf(key="Parent")]
     pub parent: PagesRc,
 
-    #[pdf(key="Resources")]
+    #[pdf(key="Resources", indirect)]
     pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
@@ -300,14 +304,14 @@ impl Page {
     pub fn media_box(&self) -> Result<Rect> {
         match self.media_box {
             Some(b) => Ok(b),
-            None => inherit(&*self.parent, |pt| pt.media_box)?
+            None => inherit(&self.parent, |pt| pt.media_box)?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
         }
     }
     pub fn crop_box(&self) -> Result<Rect> {
         match self.crop_box {
             Some(b) => Ok(b),
-            None => match inherit(&*self.parent, |pt| pt.crop_box)? {
+            None => match inherit(&self.parent, |pt| pt.crop_box)? {
                 Some(b) => Ok(b),
                 None => self.media_box()
             }
@@ -316,7 +320,7 @@ impl Page {
     pub fn resources(&self) -> Result<&MaybeRef<Resources>> {
         match self.resources {
             Some(ref r) => Ok(r),
-            None => inherit(&*self.parent, |pt| pt.resources.as_ref())?
+            None => inherit(&self.parent, |pt| pt.resources.as_ref())?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
@@ -335,7 +339,7 @@ pub struct PageLabel {
     pub start:  Option<usize>
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<Name, GraphicsStateParameters>,
@@ -549,6 +553,7 @@ pub enum ImageFormat {
 
 impl ImageXObject {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
+        dbg!(&s.info);
         let inner = Stream::from_stream(s, resolve)?;
         Ok(ImageXObject { inner })
     }
@@ -556,7 +561,7 @@ impl ImageXObject {
     /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
     pub fn raw_image_data(&self, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Option<&StreamFilter>)> {
         match self.inner.inner_data {
-            StreamData::Generated(_, _) => Ok((self.inner.data(resolve)?, None)),
+            StreamData::Generated(_) => Ok((self.inner.data(resolve)?, None)),
             StreamData::Original(ref file_range, id) => {
                 let filters = self.inner.filters.as_slice();
                 // decode all non image filters
@@ -579,7 +584,7 @@ impl ImageXObject {
                     [StreamFilter::DCTDecode(_)] |
                     [StreamFilter::CCITTFaxDecode(_)] |
                     [StreamFilter::JPXDecode] |
-                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&image_filters[0]))),
+                    [StreamFilter::JBIG2Decode(_)] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters)
                 }
             }
@@ -592,7 +597,7 @@ impl ImageXObject {
             Some(f) => f,
             None => return Ok(data)
         };
-        let data = match filter {
+        let mut data = match filter {
             StreamFilter::CCITTFaxDecode(ref params) => {
                 if self.inner.info.width != params.columns {
                     bail!("image width mismatch {} != {}", self.inner.info.width, params.columns);
@@ -606,9 +611,17 @@ impl ImageXObject {
             }
             StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
             StreamFilter::JPXDecode => jpx_decode(&data)?,
-            StreamFilter::JBIG2Decode => jbig2_decode(&data)?,
+            StreamFilter::JBIG2Decode(ref p) => {
+                let global_data = p.globals.as_ref().map(|s| s.data(resolve)).transpose()?;
+                jbig2_decode(&data, global_data.as_deref().unwrap_or_default())?
+            },
             _ => unreachable!()
         };
+        if let Some(ref decode) = self.decode {
+            if decode == &[1.0, 0.0] && self.bits_per_component == Some(1) {
+                data.iter_mut().for_each(|b| *b = !*b);
+            }
+        }
         Ok(data.into())
     }
 }
@@ -754,6 +767,7 @@ pub struct FormDict {
     pub other: Dictionary,
 }
 
+
 #[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct InteractiveFormDictionary {
     #[pdf(key="Fields")]
@@ -791,6 +805,79 @@ pub enum FieldType {
     Choice,
     #[pdf(name="Sig")]
     Signature,
+    #[pdf(name="SigRef")]
+    SignatureReference,
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="SV")]
+pub struct SeedValueDictionary {
+    #[pdf(key="Ff", default="0")]
+    pub flags: u32,
+    #[pdf(key="Filter")]
+    pub filter: Option<Name>,
+    #[pdf(key="SubFilter")]
+    pub sub_filter:  Option<Vec<Name>>,
+    #[pdf(key="V")]
+    pub value: Option<Primitive>,
+    #[pdf(key="DigestMethod")]
+    pub digest_method: Vec<PdfString>,
+    #[pdf(other)]
+    pub other: Dictionary
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="Sig?")]
+pub struct SignatureDictionary {
+    #[pdf(key="Filter")]
+    pub filter: Name,
+    #[pdf(key="SubFilter")]
+    pub sub_filter: Name,
+    #[pdf(key="ByteRange")]
+    pub byte_range: Vec<usize>,
+    #[pdf(key="Contents")]
+    pub contents: PdfString,
+    #[pdf(key="Cert")]
+    pub cert: Vec<PdfString>,
+    #[pdf(key="Reference")]
+    pub reference: Option<Primitive>,
+    #[pdf(key="Name")]
+    pub name: Option<PdfString>,
+    #[pdf(key="M")]
+    pub m: Option<PdfString>,
+    #[pdf(key="Location")]
+    pub location: Option<PdfString>,
+    #[pdf(key="Reason")]
+    pub reason: Option<PdfString>,
+    #[pdf(key="ContactInfo")]
+    pub contact_info: Option<PdfString>,
+    #[pdf(key="V")]
+    pub v: i32,
+    #[pdf(key="R")]
+    pub r: i32,
+    #[pdf(key="Prop_Build")]
+    pub prop_build: Dictionary,
+    #[pdf(key="Prop_AuthTime")]
+    pub prop_auth_time: i32,
+    #[pdf(key="Prop_AuthType")]
+    pub prop_auth_type: Name,
+    #[pdf(other)]
+    pub other: Dictionary
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="SigRef?")]
+pub struct SignatureReferenceDictionary {
+    #[pdf(key="TransformMethod")]
+    pub transform_method: Name,
+    #[pdf(key="TransformParams")]
+    pub transform_params: Option<Dictionary>,
+    #[pdf(key="Data")]
+    pub data: Option<Primitive>,
+    #[pdf(key="DigestMethod")]
+    pub digest_method: Option<Name>,
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
@@ -815,6 +902,9 @@ pub struct FieldDictionary {
     
     #[pdf(key="Ff", default="0")]
     pub flags: u32,
+
+    #[pdf(key="SigFlags", default="0")]
+    pub sig_flags: u32,
 
     #[pdf(key="V")]
     pub value: Primitive,
@@ -1405,6 +1495,43 @@ pub enum StructType {
     Form,
     #[pdf(other)]
     Other(String),
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize)]
+pub enum Trapped {
+    True,
+    False,
+    Unknown,
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
+pub struct InfoDict {
+    #[pdf(key="Title")]
+    pub title: Option<PdfString>,
+
+    #[pdf(key="Author")]
+    pub author: Option<PdfString>,
+
+    #[pdf(key="Subject")]
+    pub subject: Option<PdfString>,
+
+    #[pdf(key="Keywords")]
+    pub keywords: Option<PdfString>,
+
+    #[pdf(key="Creator")]
+    pub creator: Option<PdfString>,
+
+    #[pdf(key="Author")]
+    pub producer: Option<PdfString>,
+
+    #[pdf(key="CreationDate")]
+    pub creation_date: Option<Date>,
+
+    #[pdf(key="ModDate")]
+    pub mod_date: Option<Date>,
+
+    #[pdf(key="Trapped")]
+    pub trapped: Option<Trapped>,
 }
 
 #[cfg(test)]

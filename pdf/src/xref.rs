@@ -57,6 +57,7 @@ impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
         let mut entries = Vec::new();
         entries.resize(num_objects as usize, XRef::Invalid);
+        entries.push(XRef::Free { next_obj_nr: 0, gen_nr: 0xffff });
         XRefTable {
             entries,
         }
@@ -94,9 +95,9 @@ impl XRefTable {
         let mut max_b = 0;
         for &e in &self.entries {
             let (a, b) = match e {
-                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr as u64),
-                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr as u64),
-                XRef::Stream { stream_id, index } => (stream_id as u64, index as u64),
+                XRef::Raw { pos, gen_nr } => (pos as u64, gen_nr),
+                XRef::Free { next_obj_nr, gen_nr } => (next_obj_nr, gen_nr),
+                XRef::Stream { stream_id, index } => (stream_id, index as u64),
                 _ => continue
             };
             max_a = max_a.max(a);
@@ -105,7 +106,7 @@ impl XRefTable {
         (max_a, max_b)
     }
 
-    pub fn add_entries_from(&mut self, section: XRefSection) {
+    pub fn add_entries_from(&mut self, section: XRefSection) -> Result<()> {
         for (i, &entry) in section.entries() {
             if let Some(dst) = self.entries.get_mut(i) {
                 // Early return if the entry we have has larger or equal generation number
@@ -114,13 +115,14 @@ impl XRefTable {
                         => entry.get_gen_nr() > gen,
                     XRef::Stream { .. } | XRef::Invalid
                         => true,
-                    x => panic!("found {:?}", x)
+                    x => bail!("found {:?}", x)
                 };
                 if should_be_updated {
                     *dst = entry;
                 }
             }
         }
+        Ok(())
     }
 
     pub fn write_stream(&self, size: usize) -> Result<Stream<XRefInfo>> {
@@ -131,23 +133,23 @@ impl XRefTable {
         let mut data = Vec::with_capacity((1 + a_w + b_w) * size);
         for &x in self.entries.iter().take(size) {
             let (t, a, b) = match x {
-                XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr as u64),
-                XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr as u64),
-                XRef::Stream { stream_id, index } => (2, stream_id as u64, index as u64),
-                x => panic!("invalid xref entry: {:?}", x)
+                XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr),
+                XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr),
+                XRef::Stream { stream_id, index } => (2, stream_id, index as u64),
+                x => bail!("invalid xref entry: {:?}", x)
             };
             data.push(t);
             data.extend_from_slice(&a.to_be_bytes()[8 - a_w ..]);
             data.extend_from_slice(&b.to_be_bytes()[8 - b_w ..]);
         }
-        let _info = XRefInfo {
+        let info = XRefInfo {
             size: size as u32,
             index: vec![0, size as u32],
             prev: None,
             w: vec![1, a_w, b_w],
         };
-        unimplemented!()
-        //Ok(Stream::new(info, data).hexencode())
+        
+        Ok(Stream::new(info, data))
     }
 }
 

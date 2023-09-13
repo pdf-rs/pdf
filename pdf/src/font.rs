@@ -4,11 +4,13 @@ use crate::primitive::*;
 use crate::error::*;
 use crate::encoding::Encoding;
 use std::collections::HashMap;
+use std::fmt::Write;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use std::convert::TryInto;
 use std::sync::Arc;
 use istring::SmallString;
 use datasize::DataSize;
+use itertools::Itertools;
 
 #[allow(non_upper_case_globals, dead_code)]
 mod flags {
@@ -23,7 +25,7 @@ mod flags {
     pub const ForceBold: u32     = 1 << 18;
 }
 
-#[derive(Object, Debug, Copy, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Copy, Clone, DataSize)]
 pub enum FontType {
     Type0,
     Type1,
@@ -40,9 +42,10 @@ pub struct Font {
     pub name: Option<Name>,
     pub data: FontData,
 
-    encoding: Option<Encoding>,
+    pub encoding: Option<Encoding>,
 
-    to_unicode: Option<Stream<()>>,
+    // FIXME: Should use RcRef<Stream>
+    pub to_unicode: Option<RcRef<Stream<()>>>,
 
     /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
     pub _other: Dictionary
@@ -56,7 +59,6 @@ pub enum FontData {
     CIDFontType0(CIDFont),
     CIDFontType2(CIDFont),
     Other(Dictionary),
-    None,
 }
 
 #[derive(Debug, DataSize)]
@@ -82,6 +84,18 @@ impl Object for CidToGidMap {
         }
     }
 }
+impl ObjectWrite for CidToGidMap {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            CidToGidMap::Identity => Ok(Name::from("Identity").into()),
+            CidToGidMap::Table(ref table) => {
+                let mut data = Vec::with_capacity(table.len() * 2);
+                data.extend(table.iter().flat_map(|&v| <[u8; 2]>::into_iter(v.to_be_bytes())));
+                Stream::new((), data).to_primitive(update)
+            }
+        }
+    }
+}
 
 impl Object for Font {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -104,7 +118,7 @@ impl Object for Font {
         let encoding = dict.remove("Encoding").map(|p| Object::from_primitive(p, resolve)).transpose()?;
 
         let to_unicode = match dict.remove("ToUnicode") {
-            Some(p) => Some(Stream::<()>::from_primitive(p, resolve)?),
+            Some(p) => Some(Object::from_primitive(p, resolve)?),
             None => None
         };
         let _other = dict.clone();
@@ -128,8 +142,36 @@ impl Object for Font {
     }
 }
 impl ObjectWrite for Font {
-    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
-        unimplemented!()
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let mut dict = match self.data {
+            FontData::CIDFontType0(ref d) | FontData::CIDFontType2(ref d) => d.to_dict(update)?,
+            FontData::TrueType(ref d) | FontData::Type1(ref d) => d.to_dict(update)?,
+            FontData::Type0(ref d) => d.to_dict(update)?,
+            FontData::Other(ref dict) => dict.clone(),
+        };
+        
+        if let Some(ref to_unicode) = self.to_unicode {
+            dict.insert("ToUnicode", to_unicode.to_primitive(update)?);
+        }
+        if let Some(ref encoding) = self.encoding {
+            dict.insert("Encoding", encoding.to_primitive(update)?);
+        }
+        if let Some(ref name) = self.name {
+            dict.insert("BaseFont", name.to_primitive(update)?);
+        }
+
+        let subtype = match self.data {
+            FontData::Type0(_) => FontType::Type0,
+            FontData::Type1(_) => FontType::Type1,
+            FontData::TrueType(_) => FontType::TrueType,
+            FontData::CIDFontType0(_) => FontType::CIDFontType0,
+            FontData::CIDFontType2(_) => FontType::CIDFontType2,
+            FontData::Other(_) => bail!("unimplemented")
+        };
+        dict.insert("Subtype", subtype.to_primitive(update)?);
+        dict.insert("Type", Name::from("Font"));
+
+        Ok(Primitive::Dictionary(dict))
     }
 }
 
@@ -246,7 +288,7 @@ impl Font {
                 while let Some(p) = iter.next() {
                     let c1 = p.as_usize()?;
                     match iter.next() {
-                        Some(&Primitive::Array(ref array)) => {
+                        Some(Primitive::Array(array)) => {
                             widths.ensure_cid(c1 + array.len() - 1);
                             for (i, w) in array.iter().enumerate() {
                                 widths.set(c1 + i, w.as_number()?);
@@ -265,7 +307,7 @@ impl Font {
                         }
                         Some(&Primitive::Integer(c2)) => {
                             let w = try_opt!(iter.next()).as_number()?;
-                            for c in (c1 as usize) ..= (c2 as usize) {
+                            for c in c1 ..= (c2 as usize) {
                                 widths.set(c, w);
                             }
                         },
@@ -278,10 +320,10 @@ impl Font {
         }
     }
     pub fn to_unicode(&self, resolve: &impl Resolve) -> Option<Result<ToUnicodeMap>> {
-        self.to_unicode.as_ref().map(|s| s.data(resolve).and_then(|d| parse_cmap(&d)))
+        self.to_unicode.as_ref().map(|s| (**s).data(resolve).and_then(|d| parse_cmap(&d)))
     }
 }
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct TFont {
     #[pdf(key="BaseFont")]
     pub base_font: Option<Name>,
@@ -301,25 +343,25 @@ pub struct TFont {
     pub font_descriptor: Option<FontDescriptor>
 }
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
-    descendant_fonts: Vec<MaybeRef<Font>>,
+    pub descendant_fonts: Vec<MaybeRef<Font>>,
 
     #[pdf(key="ToUnicode")]
-    to_unicode: Option<Stream<()>>,
+    pub to_unicode: Option<RcRef<Stream<()>>>,
 }
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct CIDFont {
     #[pdf(key="CIDSystemInfo")]
-    system_info: Dictionary,
+    pub system_info: Dictionary,
 
     #[pdf(key="FontDescriptor")]
-    font_descriptor: FontDescriptor,
+    pub font_descriptor: FontDescriptor,
 
     #[pdf(key="DW", default="1000.")]
-    default_width: f32,
+    pub default_width: f32,
 
     #[pdf(key="W")]
     pub widths: Vec<Primitive>,
@@ -328,11 +370,11 @@ pub struct CIDFont {
     pub cid_to_gid_map: Option<CidToGidMap>,
 
     #[pdf(other)]
-    _other: Dictionary
+    pub _other: Dictionary
 }
 
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
     pub font_name: Name,
@@ -387,13 +429,13 @@ pub struct FontDescriptor {
     pub missing_width: f32,
 
     #[pdf(key="FontFile")]
-    pub font_file: Option<Stream<()>>,
+    pub font_file: Option<RcRef<Stream<()>>>,
 
     #[pdf(key="FontFile2")]
-    pub font_file2: Option<Stream<()>>,
+    pub font_file2: Option<RcRef<Stream<()>>>,
 
     #[pdf(key="FontFile3")]
-    pub font_file3: Option<Stream<FontStream3>>,
+    pub font_file3: Option<RcRef<Stream<FontStream3>>>,
 
     #[pdf(key="CharSet")]
     pub char_set: Option<PdfString>
@@ -401,31 +443,31 @@ pub struct FontDescriptor {
 impl FontDescriptor {
     pub fn data(&self, resolve: &impl Resolve) -> Option<Result<Arc<[u8]>>> {
         if let Some(ref s) = self.font_file {
-            Some(s.data(resolve))
+            Some((**s).data(resolve))
         } else if let Some(ref s) = self.font_file2 {
-            Some(s.data(resolve))
+            Some((**s).data(resolve))
         } else if let Some(ref s) = self.font_file3 {
-            Some(s.data(resolve))
+            Some((**s).data(resolve))
         } else {
             None
         }
     }
 }
 
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 #[pdf(key="Subtype")]
 pub enum FontTypeExt {
     Type1C,
     CIDFontType0C,
     OpenType
 }
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct FontStream3 {
     #[pdf(key="Subtype")]
     pub subtype: FontTypeExt
 }
 
-#[derive(Object, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, DataSize)]
 pub enum FontStretch {
     UltraCondensed,
     ExtraCondensed,
@@ -576,16 +618,89 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
     Ok(map)
 }
 
+fn write_cid(w: &mut String, cid: u16) {
+    write!(w, "<{:04X}>", cid).unwrap();
+}
+fn write_unicode(out: &mut String, unicode: &str) {
+    let mut buf = [0; 2];
+    write!(out, "<").unwrap();
+    for c in unicode.chars() {
+        let slice = c.encode_utf16(&mut buf);
+        for &word in slice.iter() {
+            write!(out, "{:04X}", word).unwrap();
+        }
+    }
+    write!(out, ">").unwrap();
+}
+pub fn write_cmap(map: &ToUnicodeMap) -> String {
+    let mut buf = String::new();
+    let mut list: Vec<(u16, &str)> = map.inner.iter().map(|(&cid, s)| (cid, s.as_str())).collect();
+    list.sort();
+
+
+    let mut remaining = &list[..];
+    let blocks = std::iter::from_fn(move || {
+        if remaining.len() == 0 {
+            return None;
+        }
+        let first_cid = remaining[0].0;
+        let seq_len = remaining.iter().enumerate().take_while(|&(i, &(cid, _))| cid == first_cid + i as u16).count();
+        
+        let (block, tail) = remaining.split_at(seq_len);
+        remaining = tail;
+        Some(block)
+    });
+
+    for (single, group) in &blocks.group_by(|b| b.len() == 1) {
+        if single {
+            writeln!(buf, "beginbfchar").unwrap();
+            for block in group {
+                for &(cid, uni) in block {
+                    write_cid(&mut buf, cid);
+                    write!(buf, " ").unwrap();
+                    write_unicode(&mut buf, uni);
+                    writeln!(buf).unwrap();
+                }
+            }
+            writeln!(buf, "endbfchar").unwrap();
+        } else {
+            writeln!(buf, "beginbfrange").unwrap();
+            for block in group {
+                write_cid(&mut buf, block[0].0);
+                write!(buf, " ").unwrap();
+                write_cid(&mut buf, block.last().unwrap().0);
+                write!(buf, " [").unwrap();
+                for (i, &(_cid, u)) in block.iter().enumerate() {
+                    if i > 0 {
+                        write!(buf, ", ").unwrap();
+                    }
+                    write_unicode(&mut buf, u);
+                }
+                writeln!(buf, "]").unwrap();
+            }    
+            writeln!(buf, "endbfrange").unwrap();
+        }
+    }
+
+    buf
+}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::font::{utf16be_to_string, utf16be_to_char, utf16be_to_string_lossy};
+    use crate::font::{utf16be_to_string, utf16be_to_char, utf16be_to_string_lossy, write_unicode};
     #[test]
     fn utf16be_to_string_quick() {
         let v = vec![0x20, 0x09];
         let s = utf16be_to_string(&v);
         assert_eq!(s.unwrap(), "\u{2009}");
         assert!(!v.is_empty());
+    }
+
+    fn string_to_utf16be() {
+        let mut buf = String::new();
+        write_unicode(&mut buf, "\u{2009}");
+        assert_eq!(buf, "<2009>");
     }
 
     #[test]

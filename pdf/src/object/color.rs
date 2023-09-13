@@ -27,7 +27,7 @@ pub enum ColorSpace {
     CalGray(Dictionary),
     CalRGB(Dictionary),
     CalCMYK(Dictionary),
-    Indexed(Box<ColorSpace>, Arc<[u8]>),
+    Indexed(Box<ColorSpace>, u8, Arc<[u8]>),
     Separation(Name, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
     Pattern,
@@ -51,7 +51,7 @@ impl DataSize for ColorSpace {
             ColorSpace::CalGray(ref d) | ColorSpace::CalRGB(ref d) | ColorSpace::CalCMYK(ref d) => {
                 d.estimate_heap_size()
             }
-            ColorSpace::Indexed(ref cs, ref data) => {
+            ColorSpace::Indexed(ref cs, _, ref data) => {
                 cs.estimate_heap_size() + data.estimate_heap_size()
             }
             ColorSpace::Separation(ref name, ref cs, ref f) => {
@@ -96,6 +96,7 @@ impl ColorSpace {
         match typ {
             "Indexed" => {
                 let base = Box::new(t!(ColorSpace::from_primitive_depth(t!(get_index(&arr, 1)).clone(), resolve, depth-1)));
+                let hival = t!(t!(get_index(&arr, 2)).as_u8());
                 let lookup = match t!(get_index(&arr, 3)) {
                     &Primitive::Reference(r) => resolve.resolve(r)?,
                     p => p.clone()
@@ -114,7 +115,7 @@ impl ColorSpace {
                         found: p.get_debug_name()
                     })
                 };
-                Ok(ColorSpace::Indexed(base, lookup))
+                Ok(ColorSpace::Indexed(base, hival, lookup))
             }
             "Separation" => {
                 let name = t!(t!(get_index(&arr, 1)).clone().into_name());

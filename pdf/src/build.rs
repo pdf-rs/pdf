@@ -1,3 +1,12 @@
+use std::sync::Arc;
+
+use crate::PdfError;
+use crate::any::AnySync;
+use crate::file::Cache;
+use crate::file::FileOptions;
+use crate::file::Log;
+use crate::file::Storage;
+use crate::file::Trailer;
 use crate::object::*;
 use crate::content::*;
 use crate::error::Result;
@@ -91,6 +100,7 @@ impl CatalogBuilder {
         }
 
         Ok(Catalog {
+            version: Some("1.7".into()),
             pages: tree,
             names: None,
             dests: None,
@@ -99,5 +109,49 @@ impl CatalogBuilder {
             struct_tree_root: None,
             forms: None,
         })
+    }
+}
+
+pub struct PdfBuilder<SC, OC, L> {
+    pub storage: Storage<Vec<u8>, SC, OC, L>,
+    pub info: Option<InfoDict>,
+    pub id: Option<[String; 2]>,
+
+}
+impl<SC, OC, L> PdfBuilder<SC, OC, L>
+where
+    SC: Cache<Result<AnySync, Arc<PdfError>>>,
+    OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+    L: Log,
+{
+    pub fn new(fileoptions: FileOptions<'_, SC, OC, L>) -> Self {
+        let storage = fileoptions.storage();
+        PdfBuilder {
+            storage,
+            info: None,
+            id: None
+        }
+    }
+    pub fn info(mut self, info: InfoDict) -> Self {
+        self.info = Some(info);
+        self
+    }
+    pub fn id(mut self, a: String, b: String) -> Self {
+        self.id = Some([a, b]);
+        self
+    }
+    pub fn build(mut self, catalog: CatalogBuilder) -> Result<Vec<u8>> {
+        let catalog = catalog.build(&mut self.storage)?;
+        
+        let mut trailer = Trailer {
+            root: self.storage.create(catalog)?,
+            encrypt_dict: None,
+            size: 0,
+            id: vec!["foo".into(), "bar".into()],
+            info_dict: self.info,
+            prev_trailer_pos: None,
+        };
+        self.storage.save(&mut trailer)?;
+        Ok(self.storage.into_inner())
     }
 }

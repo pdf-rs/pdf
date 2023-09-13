@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
-use datasize::{DataSize};
+use datasize::DataSize;
 
 pub type ObjNr = u64;
 pub type GenNr = u64;
@@ -162,13 +162,13 @@ impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
         Ref {
             inner,
-            _marker:    PhantomData::default(),
+            _marker:    PhantomData,
         }
     }
     pub fn from_id(id: ObjNr) -> Ref<T> {
         Ref {
             inner:      PlainRef {id, gen: 0},
-            _marker:    PhantomData::default(),
+            _marker:    PhantomData,
         }
     }
     pub fn get_inner(&self) -> PlainRef {
@@ -218,6 +218,11 @@ pub struct RcRef<T> {
     inner: PlainRef,
     data: Shared<T>
 }
+impl<T> From<RcRef<T>> for Primitive {
+    fn from(value: RcRef<T>) -> Self {
+        Primitive::Reference(value.inner)
+    }
+}
 
 impl<T> RcRef<T> {
     pub fn new(inner: PlainRef, data: Shared<T>) -> RcRef<T> {
@@ -246,7 +251,7 @@ impl<T> ObjectWrite for RcRef<T> {
 impl<T> Deref for RcRef<T> {
     type Target = T;
     fn deref(&self) -> &T {
-        &*self.data
+        &self.data
     }
 }
 impl<T> Clone for RcRef<T> {
@@ -319,7 +324,7 @@ impl<T> Deref for MaybeRef<T> {
     fn deref(&self) -> &T {
         match *self {
             MaybeRef::Direct(ref t) => t,
-            MaybeRef::Indirect(ref r) => &**r
+            MaybeRef::Indirect(ref r) => r
         }
     }
 }
