@@ -7,7 +7,6 @@ fn harness(data: &[u8]) {
             let _ = file.get_page(idx);
         }
     }
-    Ok(())
 }
 
 fuzz_target!(|data: &[u8]| {
