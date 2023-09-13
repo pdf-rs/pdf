@@ -208,10 +208,8 @@ where
                                     return Some(Ok(ScanItem::Trailer(trailer)));
                                 }
                             }
-                            else if s == "startxref" {
-                                if let Ok(_) = lexer.next() {
-                                    continue;
-                                }
+                            else if s == "startxref" && lexer.next().is_ok() {
+                                continue;
                             }
                         }
                         return Some(Err(e));

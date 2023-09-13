@@ -509,6 +509,15 @@ impl ToUnicodeMap {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+impl Default for ToUnicodeMap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// helper function to decode UTF-16-BE data
@@ -545,7 +554,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
         match substr.as_slice() {
             b"beginbfchar" => loop {
                 let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
-                if let Err(_) = a {
+                if a.is_err() {
                     break;
                 }
                 let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
@@ -563,7 +572,7 @@ fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
             },
             b"beginbfrange" => loop {
                 let a = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
-                if let Err(_) = a {
+                if a.is_err() {
                     break;
                 }
                 let b = parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::STRING);
