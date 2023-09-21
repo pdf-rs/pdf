@@ -23,6 +23,7 @@ pub struct PageBuilder {
     pub metadata: Option<Primitive>,
     pub lgi: Option<Primitive>,
     pub vp: Option<Primitive>,
+    pub other: Dictionary,
 }
 impl PageBuilder {
     pub fn from_content(content: Content) -> PageBuilder {
@@ -42,6 +43,7 @@ impl PageBuilder {
             metadata: page.metadata.clone(),
             lgi: page.lgi.clone(),
             vp: page.vp.clone(),
+            other: page.other.clone(),
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
@@ -95,6 +97,7 @@ impl CatalogBuilder {
                 metadata: page.metadata,
                 lgi: page.lgi,
                 vp: page.vp,
+                other: page.other,
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }

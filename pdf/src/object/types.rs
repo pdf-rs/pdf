@@ -273,6 +273,9 @@ pub struct Page {
 
     #[pdf(key="VP")]
     pub vp:         Option<Primitive>,
+
+    #[pdf(other)]
+    pub other: Dictionary,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -299,6 +302,7 @@ impl Page {
             metadata:   None,
             lgi:        None,
             vp:         None,
+            other: Dictionary::new(),
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
