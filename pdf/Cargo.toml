@@ -60,3 +60,6 @@ name = "names"
 
 [[example]]
 name = "read"
+
+[[example]]
+name = "other_page_content"
