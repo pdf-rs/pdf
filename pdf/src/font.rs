@@ -689,19 +689,13 @@ pub fn write_cmap(map: &ToUnicodeMap) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::font::{utf16be_to_string, utf16be_to_char, utf16be_to_string_lossy, write_unicode};
+    use crate::font::{utf16be_to_string, utf16be_to_char, utf16be_to_string_lossy};
     #[test]
     fn utf16be_to_string_quick() {
         let v = vec![0x20, 0x09];
         let s = utf16be_to_string(&v);
         assert_eq!(s.unwrap(), "\u{2009}");
         assert!(!v.is_empty());
-    }
-
-    fn string_to_utf16be() {
-        let mut buf = String::new();
-        write_unicode(&mut buf, "\u{2009}");
-        assert_eq!(buf, "<2009>");
     }
 
     #[test]

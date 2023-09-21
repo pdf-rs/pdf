@@ -10,6 +10,7 @@ use crate::file::Trailer;
 use crate::object::*;
 use crate::content::*;
 use crate::error::Result;
+use crate::primitive::Dictionary;
 use crate::primitive::Primitive;
 
 #[derive(Default)]
