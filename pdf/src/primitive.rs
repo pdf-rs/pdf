@@ -728,8 +728,8 @@ pub enum TimeRel {
 datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
 
 impl Object for Date {
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        match p {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p.resolve(r)? {
             Primitive::String (PdfString {data}) => {
                 let s = str::from_utf8(&data)?;
                 let len = s.len();
@@ -773,7 +773,7 @@ impl Object for Date {
                     bail!("Failed parsing date");
                 }
             }
-            _ => unexpected_primitive!(String, p.get_debug_name()),
+            p => unexpected_primitive!(String, p.get_debug_name()),
         }
     }
 }
