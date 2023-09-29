@@ -88,7 +88,8 @@ impl ColorSpace {
             return Ok(cs);
         }
         let arr = t!(p.into_array());
-        let typ = t!(t!(get_index(&arr, 0)).as_name());
+        let typ_p = t!(get_index(&arr, 0)).clone().resolve(resolve)?;
+        let typ = t!(typ_p.as_name());
         
         if depth == 0 {
             bail!("ColorSpace base recursion");
