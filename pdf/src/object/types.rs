@@ -557,7 +557,6 @@ pub enum ImageFormat {
 
 impl ImageXObject {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        dbg!(&s.info);
         let inner = Stream::from_stream(s, resolve)?;
         Ok(ImageXObject { inner })
     }
