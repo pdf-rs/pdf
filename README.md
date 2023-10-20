@@ -1,4 +1,12 @@
-# pdf-rs [![test](https://github.com/pdf-rs/pdf/actions/workflows/test.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/test.yml) [![clippy&fmt](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml)
+# pdf-rs [![test_badge]][test_action] [![lint_badge]][lint_action] [![Latest version]][crates.io]
+
+[test_badge]: https://github.com/pdf-rs/pdf/actions/workflows/test.yml/badge.svg
+[test_action]: https://github.com/pdf-rs/pdf/actions/workflows/test.yml
+[lint_badge]: https://github.com/pdf-rs/pdf/actions/workflows/lint.yml/badge.svg
+[lint_action]: https://github.com/pdf-rs/pdf/actions/workflows/lint.yml
+[Latest version]: https://img.shields.io/crates/v/pdf.svg
+[crates.io]: https://crates.io/crates/pdf
+
 Read, alter and write PDF files.
 
 Modifying and writing PDFs is still experimental.
