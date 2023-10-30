@@ -34,6 +34,11 @@ struct Point {
     x: f32,
     y: f32
 }
+struct Align {
+    page_rel: f32,
+    page_abs: f32,
+    img_rel: f32,
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
@@ -65,14 +70,42 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut ops = page.contents.as_ref().unwrap().operations(&file.resolver())?;
 
-    let scale = Point { x: img.width() as f32, y: img.height() as f32 };
+    let mm = 72.0 / 25.4; // one millimeter
+    // bottom right corner of the page, but 5mm margin
+    let h_align = Align {
+        img_rel: -1.0, // move left by image width
+        page_rel: 1.0, // move right by page width
+        page_abs: -5.0 * mm, // 5,mm from the right edge
+    };
+    let v_align = Align {
+        img_rel: 0.0,
+        page_rel: 0.0,
+        page_abs: 5.0 * mm
+    };
+    let dpi = 300.;
+
+    let px_scale = 72. / dpi;
+    let media_box = page.media_box.unwrap();
+    let scale = Point { x: img.width() as f32 * px_scale , y: img.height() as f32 * px_scale };
     let skew = Point { x: 0.0, y: 0.0 };
-    let position = Point { x: 100., y: 100. };
+    let page_size = Point {
+        x: media_box.right - media_box.left,
+        y: media_box.top - media_box.bottom
+    };
+    let page_origin = Point {
+        x: media_box.left,
+        y: media_box.bottom
+    };
+
+    let position = Point {
+        x: page_origin.x + h_align.page_abs + h_align.img_rel * scale.x + h_align.page_rel * page_size.x,
+        y: page_origin.y + v_align.page_abs + v_align.img_rel * scale.y + v_align.page_rel * page_size.y
+    };
 
     ops.append(&mut vec![
         Op::Save, // ADD IMAGE START
         Op::Transform { matrix: Matrix{ // IMAGE MANIPULATION
-            a: scale.x * 0.1, d: scale.y * 0.1,
+            a: scale.x, d: scale.y,
             b: skew.x, c: skew.y,
             e: position.x, f: position.y,
         } },
