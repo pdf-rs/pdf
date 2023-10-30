@@ -1,11 +1,9 @@
-use std::{path::PathBuf, io::BufReader, fs::File, error::Error};
+use std::{path::PathBuf, error::Error};
 
 use pdf::{
-    error::PdfError,
     file::FileOptions,
     object::*,
-    build::*,
-    primitive::{PdfString, Name}, enc::{StreamFilter, DCTDecodeParams}, content::{Op, Matrix, Content},
+    primitive::Name, enc::{StreamFilter, DCTDecodeParams}, content::{Op, Matrix, Content},
 };
 
 use clap::Parser;
@@ -41,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     
     let img_data = std::fs::read(&args.image)?;
-    let img = ImageReader::new(Cursor::new(&img_data)).with_guessed_format()?.decode()?;
+    let img = ImageReader::with_format(Cursor::new(&img_data), image::ImageFormat::Jpeg).decode()?;
     let image_dict = ImageDict {
         width: img.width(),
         height: img.height(),
