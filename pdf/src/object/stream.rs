@@ -23,7 +23,7 @@ pub struct Stream<I> {
     pub info: StreamInfo<I>,
     pub (crate) inner_data: StreamData,
 }
-impl<I: Object + fmt::Debug> Stream<I> {
+impl<I: Object> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
         let PdfStream {info, inner} = s;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
@@ -98,7 +98,7 @@ impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
     }
 }
 
-impl<I: Object + fmt::Debug> Object for Stream<I> {
+impl<I: Object> Object for Stream<I> {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let s = PdfStream::from_primitive(p, resolve)?;
@@ -171,7 +171,18 @@ impl<I: ObjectWrite> ObjectWrite for Stream<I> {
         self.to_pdf_stream(update).map(Primitive::Stream)
     }
 }
-
+impl<I: DeepClone> DeepClone for Stream<I> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        let data = match self.inner_data {
+            StreamData::Generated(ref data) => data.clone(),
+            StreamData::Original(ref range, id) => cloner.stream_data(id, range.clone())?
+        };
+        Ok(Stream {
+            info: self.info.deep_clone(cloner)?,
+            inner_data: StreamData::Generated(data),
+        })
+    }
+}
 impl<I: Object> Deref for Stream<I> {
     type Target = StreamInfo<I>;
     fn deref(&self) -> &StreamInfo<I> {
@@ -181,7 +192,7 @@ impl<I: Object> Deref for Stream<I> {
 
 
 /// General stream type. `I` is the additional information to be read from the stream dict.
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DataSize, DeepClone)]
 pub struct StreamInfo<I> {
     // General dictionary entries
     /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and

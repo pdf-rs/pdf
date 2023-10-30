@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use datasize::DataSize;
 
 use crate as pdf;
+use crate::content::deep_clone_op;
 use crate::object::*;
 use crate::error::*;
 use crate::content::{Content, FormXObject, Matrix, parse_ops, serialize_ops, Op};
@@ -66,6 +67,9 @@ impl Deref for PageRc {
 impl PageRc {
     pub fn create(page: Page, update: &mut impl Updater) -> Result<PageRc> {
         Ok(PageRc(update.create(PagesNode::Leaf(page))?))
+    }
+    pub fn get_ref(&self) -> Ref<PagesNode> {
+        self.0.get_ref()
     }
 }
 
@@ -343,7 +347,7 @@ pub struct PageLabel {
     pub start:  Option<usize>
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Default, DeepClone, Clone)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<Name, GraphicsStateParameters>,
@@ -371,7 +375,7 @@ impl Resources {
 }
 
 
-#[derive(Debug, Object, ObjectWrite, DataSize, Clone)]
+#[derive(Debug, Object, ObjectWrite, DataSize, Clone, DeepClone)]
 pub struct PatternDict {
     #[pdf(key="PaintType")]
     pub paint_type: Option<i32>,
@@ -436,21 +440,38 @@ impl ObjectWrite for Pattern {
         }
     }
 }
+impl DeepClone for Pattern {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        match *self {
+            Pattern::Dict(ref d) => Ok(Pattern::Dict(d.deep_clone(cloner)?)),
+            Pattern::Stream(ref dict, ref ops) => {
+                let old_resources = cloner.get(dict.resources)?;
+                let mut resources = Resources::default();
+                let ops: Vec<Op> = ops.iter().map(|op| deep_clone_op(op, cloner, &old_resources, &mut resources)).collect::<Result<Vec<_>>>()?;
+                let dict = PatternDict {
+                    resources: cloner.create(resources)?.get_ref(),
+                    .. *dict
+                };
+                Ok(Pattern::Stream(dict, ops))
+            }
+        }
+    }
+}
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, DeepClone, Debug, DataSize, Copy, Clone)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2
 }
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, DeepClone, Debug, DataSize, Copy, Clone)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
     Bevel = 2
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, DeepClone, Debug, DataSize, Clone)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
@@ -518,7 +539,7 @@ pub struct GraphicsStateParameters {
     _other: Dictionary
 }
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone)]
 #[pdf(is_stream)]
 pub enum XObject {
     #[pdf(name="PS")]
@@ -526,11 +547,23 @@ pub enum XObject {
     Image (ImageXObject),
     Form (FormXObject),
 }
+impl ObjectWrite for XObject {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let (subtype, mut stream) = match self {
+            XObject::Postscript(s) => ("PS", s.to_pdf_stream(update)?),
+            XObject::Form(s) => ("Form", s.stream.to_pdf_stream(update)?),
+            XObject::Image(s) => ("Image", s.inner.to_pdf_stream(update)?),
+        };
+        stream.info.insert("Subtype", Name::from(subtype));
+        stream.info.insert("Type", Name::from("XObject"));
+        Ok(stream.into())
+    }
+}
 
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;
 
-#[derive(Debug, DataSize, Clone)]
+#[derive(Debug, DataSize, Clone, DeepClone)]
 pub struct ImageXObject {
     pub inner: Stream<ImageDict>
 }
@@ -538,6 +571,11 @@ impl Object for ImageXObject {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let s = PdfStream::from_primitive(p, resolve)?;
         Self::from_stream(s, resolve)
+    }
+}
+impl ObjectWrite for ImageXObject {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.inner.to_primitive(update)   
     }
 }
 impl Deref for ImageXObject {
@@ -629,13 +667,15 @@ impl ImageXObject {
     }
 }
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
 #[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite, Default)]
 #[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
@@ -692,11 +732,11 @@ pub struct ImageDict {
     // OC: dict
     
     #[pdf(other)]
-    pub(crate) other: Dictionary
+    pub other: Dictionary
 }
 
 
-#[derive(Object, Debug, Copy, Clone, DataSize)]
+#[derive(Object, Debug, Copy, Clone, DataSize, DeepClone, ObjectWrite)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
@@ -724,7 +764,7 @@ impl RenderingIntent {
 }
 
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     #[pdf(key="FormType", default="1")]
@@ -1232,7 +1272,7 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct FileSpec {
     #[pdf(key="EF")]
     pub ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
@@ -1243,8 +1283,8 @@ pub struct FileSpec {
 }
 
 /// Used only as elements in `FileSpec`
-#[derive(Object, ObjectWrite, Debug, Clone)]
-pub struct Files<T: Object + ObjectWrite + DataSize> {
+#[derive(Object, ObjectWrite, Debug, Clone, DeepClone)]
+pub struct Files<T> {
     #[pdf(key="F")]
     pub f: Option<T>,
     #[pdf(key="UF")]
@@ -1256,7 +1296,7 @@ pub struct Files<T: Object + ObjectWrite + DataSize> {
     #[pdf(key="Unix")]
     pub unix: Option<T>,
 }
-impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
+impl<T: DataSize> DataSize for Files<T> {
     const IS_DYNAMIC: bool = T::IS_DYNAMIC;
     const STATIC_HEAP_SIZE: usize = 5 * Option::<T>::STATIC_HEAP_SIZE;
 
@@ -1271,31 +1311,31 @@ impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
 }
 
 /// PDF Embedded File Stream.
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
 pub struct EmbeddedFile {
-    /*
     #[pdf(key="Subtype")]
-    subtype: Option<String>,
-    */
+    subtype: Option<Name>,
+    
     #[pdf(key="Params")]
     pub params: Option<EmbeddedFileParamDict>,
 }
 
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size")]
     pub size: Option<i32>,
-    /*
-    // TODO need Date type
+    
     #[pdf(key="CreationDate")]
-    creationdate: T,
+    creationdate: Option<Date>,
+
     #[pdf(key="ModDate")]
-    moddate: T,
+    moddate: Option<Date>,
+
     #[pdf(key="Mac")]
-    mac: T,
+    mac: Option<Date>,
+
     #[pdf(key="CheckSum")]
-    checksum: T,
-    */
+    checksum: Option<Date>,
 }
 
 #[derive(Object, Debug, Clone, DataSize)]

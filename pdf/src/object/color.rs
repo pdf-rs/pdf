@@ -3,7 +3,7 @@ use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
 pub struct IccInfo {
     #[pdf(key="N")]
     pub components: u32,
@@ -18,7 +18,7 @@ pub struct IccInfo {
     pub metadata: Option<Stream<()>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DeepClone)]
 pub enum ColorSpace {
     DeviceGray,
     DeviceRGB,
@@ -156,11 +156,20 @@ impl ColorSpace {
     }
 }
 impl ObjectWrite for ColorSpace {
-    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match *self {
             ColorSpace::DeviceCMYK => Ok(Primitive::name("DeviceCMYK")),
             ColorSpace::DeviceRGB => Ok(Primitive::name("DeviceRGB")),
-            _ => unimplemented!()
+            ColorSpace::Indexed(ref  base, hival, ref lookup) => {
+                let base = base.to_primitive(update)?;
+                let hival = Primitive::Integer(hival.into());
+                let lookup = Stream::new((), lookup.clone()).to_primitive(update)?;
+                Ok(Primitive::Array(vec![base, hival, lookup]))
+            }
+            ref p => {
+                dbg!(p);
+                unimplemented!()
+            }
         }
     }
 }

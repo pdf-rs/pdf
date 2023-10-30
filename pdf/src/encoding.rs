@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use istring::SmallString;
 use crate as pdf;
-use crate::object::{Object, Resolve, ObjectWrite};
+use crate::object::{Object, Resolve, ObjectWrite, DeepClone};
 use crate::primitive::{Primitive, Dictionary};
 use crate::error::{Result};
 use datasize::DataSize;
@@ -99,5 +99,10 @@ impl Encoding {
             base: BaseEncoding::StandardEncoding,
             differences: HashMap::new()
         }
+    }
+}
+impl DeepClone for Encoding {
+    fn deep_clone(&self, cloner: &mut impl pdf::object::Cloner) -> Result<Self> {
+        Ok(self.clone())
     }
 }

@@ -25,7 +25,7 @@ mod flags {
     pub const ForceBold: u32     = 1 << 18;
 }
 
-#[derive(Object, ObjectWrite, Debug, Copy, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Copy, Clone, DataSize, DeepClone)]
 pub enum FontType {
     Type0,
     Type1,
@@ -36,7 +36,7 @@ pub enum FontType {
     CIDFontType2, // TrueType
 }
 
-#[derive(Debug, DataSize)]
+#[derive(Debug, DataSize, DeepClone)]
 pub struct Font {
     pub subtype: FontType,
     pub name: Option<Name>,
@@ -51,7 +51,7 @@ pub struct Font {
     pub _other: Dictionary
 }
 
-#[derive(Debug, DataSize)]
+#[derive(Debug, DataSize, DeepClone)]
 pub enum FontData {
     Type1(TFont),
     Type0(Type0Font),
@@ -61,7 +61,7 @@ pub enum FontData {
     Other(Dictionary),
 }
 
-#[derive(Debug, DataSize)]
+#[derive(Debug, DataSize, DeepClone)]
 pub enum CidToGidMap {
     Identity,
     Table(Vec<u16>)
@@ -130,7 +130,7 @@ impl Object for Font {
             FontType::CIDFontType2 => FontData::CIDFontType2(CIDFont::from_dict(dict, resolve)?),
             _ => FontData::Other(dict)
         };
-
+        
         Ok(Font {
             subtype,
             name: base_font,
@@ -323,7 +323,7 @@ impl Font {
         self.to_unicode.as_ref().map(|s| (**s).data(resolve).and_then(|d| parse_cmap(&d)))
     }
 }
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, DeepClone)]
 pub struct TFont {
     #[pdf(key="BaseFont")]
     pub base_font: Option<Name>,
@@ -343,7 +343,7 @@ pub struct TFont {
     pub font_descriptor: Option<FontDescriptor>
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, DeepClone)]
 pub struct Type0Font {
     #[pdf(key="DescendantFonts")]
     pub descendant_fonts: Vec<MaybeRef<Font>>,
@@ -352,7 +352,7 @@ pub struct Type0Font {
     pub to_unicode: Option<RcRef<Stream<()>>>,
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, DeepClone)]
 pub struct CIDFont {
     #[pdf(key="CIDSystemInfo")]
     pub system_info: Dictionary,
@@ -374,7 +374,7 @@ pub struct CIDFont {
 }
 
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, DeepClone)]
 pub struct FontDescriptor {
     #[pdf(key="FontName")]
     pub font_name: Name,
@@ -454,20 +454,20 @@ impl FontDescriptor {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 #[pdf(key="Subtype")]
 pub enum FontTypeExt {
     Type1C,
     CIDFontType0C,
     OpenType
 }
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct FontStream3 {
     #[pdf(key="Subtype")]
     pub subtype: FontTypeExt
 }
 
-#[derive(Object, ObjectWrite, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, DataSize, DeepClone)]
 pub enum FontStretch {
     UltraCondensed,
     ExtraCondensed,

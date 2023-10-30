@@ -307,7 +307,7 @@ where
         
         let res = self.storage.cache.get_or_compute(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
-                Ok(obj) => Ok(Shared::new(obj).into()),
+                Ok(obj) => Ok(AnySync::new(Shared::new(obj))),
                 Err(e) => {
                     let p = self.resolve(key);
                     warn!("failed to decode {p:?} as {}", std::any::type_name::<T>());
@@ -323,6 +323,10 @@ where
     fn options(&self) -> &ParseOptions {
         &self.storage.options
     }
+    fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>> {
+        self.storage.decode(id, range, &[])
+    }
+
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
         self.storage.stream_cache.get_or_compute(id, || self.storage.decode(id, range, filters).map_err(Arc::new))
         .map_err(|e| e.into())

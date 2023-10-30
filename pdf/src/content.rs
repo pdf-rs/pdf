@@ -11,6 +11,7 @@ use crate::object::*;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use crate::primitive::*;
 use crate::enc::StreamFilter;
+use crate as pdf;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
 #[derive(Debug, Clone, DataSize)]
@@ -514,7 +515,7 @@ impl Object for Content {
     }
 }
 
-#[derive(Debug, DataSize)]
+#[derive(Debug, DataSize, DeepClone)]
 pub struct FormXObject {
     pub stream: Stream<FormDict>,
 }
@@ -858,7 +859,7 @@ impl From<euclid::Box2D<f32, PdfSpace>> for Rect {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize, DeepClone)]
 #[repr(C, align(8))]
 pub struct Matrix {
     pub a: f32,
@@ -1076,6 +1077,43 @@ pub enum Op {
 
     InlineImage { image: Arc<ImageXObject> },
 }
+
+pub fn deep_clone_op(op: &Op, cloner: &mut impl Cloner, old_resources: &Resources, resources: &mut Resources) -> Result<Op> {
+    match *op {
+        Op::GraphicsState { ref name } => {
+            if !resources.graphics_states.contains_key(name) {
+                if let Some(gs) = old_resources.graphics_states.get(name) {
+                    resources.graphics_states.insert(name.clone(), gs.deep_clone(cloner)?);
+                }
+            }
+            Ok(Op::GraphicsState { name: name.clone() })
+        }
+        Op::MarkedContentPoint { ref tag, ref properties } => {
+            Ok(Op::MarkedContentPoint { tag: tag.clone(), properties: properties.deep_clone(cloner)? })
+        }
+        Op::BeginMarkedContent { ref tag, ref properties } => {
+            Ok(Op::BeginMarkedContent { tag: tag.clone(), properties: properties.deep_clone(cloner)? })
+        }
+        Op::TextFont { ref name, size } => {
+            if !resources.fonts.contains_key(name) {
+                if let Some(f) = old_resources.fonts.get(name) {
+                    resources.fonts.insert(name.clone(), f.deep_clone(cloner)?);
+                }
+            }
+            Ok(Op::TextFont { name: name.clone(), size })
+        }
+        Op::XObject { ref name } => {
+            if !resources.xobjects.contains_key(name) {
+                if let Some(xo) = old_resources.xobjects.get(name) {
+                    resources.xobjects.insert(name.clone(), xo.deep_clone(cloner)?);
+                }
+            }
+            Ok(Op::XObject { name: name.clone() })
+        }
+        ref op => Ok(op.clone())
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

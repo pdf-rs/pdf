@@ -4,7 +4,7 @@ use crate::error::*;
 use itertools::izip;
 use datasize::DataSize;
 
-#[derive(Object, Debug, Clone)]
+#[derive(Object, Debug, Clone, ObjectWrite)]
 struct RawFunction {
     #[pdf(key="FunctionType")]
     function_type: u32,
@@ -95,7 +95,6 @@ impl FromDict for Function {
         match raw.function_type {
             2 => {
                 let f2 = Function2::from_dict(raw.other, resolve)?;
-                let mut parts = Vec::with_capacity(raw.domain.len());
                 
                 let n_dim = match (raw.range.as_ref(), f2.c0.as_ref(), f2.c1.as_ref()) {
                     (Some(range), _, _) => range.len() / 2,
@@ -103,6 +102,7 @@ impl FromDict for Function {
                     (_, _, Some(c1)) => c1.len(),
                     _ => bail!("unknown dimensions")
                 };
+                let mut parts = Vec::with_capacity(n_dim);
                 let input_range = (raw.domain[0], raw.domain[1]);
                 for dim in 0 .. n_dim {
                     let output_range = (
@@ -178,7 +178,37 @@ impl Object for Function {
         }
     }
 }
+impl ObjectWrite for Function {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        unimplemented!()
+        /*
+        let dict = match self {
+            Function::Interpolated(parts) => {
+                let first: &InterpolatedFunctionDim = try_opt!(parts.get(0));
+                let f2 = Function2 {
+                    c0: parts.iter().map(|p| p.c0).collect(),
+                    c1: parts.iter().map(|p| p.c0).collect(),
+                    exponent: first.exponent
+                };
+                let f = RawFunction {
+                    function_type: 2,
+                    domain: vec![first.input_range.0, first.input_range.1],
+                    range: parts.iter().flat_map(|p| [p.output_range.0, p.output_range.1]).collect(),
+                    decode: None,
+                    encode: None,
+                    order
+                };
 
+            }
+        }
+        */
+    }
+}
+impl DeepClone for Function {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        Ok(self.clone())
+    }
+}
 
 #[derive(Debug, Clone, DataSize)]
 struct SampledFunctionInput {

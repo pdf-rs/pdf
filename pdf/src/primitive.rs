@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
+use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater, DeepClone, Cloner};
 
 use std::sync::Arc;
 use std::{str, fmt, io};
@@ -180,6 +180,15 @@ impl ObjectWrite for Dictionary {
         Ok(Primitive::Dictionary(self.clone()))
     }
 }
+impl DeepClone for Dictionary {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        Ok(Dictionary {
+            dict: self.dict.iter()
+                .map(|(key, value)| Ok((key.clone(), value.deep_clone(cloner)?)))
+                .try_collect::<_, _, PdfError>()?
+        })
+    }
+}
 impl Deref for Dictionary {
     type Target = IndexMap<Name, Primitive>;
     fn deref(&self) -> &IndexMap<Name, Primitive> {
@@ -254,6 +263,11 @@ impl Object for PdfStream {
         }
     }
 }
+impl ObjectWrite for PdfStream {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(self.clone().into())
+    }
+}
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         self.info.serialize(out)?;
@@ -269,6 +283,17 @@ impl PdfStream {
         }
         writeln!(out, "\nendstream")?;
         Ok(())
+    }
+}
+impl DeepClone for PdfStream {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        let data = match self.inner {
+            StreamInner::InFile { id, ref file_range } => cloner.stream_data(id, file_range.clone())?,
+            StreamInner::Pending { ref data } => data.clone()
+        };
+        Ok(PdfStream {
+            info: self.info.deep_clone(cloner)?, inner: StreamInner::Pending { data }
+        })
     }
 }
 

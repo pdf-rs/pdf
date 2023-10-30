@@ -13,7 +13,7 @@ use once_cell::sync::OnceCell;
 use datasize::DataSize;
 
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     pub predictor: i32,
@@ -38,7 +38,7 @@ impl Default for LZWFlateParams {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.
@@ -49,7 +49,7 @@ pub struct DCTDecodeParams {
     pub color_transform: Option<i32>,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct CCITTFaxDecodeParams {
     #[pdf(key="K", default="0")]
     pub k: i32,
@@ -76,12 +76,12 @@ pub struct CCITTFaxDecodeParams {
     pub damaged_rows_before_error: u32,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct JBIG2DecodeParams {
     #[pdf(key="JBIG2Globals")]
     pub globals: Option<Stream<()>>
 }
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DataSize, DeepClone)]
 pub enum StreamFilter {
     ASCIIHexDecode,
     ASCII85Decode,

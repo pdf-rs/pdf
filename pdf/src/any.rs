@@ -10,17 +10,32 @@ pub trait AnyObject {
     fn type_id(&self) -> TypeId;
     fn size(&self) -> usize;
 }
-impl<T> AnyObject for T
-    where T: Object + 'static + DataSize
-{
-    fn type_name(&self) -> &'static str {
-        std::any::type_name::<T>()
+
+#[repr(transparent)]
+pub struct NoSize<T>(T);
+impl<T: 'static> AnyObject for NoSize<T> {
+    fn size(&self) -> usize {
+        0
     }
     fn type_id(&self) -> TypeId {
         TypeId::of::<T>()
     }
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<T>()
+    }
+}
+
+#[repr(transparent)]
+pub struct WithSize<T>(T);
+impl<T: DataSize + 'static> AnyObject for WithSize<T> {
     fn size(&self) -> usize {
-        datasize::data_size(self)
+        datasize::data_size(&self.0)
+    }
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<T>()
     }
 }
 
@@ -41,17 +56,21 @@ impl Any {
         }
     }
     pub fn new<T>(rc: Rc<T>) -> Any
-        where T: AnyObject + 'static
+        where WithSize<T>: AnyObject, T: 'static
     {
-        Any(rc as _)
+        Any(unsafe {
+            std::mem::transmute::<Rc<T>, Rc<WithSize<T>>>(rc)
+        } as _)
+    }
+    pub fn new_without_size<T>(rc: Rc<T>) -> Any
+        where NoSize<T>: AnyObject, T: 'static
+    {
+        Any(unsafe {
+            std::mem::transmute::<Rc<T>, Rc<NoSize<T>>>(rc)
+        } as _)
     }
     pub fn type_name(&self) -> &'static str {
         self.0.type_name()
-    }
-}
-impl<T: AnyObject + 'static> From<Rc<T>> for Any {
-    fn from(t: Rc<T>) -> Self {
-        Any::new(t)
     }
 }
 
@@ -68,7 +87,7 @@ impl globalcache::ValueSize for AnySync {
 
 impl AnySync {
     pub fn downcast<T>(self) -> Result<Arc<T>> 
-        where T: AnyObject + Sync + Send + 'static
+        where T: 'static
     {
         if TypeId::of::<T>() == self.0.type_id() {
             unsafe {
@@ -80,19 +99,23 @@ impl AnySync {
         }
     }
     pub fn new<T>(arc: Arc<T>) -> AnySync
-        where T: AnyObject + Sync + Send + 'static
+        where WithSize<T>: AnyObject, T: Sync + Send + 'static
     {
-        AnySync(arc as _)
+        AnySync(unsafe {
+            std::mem::transmute::<Arc<T>, Arc<WithSize<T>>>(arc)
+        } as _)
+    }
+    pub fn new_without_size<T>(arc: Arc<T>) -> AnySync
+        where NoSize<T>: AnyObject, T: Sync + Send + 'static
+    {
+        AnySync(unsafe {
+            std::mem::transmute::<Arc<T>, Arc<NoSize<T>>>(arc)
+        } as _)
     }
     pub fn type_name(&self) -> &'static str {
         self.0.type_name()
     }
 }
-impl<T: AnyObject + Sync + Send + 'static> From<Arc<T>> for AnySync {
-    fn from(t: Arc<T>) -> Self {
-        AnySync::new(t)
-    }
-}
-fn type_mismatch<T: AnyObject + 'static>(name: &str) -> PdfError {
+fn type_mismatch<T>(name: &str) -> PdfError {
     PdfError::Other { msg: format!("expected {}, found {}", std::any::type_name::<T>(), name) }
 }

@@ -1,7 +1,12 @@
+use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
+
+use datasize::DataSize;
 
 use crate::PdfError;
 use crate::any::AnySync;
+use crate::enc::StreamFilter;
 use crate::file::Cache;
 use crate::file::FileOptions;
 use crate::file::Log;
@@ -10,6 +15,7 @@ use crate::file::Trailer;
 use crate::object::*;
 use crate::content::*;
 use crate::error::Result;
+use crate::parser::ParseFlags;
 use crate::primitive::Dictionary;
 use crate::primitive::Primitive;
 
@@ -45,6 +51,33 @@ impl PageBuilder {
             lgi: page.lgi.clone(),
             vp: page.vp.clone(),
             other: page.other.clone(),
+        })
+    }
+    pub fn clone_page(page: &Page, cloner: &mut impl Cloner) -> Result<PageBuilder> {
+        let old_resources = &**page.resources()?.data();
+
+        let mut resources = Resources::default();
+        let content = page.contents.as_ref()
+            .map(|content| content.operations(cloner)).transpose()?
+            .map(|ops| {
+                ops.into_iter().map(|op| -> Result<Op, PdfError> {
+                    deep_clone_op(&op, cloner, old_resources, &mut resources)
+                }).collect()
+            })
+            .transpose()?
+            .map(|ops| Content::from_ops(ops));
+
+        Ok(PageBuilder {
+            content,
+            media_box: Some(page.media_box()?),
+            crop_box: Some(page.crop_box()?),
+            trim_box: page.trim_box,
+            resources: Some(cloner.create(resources)?.into()),
+            rotate: page.rotate,
+            metadata: page.metadata.deep_clone(cloner)?,
+            lgi: page.lgi.deep_clone(cloner)?,
+            vp: page.vp.deep_clone(cloner)?,
+            other: page.other.deep_clone(cloner)?,
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
@@ -157,5 +190,108 @@ where
         };
         self.storage.save(&mut trailer)?;
         Ok(self.storage.into_inner())
+    }
+}
+pub struct Importer<'a, R, U> {
+    resolver: R,
+    map: HashMap<PlainRef, PlainRef>,
+    updater: &'a mut U,
+    rcrefs: HashMap<PlainRef, AnySync>,
+    // ptr of old -> (old, new)
+    shared: HashMap<usize, (AnySync, AnySync)>,
+}
+
+
+impl<'a, R, U> Importer<'a, R, U> {
+    pub fn new(resolver: R, updater: &'a mut U) -> Self {
+        Importer {
+            resolver,
+            updater,
+            map: Default::default(),
+            rcrefs: Default::default(),
+            shared: Default::default()
+        }
+    }
+}
+impl<'a, R: Resolve, U> Resolve for Importer<'a, R, U> {
+    fn get<T: Object+datasize::DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+        self.resolver.get(r)
+    }
+    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        self.resolver.get_data_or_decode(id, range, filters)
+    }
+    fn options(&self) -> &ParseOptions {
+        self.resolver.options()
+    }
+    fn resolve(&self, r: PlainRef) -> Result<Primitive> {
+        self.resolver.resolve(r)
+    }
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive> {
+        self.resolver.resolve_flags(r, flags, depth)
+    }
+    fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>> {
+        self.resolver.stream_data(id, range)
+    }
+}
+impl<'a, R, U: Updater> Updater for Importer<'a, R, U> {
+    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
+        self.updater.create(obj)
+    }
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
+        self.updater.fulfill(promise, obj)
+    }
+    fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        self.updater.promise()
+    }
+    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
+        self.updater.update(old, obj)
+    }
+}
+impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
+    fn clone_ref<T: DeepClone + Object + DataSize + ObjectWrite>(&mut self, old: Ref<T>) -> Result<Ref<T>> {
+        if let Some(&new_ref) = self.map.get(&old.get_inner()) {
+            return Ok(Ref::new(new_ref));
+        }
+        let obj = self.resolver.get(old)?;
+        let clone = obj.deep_clone(self)?;
+
+        let r = self.updater.create(clone)?;
+        self.map.insert(old.get_inner(), r.get_ref().get_inner());
+        Ok(r.get_ref())
+    }
+    fn clone_plainref(&mut self, old: PlainRef) -> Result<PlainRef> {
+        if let Some(&new_ref) = self.map.get(&old) {
+            return Ok(new_ref);
+        }
+        let obj = self.resolver.resolve(old)?;
+        let clone = obj.deep_clone(self)?;
+
+        let new = self.updater.create(clone)?
+            .get_ref().get_inner();
+
+        self.map.insert(old, new);
+        Ok(new)
+    }
+    fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(&mut self, old: &RcRef<T>) -> Result<RcRef<T>> {
+        let old_ref = old.get_ref().get_inner();
+        if let Some(&new_ref) = self.map.get(&old_ref) {
+            let arc = self.rcrefs.get(&new_ref).unwrap().clone().downcast()?;
+            return Ok(RcRef::new(new_ref, arc));
+        }
+
+        let new = old.data().deep_clone(self)?;
+        let new = self.updater.create::<T>(new)?;
+        self.rcrefs.insert(new.get_ref().get_inner(), AnySync::new(new.data().clone()));
+        self.map.insert(old_ref, new.get_ref().get_inner());
+        Ok(new)
+    }
+    fn clone_shared<T: DeepClone>(&mut self, old: &Shared<T>) -> Result<Shared<T>> {
+        let key = &**old as *const T as usize;
+        if let Some((old, new)) = self.shared.get(&key) {
+            return new.clone().downcast();
+        }
+        let new = Shared::new(old.as_ref().deep_clone(self)?);
+        self.shared.insert(key, (AnySync::new_without_size(old.clone()), AnySync::new_without_size(new.clone())));
+        Ok(new)
     }
 }
