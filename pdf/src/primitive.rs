@@ -284,6 +284,12 @@ impl PdfStream {
         writeln!(out, "\nendstream")?;
         Ok(())
     }
+    pub fn raw_data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
+        match self.inner {
+            StreamInner::InFile { id, ref file_range } => resolve.stream_data(id, file_range.clone()),
+            StreamInner::Pending { ref data } => Ok(data.clone())
+        }
+    }
 }
 impl DeepClone for PdfStream {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {

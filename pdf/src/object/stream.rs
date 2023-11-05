@@ -119,6 +119,8 @@ impl<I: ObjectWrite> Stream<I> {
                     StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
                     StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
                     StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
+                    StreamFilter::CCITTFaxDecode(ref p) => Some(p.to_primitive(update)?),
+                    StreamFilter::JBIG2Decode(ref p) => Some(p.to_primitive(update)?),
                     _ => None
                 } {
                     assert!(params.is_none());

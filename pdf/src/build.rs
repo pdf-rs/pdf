@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -201,6 +202,10 @@ pub struct Importer<'a, R, U> {
     shared: HashMap<usize, (AnySync, AnySync)>,
 }
 
+pub struct ImporterMap<R> {
+    resolver: R,
+    map: HashMap<PlainRef, PlainRef>,
+}
 
 impl<'a, R, U> Importer<'a, R, U> {
     pub fn new(resolver: R, updater: &'a mut U) -> Self {
@@ -209,10 +214,109 @@ impl<'a, R, U> Importer<'a, R, U> {
             updater,
             map: Default::default(),
             rcrefs: Default::default(),
-            shared: Default::default()
+            shared: Default::default(),
         }
     }
 }
+impl<'a, R: Resolve, U> Importer<'a, R, U> {
+    pub fn finish(self) -> ImporterMap<R> {
+        ImporterMap { resolver: self.resolver, map: self.map }
+    }
+}
+impl<R: Resolve> ImporterMap<R> {
+    fn compare_dict(&self, a_dict: &Dictionary, b_dict: &Dictionary, new_resolve: &impl Resolve) -> Result<bool> {
+        let mut same = true;
+        let mut b_unvisited: HashSet<_> = b_dict.keys().collect();
+        for (a_key, a_val) in a_dict.iter() {
+            if let Some(b_val) = b_dict.get(a_key) {
+                if !self.compare_prim(a_val, b_val, new_resolve)? {
+                    println!("value for key {a_key} mismatch.");
+                    same = false;
+                }
+                b_unvisited.remove(a_key);
+            } else {
+                println!("missing key {a_key} in b.");
+                same = false;
+            }
+        }
+        for b_key in b_unvisited.iter() {
+            println!("missing key {b_key} in a.");
+        }
+        Ok(same && !b_unvisited.is_empty())
+    }
+    fn compare_prim(&self, a: &Primitive, b: &Primitive, new_resolve: &impl Resolve) -> Result<bool> {
+        match (a, b) {
+            (Primitive::Array(a_parts), Primitive::Array(b_parts)) => {
+                if a_parts.len() != b_parts.len() {
+                    dbg!(a_parts, b_parts);
+                    println!("different length {} vs. {}", a_parts.len(), b_parts.len());
+                    println!("a = {a_parts:?}");
+                    println!("b = {b_parts:?}");
+                    return Ok(false);
+                }
+                for (a, b) in a_parts.iter().zip(b_parts.iter()) {
+                    if !self.compare_prim(a, b, new_resolve)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (Primitive::Dictionary(a_dict), Primitive::Dictionary(b_dict)) => {
+                self.compare_dict(a_dict, b_dict, new_resolve)
+            }
+            (Primitive::Reference(r1), Primitive::Reference(r2)) => {
+                match self.map.get(&r1) {
+                    Some(r) if r == r2 => Ok(true),
+                    _ => Ok(false)
+                }
+            }
+            (Primitive::Stream(a_s), Primitive::Stream(b_s)) => {
+                if !self.compare_dict(&a_s.info, &b_s.info, new_resolve)? {
+                    println!("stream dicts differ");
+                    return Ok(false)
+                }
+                let a_data = a_s.raw_data(&self.resolver)?;
+                let b_data = b_s.raw_data(new_resolve)?;
+                if a_data != b_data {
+                    println!("data differs.");
+                    return Ok(false)
+                }
+                Ok(true)
+            }
+            (Primitive::Integer(a), Primitive::Number(b)) => Ok(*a as f32 == *b),
+            (Primitive::Number(a), Primitive::Integer(b)) => Ok(*a == *b as f32),
+            (Primitive::Reference(a_ref), b) => {
+                let a = self.resolver.resolve(*a_ref)?;
+                self.compare_prim(&a, b, new_resolve)
+            }
+            (a, Primitive::Reference(b_ref)) => {
+                let b = new_resolve.resolve(*b_ref)?;
+                self.compare_prim(a, &b, new_resolve)
+            }
+            (ref a, ref b) => {
+                if a == b {
+                    Ok(true)
+                } else {
+                    println!("{a:?} != {b:?}");
+                    Ok(false)
+                }
+            }
+        }
+    }
+    pub fn verify(&self, new_resolve: &impl Resolve) -> Result<bool> {
+        let mut same = true;
+        for (&old_ref, &new_ref) in self.map.iter() {
+            let old = self.resolver.resolve(old_ref)?;
+            let new = new_resolve.resolve(new_ref)?;
+
+            if !self.compare_prim(&old, &new, new_resolve)? {
+                same = false;
+            }
+        }
+        Ok(same)
+    }
+} 
+
 impl<'a, R: Resolve, U> Resolve for Importer<'a, R, U> {
     fn get<T: Object+datasize::DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.resolver.get(r)
@@ -257,6 +361,7 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
 
         let r = self.updater.create(clone)?;
         self.map.insert(old.get_inner(), r.get_ref().get_inner());
+
         Ok(r.get_ref())
     }
     fn clone_plainref(&mut self, old: PlainRef) -> Result<PlainRef> {
@@ -270,6 +375,7 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
             .get_ref().get_inner();
 
         self.map.insert(old, new);
+
         Ok(new)
     }
     fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(&mut self, old: &RcRef<T>) -> Result<RcRef<T>> {
@@ -283,6 +389,7 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
         let new = self.updater.create::<T>(new)?;
         self.rcrefs.insert(new.get_ref().get_inner(), AnySync::new(new.data().clone()));
         self.map.insert(old_ref, new.get_ref().get_inner());
+
         Ok(new)
     }
     fn clone_shared<T: DeepClone>(&mut self, old: &Shared<T>) -> Result<Shared<T>> {

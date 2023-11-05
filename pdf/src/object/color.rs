@@ -77,6 +77,7 @@ impl Object for ColorSpace {
 impl ColorSpace {
     fn from_primitive_depth(p: Primitive, resolve: &impl Resolve, depth: usize) -> Result<ColorSpace> {
         let p = p.resolve(resolve)?;
+
         if let Ok(name) = p.as_name() {
             let cs = match name {
                 "DeviceGray" => ColorSpace::DeviceGray,
@@ -163,8 +164,12 @@ impl ObjectWrite for ColorSpace {
             ColorSpace::Indexed(ref  base, hival, ref lookup) => {
                 let base = base.to_primitive(update)?;
                 let hival = Primitive::Integer(hival.into());
-                let lookup = Stream::new((), lookup.clone()).to_primitive(update)?;
-                Ok(Primitive::Array(vec![base, hival, lookup]))
+                let lookup = if lookup.len() < 100 {
+                    PdfString::new((**lookup).into()).into()
+                } else {
+                    Stream::new((), lookup.clone()).to_primitive(update)?
+                };
+                Ok(Primitive::Array(vec![Primitive::name("Indexed"), base, hival, lookup]))
             }
             ref p => {
                 dbg!(p);

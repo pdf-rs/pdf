@@ -113,6 +113,9 @@ where
     pub fn into_inner(self) -> B {
         self.backend
     }
+    pub fn resolver(&self) -> impl Resolve + '_ {
+        StorageResolver::new(self)
+    }
     pub fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
         Ok(Storage {
             start_offset: backend.locate_start_offset()?,
