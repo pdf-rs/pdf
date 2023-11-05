@@ -38,6 +38,7 @@ fn main() -> Result<(), PdfError> {
     let mut pages = Vec::new();
 
     let new_page = PageBuilder::clone_page(&old_page, &mut importer)?;
+    importer.finish().verify(&builder.storage.resolver())?;
 
     pages.push(new_page);
     
