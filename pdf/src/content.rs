@@ -601,7 +601,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                 } else if c2 == p {
                     writeln!(f, "{} {} y", c1, p)?;
                 } else {
-                    writeln!(f, "{} {} {} y", c1, c2, p)?;
+                    writeln!(f, "{} {} {} c", c1, c2, p)?;
                 }
                 current_point = Some(p);
             },
