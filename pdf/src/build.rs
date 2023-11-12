@@ -22,11 +22,11 @@ use crate::primitive::Primitive;
 
 #[derive(Default)]
 pub struct PageBuilder {
-    pub content: Option<Content>,
+    pub ops: Vec<Op>,
     pub media_box: Option<Rect>,
     pub crop_box: Option<Rect>,
     pub trim_box: Option<Rect>,
-    pub resources: Option<MaybeRef<Resources>>,
+    pub resources: Resources,
     pub rotate: i32,
     pub metadata: Option<Primitive>,
     pub lgi: Option<Primitive>,
@@ -34,19 +34,19 @@ pub struct PageBuilder {
     pub other: Dictionary,
 }
 impl PageBuilder {
-    pub fn from_content(content: Content) -> PageBuilder {
-        PageBuilder {
-            content: Some(content),
-            .. PageBuilder::default()
-        }
-    }
-    pub fn from_page(page: &Page) -> Result<PageBuilder> {
+    pub fn from_content(content: Content, resolve: &impl Resolve) -> Result<PageBuilder> {
         Ok(PageBuilder {
-            content: page.contents.clone(),
+            ops: content.operations(resolve)?,
+            .. PageBuilder::default()
+        })
+    }
+    pub fn from_page(page: &Page, resolve: &impl Resolve) -> Result<PageBuilder> {
+        Ok(PageBuilder {
+            ops: page.contents.as_ref().map(|c| c.operations(resolve)).transpose()?.unwrap_or_default(),
             media_box: Some(page.media_box()?),
             crop_box: Some(page.crop_box()?),
             trim_box: page.trim_box,
-            resources: Some(page.resources()?.clone()),
+            resources: (**page.resources()?.data()).clone(),
             rotate: page.rotate,
             metadata: page.metadata.clone(),
             lgi: page.lgi.clone(),
@@ -58,7 +58,7 @@ impl PageBuilder {
         let old_resources = &**page.resources()?.data();
 
         let mut resources = Resources::default();
-        let content = page.contents.as_ref()
+        let ops = page.contents.as_ref()
             .map(|content| content.operations(cloner)).transpose()?
             .map(|ops| {
                 ops.into_iter().map(|op| -> Result<Op, PdfError> {
@@ -66,14 +66,14 @@ impl PageBuilder {
                 }).collect()
             })
             .transpose()?
-            .map(|ops| Content::from_ops(ops));
+            .unwrap_or_default();
 
         Ok(PageBuilder {
-            content,
+            ops,
             media_box: Some(page.media_box()?),
             crop_box: Some(page.crop_box()?),
             trim_box: page.trim_box,
-            resources: Some(cloner.create(resources)?.into()),
+            resources,
             rotate: page.rotate,
             metadata: page.metadata.deep_clone(cloner)?,
             lgi: page.lgi.deep_clone(cloner)?,
@@ -88,9 +88,6 @@ impl PageBuilder {
             bottom: height,
             right: width,
         });
-    }
-    pub fn resources(&mut self, resources: MaybeRef<Resources>) {
-        self.resources = Some(resources);
     }
 }
 
@@ -121,13 +118,15 @@ impl CatalogBuilder {
         }, update)?;
 
         for (page, promise) in self.pages.into_iter().zip(kids_promise) {
+            let content = Content::from_ops(page.ops);
+            let resources = update.create(page.resources)?.into();
             let page = Page {
                 parent: tree.clone(),
-                contents: page.content,
+                contents: Some(content),
                 media_box: page.media_box,
                 crop_box: page.crop_box,
                 trim_box: page.trim_box,
-                resources: page.resources,
+                resources: Some(resources),
                 rotate: page.rotate,
                 metadata: page.metadata,
                 lgi: page.lgi,

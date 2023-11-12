@@ -277,7 +277,7 @@ impl Font {
                     TFont { first_char: Some(first), ref widths, .. } => Ok(Some(Widths {
                         default: 0.0,
                         first_char: first as usize,
-                        values: widths.clone()
+                        values: widths.as_ref().cloned().unwrap_or_default()
                     })),
                     _ => Ok(None)
                 }
@@ -337,7 +337,7 @@ pub struct TFont {
     pub last_char: Option<i32>,
 
     #[pdf(key="Widths")]
-    pub widths: Vec<f32>,
+    pub widths: Option<Vec<f32>>,
 
     #[pdf(key="FontDescriptor")]
     pub font_descriptor: Option<FontDescriptor>
