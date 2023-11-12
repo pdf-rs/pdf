@@ -29,7 +29,7 @@ fn main() -> Result<(), PdfError> {
         Op::Close,
         Op::Stroke,
     ]);
-    let mut new_page = PageBuilder::from_content(content);
+    let mut new_page = PageBuilder::from_content(content, &NoResolve)?;
     new_page.media_box = Some(pdf::object::Rect {
         left: 0.0,
         top: 0.0,
@@ -50,7 +50,7 @@ fn main() -> Result<(), PdfError> {
     resources.fonts.insert("f1", font);
     */
 
-    new_page.resources = Some(MaybeRef::Indirect(builder.storage.create(resources)?));
+    new_page.resources = resources;
     pages.push(new_page);
     
     let catalog = CatalogBuilder::from_pages(pages);
