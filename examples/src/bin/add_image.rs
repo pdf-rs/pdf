@@ -13,11 +13,11 @@ use image::io::Reader as ImageReader;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Input file
+    /// Input PDF file
     #[arg(short, long)]
     input: PathBuf,
 
-    /// Page number
+    /// Input image file
     #[arg(long)]
     image: PathBuf,
 
