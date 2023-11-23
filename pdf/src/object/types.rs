@@ -1442,7 +1442,7 @@ impl Object for Rect {
 }
 impl ObjectWrite for Rect {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        Primitive::array::<f32, _, _, _>([self.left, self.top, self.right, self.bottom].iter(), update)
+        Primitive::array::<f32, _, _, _>([self.left, self.bottom, self.right, self.top].iter(), update)
     }
 }
 
