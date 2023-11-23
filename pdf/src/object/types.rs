@@ -591,6 +591,7 @@ pub enum ImageFormat {
     Jp2k,
     Jbig2,
     CittFax,
+    Png
 }
 
 impl ImageXObject {
@@ -610,9 +611,7 @@ impl ImageXObject {
                     StreamFilter::ASCIIHexDecode => false,
                     StreamFilter::ASCII85Decode => false,
                     StreamFilter::LZWDecode(_) => false,
-                    StreamFilter::FlateDecode(_) => false,
                     StreamFilter::RunLengthDecode => false,
-        
                     StreamFilter::Crypt => true,
                     _ => true
                 }).unwrap_or(filters.len());
@@ -625,6 +624,7 @@ impl ImageXObject {
                     [StreamFilter::DCTDecode(_)] |
                     [StreamFilter::CCITTFaxDecode(_)] |
                     [StreamFilter::JPXDecode] |
+                    [StreamFilter::FlateDecode(_)] |
                     [StreamFilter::JBIG2Decode(_)] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters)
                 }
@@ -651,7 +651,7 @@ impl ImageXObject {
                 data
             }
             StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
-            StreamFilter::JPXDecode => jpx_decode(&data)?,
+            StreamFilter::JPXDecode => jpx_decode(&data)?, params)?,
             StreamFilter::JBIG2Decode(ref p) => {
                 let global_data = p.globals.as_ref().map(|s| s.data(resolve)).transpose()?;
                 jbig2_decode(&data, global_data.as_deref().unwrap_or_default())?

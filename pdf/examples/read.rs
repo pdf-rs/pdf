@@ -70,6 +70,7 @@ fn main() -> Result<(), PdfError> {
             Some(StreamFilter::DCTDecode(_)) => "jpeg",
             Some(StreamFilter::JBIG2Decode(_)) => "jbig2",
             Some(StreamFilter::JPXDecode) => "jp2k",
+            Some(StreamFilter::FlateDecode(_)) => "png",
             _ => continue,
         };
 
@@ -79,7 +80,6 @@ fn main() -> Result<(), PdfError> {
         println!("Wrote file {}", fname);
     }
     println!("Found {} image(s).", images.len());
-
 
     for (name, font) in fonts.iter() {
         let fname = format!("font_{}", name);
