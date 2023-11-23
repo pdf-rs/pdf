@@ -12,7 +12,7 @@ use std::fmt;
 
 #[derive(Clone)]
 pub (crate) enum StreamData {
-    Generated(Arc<[u8]>, Vec<StreamFilter>),
+    Generated(Arc<[u8]>),
     Original(Range<usize>, PlainRef),
 }
 datasize::non_dynamic_const_heap_size!(StreamData, std::mem::size_of::<StreamData>());
@@ -23,11 +23,15 @@ pub struct Stream<I> {
     pub info: StreamInfo<I>,
     pub (crate) inner_data: StreamData,
 }
-impl<I: Object + fmt::Debug> Stream<I> {
+impl<I: Object> Stream<I> {
     pub fn from_stream(s: PdfStream, resolve: &impl Resolve) -> Result<Self> {
-        let PdfStream {info, id, file_range} = s;
+        let PdfStream {info, inner} = s;
         let info = StreamInfo::<I>::from_primitive(Primitive::Dictionary (info), resolve)?;
-        Ok(Stream { info, inner_data: StreamData::Original(file_range, id) })
+        let inner_data = match inner {
+            StreamInner::InFile { id, file_range } => StreamData::Original(file_range, id),
+            StreamInner::Pending { data } => StreamData::Generated(data)
+        };
+        Ok(Stream { info, inner_data })
     }
 
     /// the data is not compressed. the specified filters are to be applied when compressing the data
@@ -39,7 +43,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            inner_data: StreamData::Generated(data.into(), vec![]),
+            inner_data: StreamData::Generated(data.into()),
         }
     }
     pub fn new(i: I, data: impl Into<Arc<[u8]>>) -> Stream<I> {
@@ -50,7 +54,7 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            inner_data: StreamData::Generated(data.into(), vec![]),
+            inner_data: StreamData::Generated(data.into()),
         }
     }
     /// the data is already compressed with the specified filters
@@ -62,13 +66,14 @@ impl<I: Object + fmt::Debug> Stream<I> {
                 file_filters: Vec::new(),
                 info: i
             },
-            inner_data: StreamData::Generated(data.into(), filters),
+            inner_data: StreamData::Generated(data.into()),
         }
     }
 
     pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
         match self.inner_data {
-            StreamData::Generated(ref data, ref filters) => {
+            StreamData::Generated(ref data) => {
+                let filters = &self.info.filters;
                 if filters.len() == 0 {
                     Ok(data.clone())
                 } else {
@@ -93,7 +98,7 @@ impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
     }
 }
 
-impl<I: Object + fmt::Debug> Object for Stream<I> {
+impl<I: Object> Object for Stream<I> {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let s = PdfStream::from_primitive(p, resolve)?;
@@ -114,6 +119,8 @@ impl<I: ObjectWrite> Stream<I> {
                     StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
                     StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
                     StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
+                    StreamFilter::CCITTFaxDecode(ref p) => Some(p.to_primitive(update)?),
+                    StreamFilter::JBIG2Decode(ref p) => Some(p.to_primitive(update)?),
                     _ => None
                 } {
                     assert!(params.is_none());
@@ -128,7 +135,7 @@ impl<I: ObjectWrite> Stream<I> {
                 StreamFilter::JPXDecode => "JPXDecode",
                 StreamFilter::DCTDecode(ref _p) => "DCTDecode",
                 StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
-                StreamFilter::JBIG2Decode => "JBIG2Decode",
+                StreamFilter::JBIG2Decode(ref _p) => "JBIG2Decode",
                 StreamFilter::Crypt => "Crypt",
                 StreamFilter::RunLengthDecode => "RunLengthDecode",
             })
@@ -147,13 +154,18 @@ impl<I: ObjectWrite> Stream<I> {
             info.insert("DecodeParms", para);
         }
 
-        match self.inner_data {
-            StreamData::Generated(ref _data, _) => unimplemented!(),
+        let inner = match self.inner_data {
+            StreamData::Generated(ref data) => {
+                info.insert("Length", Primitive::Integer(data.len() as _));
+                StreamInner::Pending { data: data.clone() }
+            },
             StreamData::Original(ref file_range, id) => {
                 info.insert("Length", Primitive::Integer(file_range.len() as _));
-                Ok(PdfStream { info, id, file_range: file_range.clone() })
+                StreamInner::InFile { id, file_range: file_range.clone() }
             }
-        }
+        };
+
+        Ok(PdfStream { info, inner })
     }
 }
 impl<I: ObjectWrite> ObjectWrite for Stream<I> {
@@ -161,7 +173,18 @@ impl<I: ObjectWrite> ObjectWrite for Stream<I> {
         self.to_pdf_stream(update).map(Primitive::Stream)
     }
 }
-
+impl<I: DeepClone> DeepClone for Stream<I> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        let data = match self.inner_data {
+            StreamData::Generated(ref data) => data.clone(),
+            StreamData::Original(ref range, id) => cloner.stream_data(id, range.clone())?
+        };
+        Ok(Stream {
+            info: self.info.deep_clone(cloner)?,
+            inner_data: StreamData::Generated(data),
+        })
+    }
+}
 impl<I: Object> Deref for Stream<I> {
     type Target = StreamInfo<I>;
     fn deref(&self) -> &StreamInfo<I> {
@@ -171,7 +194,7 @@ impl<I: Object> Deref for Stream<I> {
 
 
 /// General stream type. `I` is the additional information to be read from the stream dict.
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DataSize, DeepClone)]
 pub struct StreamInfo<I> {
     // General dictionary entries
     /// Filters that the `data` is currently encoded with (corresponds to both `/Filter` and
@@ -240,7 +263,7 @@ impl<T: Object> Object for StreamInfo<T> {
             dict.remove("Filter").unwrap_or(Primitive::Null),
             resolve)?;
 
-        let decode_params = Vec::<Dictionary>::from_primitive(
+        let decode_params = Vec::<Option<Dictionary>>::from_primitive(
             dict.remove("DecodeParms").unwrap_or(Primitive::Null),
             resolve)?;
 
@@ -262,8 +285,8 @@ impl<T: Object> Object for StreamInfo<T> {
 
         for (i, filter) in filters.iter().enumerate() {
             let params = match decode_params.get(i) {
-                Some(params) => params.clone(),
-                None => Dictionary::default(),
+                Some(Some(params)) => params.clone(),
+                _ => Dictionary::default(),
             };
             new_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve)?);
         }

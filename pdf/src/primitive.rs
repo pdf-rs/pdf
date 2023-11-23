@@ -1,12 +1,13 @@
 use crate::error::*;
-use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater};
+use crate::object::{PlainRef, Resolve, Object, NoResolve, ObjectWrite, Updater, DeepClone, Cloner};
 
-use std::collections::{btree_map, BTreeMap};
+use std::sync::Arc;
 use std::{str, fmt, io};
 use std::ops::{Index, Range};
 use std::ops::Deref;
 use std::convert::TryInto;
 use std::borrow::{Borrow, Cow};
+use indexmap::IndexMap;
 use itertools::Itertools;
 use istring::{SmallString, IBytes};
 use datasize::DataSize;
@@ -57,7 +58,7 @@ impl fmt::Display for Primitive {
     }
 }
 impl Primitive {
-    pub fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         match self {
             Primitive::Null => write!(out, "null")?,
             Primitive::Integer(i) => write!(out, "{}", i)?,
@@ -65,8 +66,8 @@ impl Primitive {
             Primitive::Boolean(b) => write!(out, "{}", b)?,
             Primitive::String(ref s) => s.serialize(out)?,
             Primitive::Stream(ref s) => s.serialize(out)?,
-            Primitive::Dictionary(ref d) => d.serialize(out, level)?,
-            Primitive::Array(ref arr) => serialize_list(arr, out, level)?,
+            Primitive::Dictionary(ref d) => d.serialize(out)?,
+            Primitive::Array(ref arr) => serialize_list(arr, out)?,
             Primitive::Reference(r) =>  write!(out, "{} {} R", r.id, r.gen)?,
             Primitive::Name(ref s) => serialize_name(s, out)?,
         }
@@ -83,15 +84,15 @@ impl Primitive {
     }
 }
 
-fn serialize_list(arr: &[Primitive], out: &mut impl io::Write, level: usize) -> Result<()> {
+fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
     let mut parts = arr.iter();
-    write!(out, "{:w$}[", "", w=2*level)?;
+    write!(out, "[")?;
     if let Some(first) = parts.next() {
-        first.serialize(out, level+1)?;
+        first.serialize(out)?;
     }
     for p in parts {
         write!(out, " ")?;
-        p.serialize(out, level+1)?;
+        p.serialize(out)?;
     }
     write!(out, "]")?;
     Ok(())
@@ -111,13 +112,13 @@ pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
 }
 
 /// Primitive Dictionary type.
-#[derive(Default, Clone, PartialEq, DataSize)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Dictionary {
-    dict: BTreeMap<Name, Primitive>
+    dict: IndexMap<Name, Primitive>
 }
 impl Dictionary {
     pub fn new() -> Dictionary {
-        Dictionary { dict: BTreeMap::new()}
+        Dictionary { dict: IndexMap::new()}
     }
     pub fn len(&self) -> usize {
         self.dict.len()
@@ -128,10 +129,10 @@ impl Dictionary {
     pub fn get(&self, key: &str) -> Option<&Primitive> {
         self.dict.get(key)
     }
-    pub fn insert(&mut self, key: impl Into<Name>, val: Primitive) -> Option<Primitive> {
-        self.dict.insert(key.into(), val)
+    pub fn insert(&mut self, key: impl Into<Name>, val: impl Into<Primitive>) -> Option<Primitive> {
+        self.dict.insert(key.into(), val.into())
     }
-    pub fn iter(&self) -> btree_map::Iter<Name, Primitive> {
+    pub fn iter(&self) -> impl Iterator<Item=(&Name, &Primitive)> {
         self.dict.iter()
     }
     pub fn remove(&mut self, key: &str) -> Option<Primitive> {
@@ -167,26 +168,42 @@ impl Dictionary {
         }
     }
 }
+impl DataSize for Dictionary {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = std::mem::size_of::<Self>();
+    fn estimate_heap_size(&self) -> usize {
+        self.iter().map(|(k, v)| 16 + k.estimate_heap_size() + v.estimate_heap_size()).sum()
+    }
+}
 impl ObjectWrite for Dictionary {
     fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         Ok(Primitive::Dictionary(self.clone()))
     }
 }
+impl DeepClone for Dictionary {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        Ok(Dictionary {
+            dict: self.dict.iter()
+                .map(|(key, value)| Ok((key.clone(), value.deep_clone(cloner)?)))
+                .try_collect::<_, _, PdfError>()?
+        })
+    }
+}
 impl Deref for Dictionary {
-    type Target = BTreeMap<Name, Primitive>;
-    fn deref(&self) -> &BTreeMap<Name, Primitive> {
+    type Target = IndexMap<Name, Primitive>;
+    fn deref(&self) -> &IndexMap<Name, Primitive> {
         &self.dict
     }
 }
 impl Dictionary {
-    fn serialize(&self, out: &mut impl io::Write, level: usize) -> Result<()> {
+    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         writeln!(out, "<<")?;
         for (key, val) in self.iter() {
-            write!(out, "{:w$}/{} ", "", key, w=2*level+2)?;
-            val.serialize(out, level+2)?;
+            write!(out, "{} ", key)?;
+            val.serialize(out)?;
             writeln!(out)?;
         }
-        writeln!(out, "{:w$}>>", "", w=2*level)?;
+        writeln!(out, ">>")?;
         Ok(())
     }
 }
@@ -212,14 +229,14 @@ impl<'a> Index<&'a str> for Dictionary {
 }
 impl IntoIterator for Dictionary {
     type Item = (Name, Primitive);
-    type IntoIter = btree_map::IntoIter<Name, Primitive>;
+    type IntoIter = indexmap::map::IntoIter<Name, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         self.dict.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a Dictionary {
     type Item = (&'a Name, &'a Primitive);
-    type IntoIter = btree_map::Iter<'a, Name, Primitive>;
+    type IntoIter = indexmap::map::Iter<'a, Name, Primitive>;
     fn into_iter(self) -> Self::IntoIter {
         self.dict.iter()
     }
@@ -229,8 +246,13 @@ impl<'a> IntoIterator for &'a Dictionary {
 #[derive(Clone, Debug, PartialEq, DataSize)]
 pub struct PdfStream {
     pub info: Dictionary,
-    pub (crate) id: PlainRef,
-    pub (crate) file_range: Range<usize>,
+    pub (crate) inner: StreamInner,
+}
+
+#[derive(Clone, Debug, PartialEq, DataSize)]
+pub enum StreamInner {
+    InFile { id: PlainRef, file_range: Range<usize> },
+    Pending { data: Arc<[u8]> },
 }
 impl Object for PdfStream {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -241,15 +263,43 @@ impl Object for PdfStream {
         }
     }
 }
+impl ObjectWrite for PdfStream {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(self.clone().into())
+    }
+}
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        self.info.serialize(out, 0)?;
+        self.info.serialize(out)?;
 
         writeln!(out, "stream")?;
-        unimplemented!();
-        //out.write_all(&self.data)?;
-        //writeln!(out, "\nendstream")?;
-        //Ok(())
+        match self.inner {
+            StreamInner::InFile { .. } => {
+                unimplemented!()
+            }
+            StreamInner::Pending { ref data } => {
+                out.write_all(data)?;
+            }
+        }
+        writeln!(out, "\nendstream")?;
+        Ok(())
+    }
+    pub fn raw_data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
+        match self.inner {
+            StreamInner::InFile { id, ref file_range } => resolve.stream_data(id, file_range.clone()),
+            StreamInner::Pending { ref data } => Ok(data.clone())
+        }
+    }
+}
+impl DeepClone for PdfStream {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        let data = match self.inner {
+            StreamInner::InFile { id, ref file_range } => cloner.stream_data(id, file_range.clone())?,
+            StreamInner::Pending { ref data } => data.clone()
+        };
+        Ok(PdfStream {
+            info: self.info.deep_clone(cloner)?, inner: StreamInner::Pending { data }
+        })
     }
 }
 
@@ -276,6 +326,12 @@ impl Deref for Name {
     #[inline]
     fn deref(&self) -> &str {
         &self.0
+    }
+}
+impl From<String> for Name {
+    #[inline]
+    fn from(s: String) -> Name {
+        Name(s.into())
     }
 }
 impl From<SmallString> for Name {
@@ -423,7 +479,11 @@ impl PdfString {
         }
     }
 }
-
+impl<'a> From<&'a str> for PdfString {
+    fn from(value: &'a str) -> Self {
+        PdfString { data: value.into() }
+    }
+}
 
 // TODO:
 // Noticed some inconsistency here.. I think to_* and as_* should not take Resolve, and not accept
@@ -454,6 +514,13 @@ impl Primitive {
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
             Primitive::Integer(n) => Ok(n),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name())
+        }
+    }
+    pub fn as_u8(&self) -> Result<u8> {
+        match *self {
+            Primitive::Integer(n) if (0..256).contains(&n) => Ok(n as u8),
+            Primitive::Integer(_) => bail!("invalid integer"),
             ref p => unexpected_primitive!(Integer, p.get_debug_name())
         }
     }
@@ -610,7 +677,7 @@ impl<'a> TryInto<Name> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<Name> {
         match self {
-            &Primitive::Name(ref s) => Ok(Name(s.clone())),
+            Primitive::Name(s) => Ok(Name(s.clone())),
             p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name",
                 found: p.get_debug_name()
@@ -641,7 +708,7 @@ impl<'a> TryInto<Cow<'a, str>> for &'a Primitive {
     type Error = PdfError;
     fn try_into(self) -> Result<Cow<'a, str>> {
         match *self {
-            Primitive::Name(ref s) => Ok(Cow::Borrowed(&*s)),
+            Primitive::Name(ref s) => Ok(Cow::Borrowed(s)),
             Primitive::String(ref s) => Ok(Cow::Owned(s.to_string_lossy())),
             ref p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Name or String",
@@ -670,7 +737,7 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Date {
     pub year: u16,
     pub month: u8,
@@ -678,14 +745,22 @@ pub struct Date {
     pub hour: u8,
     pub minute: u8,
     pub second: u8,
+    pub rel: TimeRel,
     pub tz_hour: u8,
     pub tz_minute: u8,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub enum TimeRel {
+    Earlier,
+    Later,
+    Universal
 }
 datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
 
 impl Object for Date {
-    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        match p {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p.resolve(r)? {
             Primitive::String (PdfString {data}) => {
                 let s = str::from_utf8(&data)?;
                 let len = s.len();
@@ -697,31 +772,69 @@ impl Object for Date {
                         }
                         None => bail!("Missing obligatory year in date")
                     };
-                    let month = parse_or(s, 6..8, 1);
-                    let day = parse_or(s, 8..10, 1);
-                    let hour = parse_or(s, 10..12, 0);
-                    let minute = parse_or(s, 12..14, 0);
-                    let second = parse_or(s, 14..16, 0);
-                    let tz_hour = parse_or(s, 16..18, 0);
-                    let tz_minute = parse_or(s, 19..21, 0);
+                    
+                    let (time, rel, zone) = match s.find(['+', '-', 'Z']) {
+                        Some(p) => {
+                            let rel = match &s[p..p+1] {
+                                "-" => TimeRel::Earlier,
+                                "+" => TimeRel::Later,
+                                "Z" => TimeRel::Universal,
+                                _ => unreachable!()
+                            };
+                            (&s[..p], rel, &s[p+1..])
+                        }
+                        None => (s, TimeRel::Universal, "")
+                    };
+
+                    let month = parse_or(time, 6..8, 1);
+                    let day = parse_or(time, 8..10, 1);
+                    let hour = parse_or(time, 10..12, 0);
+                    let minute = parse_or(time, 12..14, 0);
+                    let second = parse_or(time, 14..16, 0);
+                    let tz_hour = parse_or(zone, 0..2, 0);
+                    let tz_minute = parse_or(zone, 3..5, 0);
                     
                     Ok(Date {
                         year, month, day,
                         hour, minute, second,
                         tz_hour, tz_minute,
+                        rel
                     })
                 } else {
                     bail!("Failed parsing date");
                 }
             }
-            _ => unexpected_primitive!(String, p.get_debug_name()),
+            p => unexpected_primitive!(String, p.get_debug_name()),
         }
+    }
+}
+
+impl ObjectWrite for Date {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
+        let Date {
+            year, month, day,
+            hour, minute, second,
+            tz_hour, tz_minute, rel,
+        } = *self;
+        if year > 9999 || day > 99 || hour > 23 || minute >= 60 || second >= 60 || tz_hour >= 24 || tz_minute >= 60 {
+            bail!("not a valid date");
+        }
+        let o = match rel {
+            TimeRel::Earlier => "-",
+            TimeRel::Later => "+",
+            TimeRel::Universal => "Z"
+        };
+        
+        let s = format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}{o}{tz_hour:02}'{tz_minute:02}");
+        Ok(Primitive::String(PdfString { data: s.into() }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::primitive::PdfString;
+    use crate::{primitive::{PdfString, TimeRel}, object::{NoResolve, Object}};
+
+    use super::Date;
     #[test]
     fn utf16be_string() {
         let s = PdfString::new([0xfe, 0xff, 0x20, 0x09].as_slice().into());
@@ -761,5 +874,24 @@ mod tests {
         let repl_ch = ['m', 'i', 't', std::char::REPLACEMENT_CHARACTER].iter().collect::<String>();
         assert_eq!(s.to_string_lossy(), repl_ch);
         assert!(s.to_string().is_err()); // FIXME verify it is a PdfError::Utf16Decode
+    }
+
+    #[test]
+    fn date() {
+        let p = PdfString::from("D:199812231952-08'00");
+        let d = Date::from_primitive(p.into(), &NoResolve);
+        
+        let d2 = Date {
+            year: 1998,
+            month: 12,
+            day: 23,
+            hour: 19,
+            minute: 52,
+            second: 00,
+            rel: TimeRel::Earlier,
+            tz_hour: 8,
+            tz_minute: 0
+        };
+        assert_eq!(d.unwrap(), d2);
     }
 }

@@ -65,6 +65,7 @@ fn main() {
     println!("read: {}", path);
 
     let file = FileOptions::cached().open(&path).unwrap();
+    let resolver = file.resolver();
     let catalog = file.get_root();
 
     let mut pages_map: HashMap<String, PlainRef> = HashMap::new();
@@ -81,7 +82,7 @@ fn main() {
 
     if let Some(ref names) = catalog.names {
         if let Some(ref dests) = names.dests {
-            dests.walk(&file, &mut dests_cb).unwrap();
+            dests.walk(&resolver, &mut dests_cb).unwrap();
         }
     }
 
@@ -100,7 +101,7 @@ fn main() {
             }
         }
     }
-    add_tree(&file, &mut pages, &catalog.pages, &mut 0);
+    add_tree(&resolver, &mut pages, &catalog.pages, &mut 0);
 
     let get_page_nr = |name: &str| -> usize {
         let page = pages_map[name];
@@ -112,8 +113,8 @@ fn main() {
 
     if let Some(ref outlines) = catalog.outlines {
         if let Some(entry_ref) = outlines.first {
-            let entry = file.get(entry_ref).unwrap();
-            walk_outline(&file, entry, &get_page_nr, &page_nr, 0);
+            let entry = resolver.get(entry_ref).unwrap();
+            walk_outline(&resolver, entry, &get_page_nr, &page_nr, 0);
         }
     }
 

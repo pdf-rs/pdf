@@ -5,22 +5,33 @@ use std::time::SystemTime;
 use std::fs;
 use std::collections::HashMap;
 
-use pdf::file::{FileOptions};
+use pdf::file::{FileOptions, Log};
 use pdf::object::*;
 use pdf::primitive::Primitive;
 use pdf::error::PdfError;
 use pdf::enc::StreamFilter;
 
+struct VerboseLog;
+impl Log for VerboseLog {
+    fn load_object(&self, r: PlainRef) {
+        println!("load {r:?}");
+    }
+    fn log_get(&self, r: PlainRef) {
+        println!("get {r:?}");
+    }
+}
 
 fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
     let now = SystemTime::now();
 
-    let file = FileOptions::cached().open(&path).unwrap();
+    let file = FileOptions::cached().log(VerboseLog).open(&path).unwrap();
+    let resolver = file.resolver();
+
     if let Some(ref info) = file.trailer.info_dict {
-        let title = info.get("Title").and_then(|p| p.to_string_lossy().ok());
-        let author = info.get("Author").and_then(|p| p.to_string_lossy().ok());
+        let title = info.title.as_ref().map(|p| p.to_string_lossy());
+        let author = info.author.as_ref().map(|p| p.to_string_lossy());
 
         let descr = match (title, author) {
             (Some(title), None) => title,
@@ -44,7 +55,7 @@ fn main() -> Result<(), PdfError> {
             };
             fonts.insert(name, font.clone());
         }
-        images.extend(resources.xobjects.iter().map(|(_name, &r)| file.get(r).unwrap())
+        images.extend(resources.xobjects.iter().map(|(_name, &r)| resolver.get(r).unwrap())
             .filter(|o| matches!(**o, XObject::Image(_)))
         );
     }
@@ -54,10 +65,10 @@ fn main() -> Result<(), PdfError> {
             XObject::Image(ref im) => im,
             _ => continue
         };
-        let (data, filter) = img.raw_image_data(&file)?;
+        let (data, filter) = img.raw_image_data(&resolver)?;
         let ext = match filter {
             Some(StreamFilter::DCTDecode(_)) => "jpeg",
-            Some(StreamFilter::JBIG2Decode) => "jbig2",
+            Some(StreamFilter::JBIG2Decode(_)) => "jbig2",
             Some(StreamFilter::JPXDecode) => "jp2k",
             Some(StreamFilter::FlateDecode(_)) => "png",
             _ => continue,
@@ -69,5 +80,32 @@ fn main() -> Result<(), PdfError> {
         println!("Wrote file {}", fname);
     }
     println!("Found {} image(s).", images.len());
+
+    for (name, font) in fonts.iter() {
+        let fname = format!("font_{}", name);
+        if let Some(Ok(data)) = font.embedded_data(&resolver) {
+            fs::write(fname.as_str(), data).unwrap();
+            println!("Wrote file {}", fname);
+        }
+    }
+    println!("Found {} font(s).", fonts.len());
+
+    if let Some(ref forms) = file.get_root().forms {
+        println!("Forms:");
+        for field in forms.fields.iter() {
+            print!("  {:?} = ", field.name);
+            match field.value {
+                Primitive::String(ref s) => println!("{}", s.to_string_lossy()),
+                Primitive::Integer(i) => println!("{}", i),
+                Primitive::Name(ref s) => println!("{}", s),
+                ref p => println!("{:?}", p),
+            }
+        }
+    }
+
+    if let Ok(elapsed) = now.elapsed() {
+        println!("Time: {}s", elapsed.as_secs() as f64
+                 + elapsed.subsec_nanos() as f64 * 1e-9);
+    }
     Ok(())
 }

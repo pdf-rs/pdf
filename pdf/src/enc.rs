@@ -2,19 +2,18 @@
 #![allow(dead_code)]  // TODO
 
 use itertools::Itertools;
-use inflate::{inflate_bytes_zlib, inflate_bytes};
-use deflate::deflate_bytes;
 
 use crate as pdf;
 use crate::error::*;
-use crate::object::{Object, Resolve};
+use crate::object::{Object, Resolve, Stream};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::TryInto;
+use std::io::{Read, Write};
 use once_cell::sync::OnceCell;
 use datasize::DataSize;
 
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct LZWFlateParams {
     #[pdf(key="Predictor", default="1")]
     pub predictor: i32,
@@ -39,7 +38,7 @@ impl Default for LZWFlateParams {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct DCTDecodeParams {
     // TODO The default value of ColorTransform is 1 if the image has three components and 0 otherwise.
     // 0:   No transformation.
@@ -50,7 +49,7 @@ pub struct DCTDecodeParams {
     pub color_transform: Option<i32>,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct CCITTFaxDecodeParams {
     #[pdf(key="K", default="0")]
     pub k: i32,
@@ -76,7 +75,13 @@ pub struct CCITTFaxDecodeParams {
     #[pdf(key="DamagedRowsBeforeError", default="0")]
     pub damaged_rows_before_error: u32,
 }
-#[derive(Debug, Clone, DataSize)]
+
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
+pub struct JBIG2DecodeParams {
+    #[pdf(key="JBIG2Globals")]
+    pub globals: Option<Stream<()>>
+}
+#[derive(Debug, Clone, DataSize, DeepClone)]
 pub enum StreamFilter {
     ASCIIHexDecode,
     ASCII85Decode,
@@ -85,7 +90,7 @@ pub enum StreamFilter {
     JPXDecode, //Jpeg2k
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
-    JBIG2Decode,
+    JBIG2Decode(JBIG2DecodeParams),
     Crypt,
     RunLengthDecode
 }
@@ -101,7 +106,7 @@ impl StreamFilter {
            "JPXDecode" => StreamFilter::JPXDecode,
            "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
-           "JBIG2Decode" => StreamFilter::JBIG2Decode,
+           "JBIG2Decode" => StreamFilter::JBIG2Decode(JBIG2DecodeParams::from_primitive(params, r)?),
            "Crypt" => StreamFilter::Crypt,
            "RunLengthDecode" => StreamFilter::RunLengthDecode,
            ty => bail!("Unrecognized filter type {:?}", ty),
@@ -250,18 +255,39 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     buf
 }
 
+fn inflate_bytes_zlib(data: &[u8]) -> Result<Vec<u8>> {
+    use libflate::zlib::Decoder;
+    let mut decoder = Decoder::new(data)?;
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded)?;
+    Ok(decoded)
+}
+
+fn inflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    use libflate::deflate::Decoder;
+    let mut decoder = Decoder::new(data);
+    let mut decoded = Vec::new();
+    decoder.read_to_end(&mut decoded)?;
+    Ok(decoded)
+}
+
 pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+
     let predictor = params.predictor as usize;
     let n_components = params.n_components as usize;
     let columns = params.columns as usize;
     let stride = columns * n_components;
 
+
     // First flate decode
-    let decoded = match inflate_bytes_zlib(data) {
-        Ok(data) => data,
-        Err(_) => {
-            info!("invalid zlib header. trying without");
-            inflate_bytes(data)?
+    let decoded = {
+        if let Ok(data) = inflate_bytes_zlib(data) {
+            data
+        } else if let Ok(data) = inflate_bytes(data) {
+            data
+        } else {
+            dump_data(data);
+            bail!("can't inflate");
         }
     };
     // Then unfilter (PNG)
@@ -306,7 +332,11 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     }
 }
 fn flate_encode(data: &[u8]) -> Vec<u8> {
-    deflate_bytes(data)
+    use libflate::deflate::Encoder;
+    let mut encoded = Vec::new();
+    let mut encoder = Encoder::new(&mut encoded);
+    encoder.write_all(data).unwrap();
+    encoded
 }
 
 pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
@@ -388,7 +418,7 @@ pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
             let copy = 257 - length as usize; // copy 2 - 128 times
             let b = d[c + 1]; // copied byte
             buf.extend(std::iter::repeat(b).take(copy));
-            c = c + 2; // move cursor to next run
+            c += 2; // move cursor to next run
         } else {
             break; // EOD
         }
@@ -411,8 +441,21 @@ pub fn set_jbig2_decoder(f: Box<DecodeFn>) {
 pub fn jpx_decode(data: &[u8]) -> Result<Vec<u8>> {
     JPX_DECODER.get().ok_or_else(|| PdfError::Other { msg: "jp2k decoder not set".into()})?(data)
 }
-pub fn jbig2_decode(data: &[u8]) -> Result<Vec<u8>> {
-    JBIG2_DECODER.get().ok_or_else(|| PdfError::Other { msg: "jbig2 decoder not set".into()})?(data)
+pub fn jbig2_decode(data: &[u8], globals: &[u8]) -> Result<Vec<u8>> {
+    let data = [
+        // file header
+        // &[0x97, 0x4A, 0x42, 0x32, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x00, 0x00, 0x00, 0x01],
+
+        globals,
+        data,
+
+        // end of page
+        &[0x00, 0x00, 0x00, 0x03, 0x31, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
+
+        // end of stream
+        &[0x00, 0x00, 0x00, 0x04, 0x33, 0x01, 0x00, 0x00, 0x00, 0x00],
+    ].concat();
+    JBIG2_DECODER.get().ok_or_else(|| PdfError::Other { msg: "jbig2 decoder not set".into()})?(&data)
 }
 
 pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
@@ -492,6 +535,9 @@ pub fn unfilter(filter: PredictorType, bpp: usize, prev: &[u8], inp: &[u8], out:
     let len = inp.len();
     assert_eq!(len, out.len());
     assert_eq!(len, prev.len());
+    if bpp > len {
+        return;
+    }
 
     match filter {
         NoFilter => {

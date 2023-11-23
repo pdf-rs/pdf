@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use datasize::DataSize;
 
 use crate as pdf;
+use crate::content::deep_clone_op;
 use crate::object::*;
 use crate::error::*;
 use crate::content::{Content, FormXObject, Matrix, parse_ops, serialize_ops, Op};
@@ -67,6 +68,9 @@ impl PageRc {
     pub fn create(page: Page, update: &mut impl Updater) -> Result<PageRc> {
         Ok(PageRc(update.create(PagesNode::Leaf(page))?))
     }
+    pub fn get_ref(&self) -> Ref<PagesNode> {
+        self.0.get_ref()
+    }
 }
 
 /// A `PagesNode::Tree` wrapped in a `RcRef`
@@ -103,8 +107,11 @@ impl ObjectWrite for PagesRc {
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
+#[pdf(Type = "Catalog?")]
 pub struct Catalog {
-// Version: Name,
+    #[pdf(key="Version")]
+    pub version: Option<Name>,
+
     #[pdf(key="Pages")]
     pub pages: PagesRc,
 
@@ -135,6 +142,7 @@ pub struct Catalog {
 
     #[pdf(key="StructTreeRoot")]
     pub struct_tree_root: Option<StructTreeRoot>,
+
 // MarkInfo: dict
 // Lang: text string
 // SpiderInfo: dict
@@ -243,7 +251,7 @@ pub struct Page {
     #[pdf(key="Parent")]
     pub parent: PagesRc,
 
-    #[pdf(key="Resources")]
+    #[pdf(key="Resources", indirect)]
     pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
@@ -269,6 +277,9 @@ pub struct Page {
 
     #[pdf(key="VP")]
     pub vp:         Option<Primitive>,
+
+    #[pdf(other)]
+    pub other: Dictionary,
 }
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
     where F: Fn(&'a PageTree) -> Option<T>
@@ -295,19 +306,20 @@ impl Page {
             metadata:   None,
             lgi:        None,
             vp:         None,
+            other: Dictionary::new(),
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
         match self.media_box {
             Some(b) => Ok(b),
-            None => inherit(&*self.parent, |pt| pt.media_box)?
+            None => inherit(&self.parent, |pt| pt.media_box)?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
         }
     }
     pub fn crop_box(&self) -> Result<Rect> {
         match self.crop_box {
             Some(b) => Ok(b),
-            None => match inherit(&*self.parent, |pt| pt.crop_box)? {
+            None => match inherit(&self.parent, |pt| pt.crop_box)? {
                 Some(b) => Ok(b),
                 None => self.media_box()
             }
@@ -316,7 +328,7 @@ impl Page {
     pub fn resources(&self) -> Result<&MaybeRef<Resources>> {
         match self.resources {
             Some(ref r) => Ok(r),
-            None => inherit(&*self.parent, |pt| pt.resources.as_ref())?
+            None => inherit(&self.parent, |pt| pt.resources.as_ref())?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "Resources".into() })
         }
     }
@@ -335,7 +347,7 @@ pub struct PageLabel {
     pub start:  Option<usize>
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Default, DeepClone, Clone)]
 pub struct Resources {
     #[pdf(key="ExtGState")]
     pub graphics_states: HashMap<Name, GraphicsStateParameters>,
@@ -363,7 +375,7 @@ impl Resources {
 }
 
 
-#[derive(Debug, Object, ObjectWrite, DataSize, Clone)]
+#[derive(Debug, Object, ObjectWrite, DataSize, Clone, DeepClone)]
 pub struct PatternDict {
     #[pdf(key="PaintType")]
     pub paint_type: Option<i32>,
@@ -428,21 +440,38 @@ impl ObjectWrite for Pattern {
         }
     }
 }
+impl DeepClone for Pattern {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        match *self {
+            Pattern::Dict(ref d) => Ok(Pattern::Dict(d.deep_clone(cloner)?)),
+            Pattern::Stream(ref dict, ref ops) => {
+                let old_resources = cloner.get(dict.resources)?;
+                let mut resources = Resources::default();
+                let ops: Vec<Op> = ops.iter().map(|op| deep_clone_op(op, cloner, &old_resources, &mut resources)).collect::<Result<Vec<_>>>()?;
+                let dict = PatternDict {
+                    resources: cloner.create(resources)?.get_ref(),
+                    .. *dict
+                };
+                Ok(Pattern::Stream(dict, ops))
+            }
+        }
+    }
+}
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, DeepClone, Debug, DataSize, Copy, Clone)]
 pub enum LineCap {
     Butt = 0,
     Round = 1,
     Square = 2
 }
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, DeepClone, Debug, DataSize, Copy, Clone)]
 pub enum LineJoin {
     Miter = 0,
     Round = 1,
     Bevel = 2
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, DeepClone, Debug, DataSize, Clone)]
 #[pdf(Type = "ExtGState?")]
 /// `ExtGState`
 pub struct GraphicsStateParameters {
@@ -510,7 +539,7 @@ pub struct GraphicsStateParameters {
     _other: Dictionary
 }
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone)]
 #[pdf(is_stream)]
 pub enum XObject {
     #[pdf(name="PS")]
@@ -518,11 +547,23 @@ pub enum XObject {
     Image (ImageXObject),
     Form (FormXObject),
 }
+impl ObjectWrite for XObject {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let (subtype, mut stream) = match self {
+            XObject::Postscript(s) => ("PS", s.to_pdf_stream(update)?),
+            XObject::Form(s) => ("Form", s.stream.to_pdf_stream(update)?),
+            XObject::Image(s) => ("Image", s.inner.to_pdf_stream(update)?),
+        };
+        stream.info.insert("Subtype", Name::from(subtype));
+        stream.info.insert("Type", Name::from("XObject"));
+        Ok(stream.into())
+    }
+}
 
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;
 
-#[derive(Debug, DataSize, Clone)]
+#[derive(Debug, DataSize, Clone, DeepClone)]
 pub struct ImageXObject {
     pub inner: Stream<ImageDict>
 }
@@ -530,6 +571,11 @@ impl Object for ImageXObject {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let s = PdfStream::from_primitive(p, resolve)?;
         Self::from_stream(s, resolve)
+    }
+}
+impl ObjectWrite for ImageXObject {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.inner.to_primitive(update)   
     }
 }
 impl Deref for ImageXObject {
@@ -557,7 +603,7 @@ impl ImageXObject {
     /// Decode everything except for the final image encoding (jpeg, jbig2, jp2k, ...)
     pub fn raw_image_data(&self, resolve: &impl Resolve) -> Result<(Arc<[u8]>, Option<&StreamFilter>)> {
         match self.inner.inner_data {
-            StreamData::Generated(_, _) => Ok((self.inner.data(resolve)?, None)),
+            StreamData::Generated(_) => Ok((self.inner.data(resolve)?, None)),
             StreamData::Original(ref file_range, id) => {
                 let filters = self.inner.filters.as_slice();
                 // decode all non image filters
@@ -579,7 +625,7 @@ impl ImageXObject {
                     [StreamFilter::CCITTFaxDecode(_)] |
                     [StreamFilter::JPXDecode] |
                     [StreamFilter::FlateDecode(_)] |
-                    [StreamFilter::JBIG2Decode] => Ok((data, Some(&image_filters[0]))),
+                    [StreamFilter::JBIG2Decode(_)] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters)
                 }
             }
@@ -592,7 +638,7 @@ impl ImageXObject {
             Some(f) => f,
             None => return Ok(data)
         };
-        let data = match filter {
+        let mut data = match filter {
             StreamFilter::CCITTFaxDecode(ref params) => {
                 if self.inner.info.width != params.columns {
                     bail!("image width mismatch {} != {}", self.inner.info.width, params.columns);
@@ -605,22 +651,31 @@ impl ImageXObject {
                 data
             }
             StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
-            StreamFilter::JPXDecode => jpx_decode(&data)?,
-            StreamFilter::JBIG2Decode => jbig2_decode(&data)?,
-            StreamFilter::FlateDecode(ref params) => flate_decode(&data, params)?,
+            StreamFilter::JPXDecode => jpx_decode(&data)?, params)?,
+            StreamFilter::JBIG2Decode(ref p) => {
+                let global_data = p.globals.as_ref().map(|s| s.data(resolve)).transpose()?;
+                jbig2_decode(&data, global_data.as_deref().unwrap_or_default())?
+            },
             _ => unreachable!()
         };
+        if let Some(ref decode) = self.decode {
+            if decode == &[1.0, 0.0] && self.bits_per_component == Some(1) {
+                data.iter_mut().for_each(|b| *b = !*b);
+            }
+        }
         Ok(data.into())
     }
 }
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
 #[pdf(Type="XObject", Subtype="PS")]
 pub struct PostScriptDict {
     // TODO
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite, Default)]
 #[pdf(Type="XObject?", Subtype="Image")]
 /// A variant of XObject
 pub struct ImageDict {
@@ -677,11 +732,11 @@ pub struct ImageDict {
     // OC: dict
     
     #[pdf(other)]
-    pub(crate) other: Dictionary
+    pub other: Dictionary
 }
 
 
-#[derive(Object, Debug, Copy, Clone, DataSize)]
+#[derive(Object, Debug, Copy, Clone, DataSize, DeepClone, ObjectWrite)]
 pub enum RenderingIntent {
     AbsoluteColorimetric,
     RelativeColorimetric,
@@ -709,7 +764,7 @@ impl RenderingIntent {
 }
 
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     #[pdf(key="FormType", default="1")]
@@ -755,6 +810,7 @@ pub struct FormDict {
     pub other: Dictionary,
 }
 
+
 #[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 pub struct InteractiveFormDictionary {
     #[pdf(key="Fields")]
@@ -792,6 +848,79 @@ pub enum FieldType {
     Choice,
     #[pdf(name="Sig")]
     Signature,
+    #[pdf(name="SigRef")]
+    SignatureReference,
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="SV")]
+pub struct SeedValueDictionary {
+    #[pdf(key="Ff", default="0")]
+    pub flags: u32,
+    #[pdf(key="Filter")]
+    pub filter: Option<Name>,
+    #[pdf(key="SubFilter")]
+    pub sub_filter:  Option<Vec<Name>>,
+    #[pdf(key="V")]
+    pub value: Option<Primitive>,
+    #[pdf(key="DigestMethod")]
+    pub digest_method: Vec<PdfString>,
+    #[pdf(other)]
+    pub other: Dictionary
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="Sig?")]
+pub struct SignatureDictionary {
+    #[pdf(key="Filter")]
+    pub filter: Name,
+    #[pdf(key="SubFilter")]
+    pub sub_filter: Name,
+    #[pdf(key="ByteRange")]
+    pub byte_range: Vec<usize>,
+    #[pdf(key="Contents")]
+    pub contents: PdfString,
+    #[pdf(key="Cert")]
+    pub cert: Vec<PdfString>,
+    #[pdf(key="Reference")]
+    pub reference: Option<Primitive>,
+    #[pdf(key="Name")]
+    pub name: Option<PdfString>,
+    #[pdf(key="M")]
+    pub m: Option<PdfString>,
+    #[pdf(key="Location")]
+    pub location: Option<PdfString>,
+    #[pdf(key="Reason")]
+    pub reason: Option<PdfString>,
+    #[pdf(key="ContactInfo")]
+    pub contact_info: Option<PdfString>,
+    #[pdf(key="V")]
+    pub v: i32,
+    #[pdf(key="R")]
+    pub r: i32,
+    #[pdf(key="Prop_Build")]
+    pub prop_build: Dictionary,
+    #[pdf(key="Prop_AuthTime")]
+    pub prop_auth_time: i32,
+    #[pdf(key="Prop_AuthType")]
+    pub prop_auth_type: Name,
+    #[pdf(other)]
+    pub other: Dictionary
+}
+
+#[derive(Object, ObjectWrite, Debug)]
+#[pdf(Type="SigRef?")]
+pub struct SignatureReferenceDictionary {
+    #[pdf(key="TransformMethod")]
+    pub transform_method: Name,
+    #[pdf(key="TransformParams")]
+    pub transform_params: Option<Dictionary>,
+    #[pdf(key="Data")]
+    pub data: Option<Primitive>,
+    #[pdf(key="DigestMethod")]
+    pub digest_method: Option<Name>,
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
@@ -816,6 +945,9 @@ pub struct FieldDictionary {
     
     #[pdf(key="Ff", default="0")]
     pub flags: u32,
+
+    #[pdf(key="SigFlags", default="0")]
+    pub sig_flags: u32,
 
     #[pdf(key="V")]
     pub value: Primitive,
@@ -1140,7 +1272,7 @@ pub struct NameDictionary {
  * to embedded file streams through their EF entries.
 */
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone)]
 pub struct FileSpec {
     #[pdf(key="EF")]
     pub ef: Option<Files<Ref<Stream<EmbeddedFile>>>>,
@@ -1151,8 +1283,8 @@ pub struct FileSpec {
 }
 
 /// Used only as elements in `FileSpec`
-#[derive(Object, ObjectWrite, Debug, Clone)]
-pub struct Files<T: Object + ObjectWrite + DataSize> {
+#[derive(Object, ObjectWrite, Debug, Clone, DeepClone)]
+pub struct Files<T> {
     #[pdf(key="F")]
     pub f: Option<T>,
     #[pdf(key="UF")]
@@ -1164,7 +1296,7 @@ pub struct Files<T: Object + ObjectWrite + DataSize> {
     #[pdf(key="Unix")]
     pub unix: Option<T>,
 }
-impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
+impl<T: DataSize> DataSize for Files<T> {
     const IS_DYNAMIC: bool = T::IS_DYNAMIC;
     const STATIC_HEAP_SIZE: usize = 5 * Option::<T>::STATIC_HEAP_SIZE;
 
@@ -1179,31 +1311,31 @@ impl<T: Object + ObjectWrite + DataSize> DataSize for Files<T> {
 }
 
 /// PDF Embedded File Stream.
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
 pub struct EmbeddedFile {
-    /*
     #[pdf(key="Subtype")]
-    subtype: Option<String>,
-    */
+    subtype: Option<Name>,
+    
     #[pdf(key="Params")]
     pub params: Option<EmbeddedFileParamDict>,
 }
 
-#[derive(Object, Debug, Clone, DataSize)]
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
 pub struct EmbeddedFileParamDict {
     #[pdf(key="Size")]
     pub size: Option<i32>,
-    /*
-    // TODO need Date type
+    
     #[pdf(key="CreationDate")]
-    creationdate: T,
+    creationdate: Option<Date>,
+
     #[pdf(key="ModDate")]
-    moddate: T,
+    moddate: Option<Date>,
+
     #[pdf(key="Mac")]
-    mac: T,
+    mac: Option<Date>,
+
     #[pdf(key="CheckSum")]
-    checksum: T,
-    */
+    checksum: Option<Date>,
 }
 
 #[derive(Object, Debug, Clone, DataSize)]
@@ -1406,6 +1538,43 @@ pub enum StructType {
     Form,
     #[pdf(other)]
     Other(String),
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize)]
+pub enum Trapped {
+    True,
+    False,
+    Unknown,
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
+pub struct InfoDict {
+    #[pdf(key="Title")]
+    pub title: Option<PdfString>,
+
+    #[pdf(key="Author")]
+    pub author: Option<PdfString>,
+
+    #[pdf(key="Subject")]
+    pub subject: Option<PdfString>,
+
+    #[pdf(key="Keywords")]
+    pub keywords: Option<PdfString>,
+
+    #[pdf(key="Creator")]
+    pub creator: Option<PdfString>,
+
+    #[pdf(key="Author")]
+    pub producer: Option<PdfString>,
+
+    #[pdf(key="CreationDate")]
+    pub creation_date: Option<Date>,
+
+    #[pdf(key="ModDate")]
+    pub mod_date: Option<Date>,
+
+    #[pdf(key="Trapped")]
+    pub trapped: Option<Trapped>,
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use crate::object::*;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use crate::primitive::*;
 use crate::enc::StreamFilter;
+use crate as pdf;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
 #[derive(Debug, Clone, DataSize)]
@@ -31,7 +32,7 @@ impl Content {
 
 pub fn parse_ops(data: &[u8], resolve: &impl Resolve) -> Result<Vec<Op>> {
     let mut ops = OpBuilder::new();
-    ops.parse(&data, resolve)?;
+    ops.parse(data, resolve)?;
     Ok(ops.ops)
 }
 
@@ -514,7 +515,7 @@ impl Object for Content {
     }
 }
 
-#[derive(Debug, DataSize)]
+#[derive(Debug, DataSize, DeepClone)]
 pub struct FormXObject {
     pub stream: Stream<FormDict>,
 }
@@ -541,7 +542,6 @@ impl Object for FormXObject {
 
 #[allow(clippy::float_cmp)]  // TODO
 pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
-    use Op::*;
     use std::io::Write;
 
     let mut data = Vec::new();
@@ -551,120 +551,120 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
     while ops.len() > 0 {
         let mut advance = 1;
         match ops[0] {
-            BeginMarkedContent { ref tag, properties: Some(ref name) } => {
+            Op::BeginMarkedContent { ref tag, properties: Some(ref name) } => {
                 serialize_name(tag, f)?;
                 write!(f, " ")?;
-                name.serialize(f, 0)?;
+                name.serialize(f)?;
                 writeln!(f, " BDC")?;
             }
-            BeginMarkedContent { ref tag, properties: None } => {
+            Op::BeginMarkedContent { ref tag, properties: None } => {
                 serialize_name(tag, f)?;
                 writeln!(f, " BMC")?;
             }
-            MarkedContentPoint { ref tag, properties: Some(ref name) } => {
+            Op::MarkedContentPoint { ref tag, properties: Some(ref name) } => {
                 serialize_name(tag, f)?;
                 write!(f, " ")?;
-                name.serialize(f, 0)?;
+                name.serialize(f)?;
                 writeln!(f, " DP")?;
             }
-            MarkedContentPoint { ref tag, properties: None } => {
+            Op::MarkedContentPoint { ref tag, properties: None } => {
                 serialize_name(tag, f)?;
                 writeln!(f, " MP")?;
             }
-            EndMarkedContent => writeln!(f, "EMC")?,
-            Close => match ops.get(1) {
-                Some(Stroke) => {
+            Op::EndMarkedContent => writeln!(f, "EMC")?,
+            Op::Close => match ops.get(1) {
+                Some(Op::Stroke) => {
                     writeln!(f, "s")?;
                     advance += 1;
                 }
-                Some(FillAndStroke { winding: Winding::NonZero }) => {
+                Some(Op::FillAndStroke { winding: Winding::NonZero }) => {
                     writeln!(f, "b")?;
                     advance += 1;
                 }
-                Some(FillAndStroke { winding: Winding::EvenOdd }) => {
+                Some(Op::FillAndStroke { winding: Winding::EvenOdd }) => {
                     writeln!(f, "b*")?;
                     advance += 1;
                 }
                 _ => writeln!(f, "h")?,
             }
-            MoveTo { p } => {
+            Op::MoveTo { p } => {
                 writeln!(f, "{} m", p)?;
                 current_point = Some(p);
             }
-            LineTo { p } => {
+            Op::LineTo { p } => {
                 writeln!(f, "{} l", p)?;
                 current_point = Some(p);
             },
-            CurveTo { c1, c2, p } => {
+            Op::CurveTo { c1, c2, p } => {
                 if Some(c1) == current_point {
                     writeln!(f, "{} {} v", c2, p)?;
                 } else if c2 == p {
                     writeln!(f, "{} {} y", c1, p)?;
                 } else {
-                    writeln!(f, "{} {} {} y", c1, c2, p)?;
+                    writeln!(f, "{} {} {} c", c1, c2, p)?;
                 }
                 current_point = Some(p);
             },
-            Rect { rect } => writeln!(f, "{} re", rect)?,
-            EndPath => writeln!(f, "n")?,
-            Stroke => writeln!(f, "S")?,
-            FillAndStroke { winding: Winding::NonZero } => writeln!(f, "B")?,
-            FillAndStroke { winding: Winding::EvenOdd } => writeln!(f, "B*")?,
-            Fill { winding: Winding::NonZero } => writeln!(f, "f")?,
-            Fill { winding: Winding::EvenOdd } => writeln!(f, "f*")?,
-            Shade { ref name } => {
+            Op::Rect { rect } => writeln!(f, "{} re", rect)?,
+            Op::EndPath => writeln!(f, "n")?,
+            Op::Stroke => writeln!(f, "S")?,
+            Op::FillAndStroke { winding: Winding::NonZero } => writeln!(f, "B")?,
+            Op::FillAndStroke { winding: Winding::EvenOdd } => writeln!(f, "B*")?,
+            Op::Fill { winding: Winding::NonZero } => writeln!(f, "f")?,
+            Op::Fill { winding: Winding::EvenOdd } => writeln!(f, "f*")?,
+            Op::Shade { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " sh")?;
             },
-            Clip { winding: Winding::NonZero } => writeln!(f, "W")?,
-            Clip { winding: Winding::EvenOdd } => writeln!(f, "W*")?,
-            Save => writeln!(f, "q")?,
-            Restore => writeln!(f, "Q")?,
-            Transform { matrix } => writeln!(f, "{} cm", matrix)?,
-            LineWidth { width } => writeln!(f, "{} w", width)?,
-            Dash { ref pattern, phase } => write!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
-            LineJoin { join } => writeln!(f, "{} j", join as u8)?,
-            LineCap { cap } => writeln!(f, "{} J", cap as u8)?,
-            MiterLimit { limit } => writeln!(f, "{} M", limit)?,
-            Flatness { tolerance } => writeln!(f, "{} i", tolerance)?,
-            GraphicsState { ref name } => {
+            Op::Clip { winding: Winding::NonZero } => writeln!(f, "W")?,
+            Op::Clip { winding: Winding::EvenOdd } => writeln!(f, "W*")?,
+            Op::Save => writeln!(f, "q")?,
+            Op::Restore => writeln!(f, "Q")?,
+            Op::Transform { matrix } => writeln!(f, "{} cm", matrix)?,
+            Op::LineWidth { width } => writeln!(f, "{} w", width)?,
+            Op::Dash { ref pattern, phase } => write!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
+            Op::LineJoin { join } => writeln!(f, "{} j", join as u8)?,
+            Op::LineCap { cap } => writeln!(f, "{} J", cap as u8)?,
+            Op::MiterLimit { limit } => writeln!(f, "{} M", limit)?,
+            Op::Flatness { tolerance } => writeln!(f, "{} i", tolerance)?,
+            Op::GraphicsState { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " gs")?;
             },
-            StrokeColor { color: Color::Gray(g) } => writeln!(f, "{} G", g)?,
-            StrokeColor { color: Color::Rgb(rgb) } => writeln!(f, "{} RG", rgb)?,
-            StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
-            StrokeColor { color: Color::Other(ref args) } =>  {
+            Op::StrokeColor { color: Color::Gray(g) } => writeln!(f, "{} G", g)?,
+            Op::StrokeColor { color: Color::Rgb(rgb) } => writeln!(f, "{} RG", rgb)?,
+            Op::StrokeColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} K", cmyk)?,
+            Op::StrokeColor { color: Color::Other(ref args) } =>  {
                 for p in args {
-                    p.serialize(f, 0)?;
+                    p.serialize(f)?;
                     write!(f, " ")?;
                 }
                 writeln!(f, "SCN")?;
             }
-            FillColor { color: Color::Gray(g) } => writeln!(f, "{} g", g)?,
-            FillColor { color: Color::Rgb(rgb) } => writeln!(f, "{} rg", rgb)?,
-            FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
-            FillColor { color: Color::Other(ref args) } => {
+            Op::FillColor { color: Color::Gray(g) } => writeln!(f, "{} g", g)?,
+            Op::FillColor { color: Color::Rgb(rgb) } => writeln!(f, "{} rg", rgb)?,
+            Op::FillColor { color: Color::Cmyk(cmyk) } => writeln!(f, "{} k", cmyk)?,
+            Op::FillColor { color: Color::Other(ref args) } => {
                 for p in args {
-                    p.serialize(f, 0)?;
+                    p.serialize(f)?;
                     write!(f, " ")?;
                 }
                 writeln!(f, "scn")?;
             }
-            FillColorSpace { ref name } => {
+            Op::FillColorSpace { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " cs")?;
             },
-            StrokeColorSpace { ref name } => {
+            Op::StrokeColorSpace { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " CS")?;
             },
 
-            RenderingIntent { intent } => writeln!(f, "{} ri", intent.to_str())?,
+            Op::RenderingIntent { intent } => writeln!(f, "{} ri", intent.to_str())?,
             Op::BeginText => writeln!(f, "BT")?,
             Op::EndText => writeln!(f, "ET")?,
-            CharSpacing { char_space } => writeln!(f, "{} Tc", char_space)?,
-            WordSpacing { word_space } => {
+            Op::CharSpacing { char_space } => writeln!(f, "{} Tc", char_space)?,
+            Op::WordSpacing { word_space } => {
                 if let [
                     Op::CharSpacing { char_space },
                     Op::TextNewline,
@@ -679,8 +679,8 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                     writeln!(f, "{} Tw", word_space)?;
                 }
             }
-            TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
-            Leading { leading } => match ops[1..] {
+            Op::TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
+            Op::Leading { leading } => match ops[1..] {
                 [Op::MoveTextPosition { translation }, ..] if leading == -translation.x => {
                     writeln!(f, "{} {} TD", translation.x, translation.y)?;
                     advance += 1;
@@ -689,15 +689,15 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                     writeln!(f, "{} TL", leading)?;
                 }
             }
-            TextFont { ref name, ref size } => {
+            Op::TextFont { ref name, ref size } => {
                 serialize_name(name, f)?;
                 writeln!(f, " {} Tf", size)?;
             },
-            TextRenderMode { mode } => writeln!(f, "{} Tr", mode as u8)?,
-            TextRise { rise } => writeln!(f, "{} Ts", rise)?,
-            MoveTextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
-            SetTextMatrix { matrix } => writeln!(f, "{} Tm", matrix)?,
-            TextNewline => {
+            Op::TextRenderMode { mode } => writeln!(f, "{} Tr", mode as u8)?,
+            Op::TextRise { rise } => writeln!(f, "{} Ts", rise)?,
+            Op::MoveTextPosition { translation } => writeln!(f, "{} {} Td", translation.x, translation.y)?,
+            Op::SetTextMatrix { matrix } => writeln!(f, "{} Tm", matrix)?,
+            Op::TextNewline => {
                 if let [Op::TextDraw { ref text }, ..] = ops[1..] {
                     text.serialize(f)?;
                     writeln!(f, " '")?;
@@ -706,15 +706,25 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                     writeln!(f, "T*")?;
                 }
             },
-            TextDraw { ref text } => {
+            Op::TextDraw { ref text } => {
                 text.serialize(f)?;
                 writeln!(f, " Tj")?;
             },
-            TextDrawAdjusted { ref array } => {
-                writeln!(f, "[{}] TJ", array.iter().format(" "))?;
+            Op::TextDrawAdjusted { ref array } => {
+                write!(f, "[")?;
+                for (i, val) in array.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    match val {
+                        TextDrawAdjusted::Spacing(s) => write!(f, "{s}")?,
+                        TextDrawAdjusted::Text(data) => data.serialize(f)?,
+                    }
+                }
+                writeln!(f, "] TJ")?;
             },
-            InlineImage { image: _ } => unimplemented!(),
-            XObject { ref name } => {
+            Op::InlineImage { image: _ } => unimplemented!(),
+            Op::XObject { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " Do")?;
             },
@@ -736,7 +746,8 @@ impl Content {
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.parts.len() == 1 {
-            self.parts[0].to_primitive(update)
+            let obj = self.parts[0].to_primitive(update)?;
+            update.create(obj)?.to_primitive(update)
         } else {
             self.parts.to_primitive(update)
         }
@@ -848,7 +859,7 @@ impl From<euclid::Box2D<f32, PdfSpace>> for Rect {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, DataSize)]
+#[derive(Debug, Copy, Clone, PartialEq, DataSize, DeepClone)]
 #[repr(C, align(8))]
 pub struct Matrix {
     pub a: f32,
@@ -1066,6 +1077,43 @@ pub enum Op {
 
     InlineImage { image: Arc<ImageXObject> },
 }
+
+pub fn deep_clone_op(op: &Op, cloner: &mut impl Cloner, old_resources: &Resources, resources: &mut Resources) -> Result<Op> {
+    match *op {
+        Op::GraphicsState { ref name } => {
+            if !resources.graphics_states.contains_key(name) {
+                if let Some(gs) = old_resources.graphics_states.get(name) {
+                    resources.graphics_states.insert(name.clone(), gs.deep_clone(cloner)?);
+                }
+            }
+            Ok(Op::GraphicsState { name: name.clone() })
+        }
+        Op::MarkedContentPoint { ref tag, ref properties } => {
+            Ok(Op::MarkedContentPoint { tag: tag.clone(), properties: properties.deep_clone(cloner)? })
+        }
+        Op::BeginMarkedContent { ref tag, ref properties } => {
+            Ok(Op::BeginMarkedContent { tag: tag.clone(), properties: properties.deep_clone(cloner)? })
+        }
+        Op::TextFont { ref name, size } => {
+            if !resources.fonts.contains_key(name) {
+                if let Some(f) = old_resources.fonts.get(name) {
+                    resources.fonts.insert(name.clone(), f.deep_clone(cloner)?);
+                }
+            }
+            Ok(Op::TextFont { name: name.clone(), size })
+        }
+        Op::XObject { ref name } => {
+            if !resources.xobjects.contains_key(name) {
+                if let Some(xo) = old_resources.xobjects.get(name) {
+                    resources.xobjects.insert(name.clone(), xo.deep_clone(cloner)?);
+                }
+            }
+            Ok(Op::XObject { name: name.clone() })
+        }
+        ref op => Ok(op.clone())
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

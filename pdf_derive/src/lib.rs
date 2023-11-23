@@ -94,9 +94,9 @@ extern crate syn;
 #[macro_use]
 extern crate quote;
 
-use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
-use syn::*;
+use proc_macro::{TokenStream};
+use proc_macro2::{TokenStream as TokenStream2, Span};
+use syn::{*, punctuated::Punctuated, token::Where};
 type SynStream = TokenStream2;
 
 // Debugging:
@@ -126,13 +126,23 @@ pub fn objectwrite(input: TokenStream) -> TokenStream {
     impl_objectwrite(&ast)
 }
 
+#[proc_macro_derive(DeepClone, attributes(pdf))]
+pub fn deepclone(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    // Build the impl
+    impl_deepclone(&ast)
+}
+
+
 #[derive(Default)]
 struct FieldAttrs {
     key: Option<LitStr>,
     default: Option<LitStr>,
     name: Option<LitStr>,
     skip: bool,
-    other: bool
+    other: bool,
+    indirect: bool,
 }
 impl FieldAttrs {
     fn new() -> FieldAttrs {
@@ -141,7 +151,8 @@ impl FieldAttrs {
             default: None,
             name: None,
             skip: false,
-            other: false
+            other: false,
+            indirect: false,
         }
     }
     fn key(&self) -> &LitStr {
@@ -173,7 +184,8 @@ impl FieldAttrs {
                     },
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("skip") => attrs.skip = true,
                     NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("other") => attrs.other = true,
-                    _ => panic!(r##"Derive error - Supported derive attributes: `key="Key"`, `default="some code"`."##)
+                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("indirect") => attrs.indirect = true,
+                    _ => panic!(r#"Derive error - Supported derive attributes: `key="Key"`, `default="some code", skip, other, indirect`."#)
                 }
             }
         }
@@ -182,10 +194,8 @@ impl FieldAttrs {
 }
 
 
-
-
 /// Just the attributes for the whole struct
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct GlobalAttrs {
     /// List of checks to do in the dictionary (LHS is the key, RHS is the expected value)
     checks: Vec<(String, String)>,
@@ -257,6 +267,14 @@ fn impl_objectwrite(ast: &DeriveInput) -> TokenStream {
         (false, Data::Struct(ref data)) => impl_objectwrite_for_struct(ast, &data.fields).into(),
         (false, Data::Enum(ref variants)) => impl_objectwrite_for_enum(ast, variants).into(),
         (_, _) => unimplemented!()
+    }
+}
+fn impl_deepclone(ast: &DeriveInput) -> TokenStream {
+    let attrs = GlobalAttrs::from_ast(ast);
+    match &ast.data {
+        Data::Struct(ref data) => impl_deepclone_for_struct(ast, &data.fields).into(),
+        Data::Enum(ref variants) => impl_deepclone_for_enum(ast, variants).into(),
+        _ => unimplemented!()
     }
 }
 
@@ -428,6 +446,45 @@ fn impl_objectwrite_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
         }
     }
 }
+fn impl_deepclone_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
+    let id = &ast.ident;
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    let parts = data.variants.iter().map(|var| {
+        let var_ident = &var.ident;
+        match var.fields {
+            Fields::Unnamed(ref fields) => {
+                let labels: Vec<Ident> = fields.unnamed.iter().enumerate().map(|(i, f)| {
+                    Ident::new(&format!("f_{i}"), Span::mixed_site())
+                }).collect();
+                quote! {
+                    #id::#var_ident( #( ref #labels, )* ) => Ok(#id::#var_ident( #( #labels.deep_clone(cloner)? ),* ))
+                }
+            }
+            Fields::Named(ref fields) => {
+                let names: Vec<_> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                quote! {
+                    #id::#var_ident { #( ref #names ),* } => Ok(#id::#var_ident { #( #names: #names.deep_clone(cloner)? ),* })
+                }
+            }
+            Fields::Unit => {
+                quote! {
+                    #id::#var_ident => Ok(#id::#var_ident)
+                }
+            }
+        }
+    });
+
+    quote! {
+        impl #impl_generics pdf::object::DeepClone for #id #ty_generics #where_clause {
+            fn deep_clone(&self, cloner: &mut impl pdf::object::Cloner) -> Result<Self> {
+                match *self {
+                    #( #parts, )*
+                }
+            }
+        }
+    }
+}
 
 fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs) -> SynStream {
     let id = &ast.ident;
@@ -475,6 +532,9 @@ fn impl_enum_from_stream(ast: &DeriveInput, data: &DataEnum, attrs: &GlobalAttrs
     }
 }
 
+
+
+
 fn is_option(f: &Field) -> Option<Type> {
     match f.ty {
         Type::Path(ref p) => {
@@ -496,7 +556,15 @@ fn is_option(f: &Field) -> Option<Type> {
 /// Accepts Dictionary to construct a struct
 fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     let id = &ast.ident;
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+    let mut generics = ast.generics.clone();
+    for g in generics.params.iter_mut() {
+        if let GenericParam::Type(p) = g {
+            p.bounds.push(
+                parse_quote!(pdf::object::Object)
+            );
+        }
+    }
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(ast);
 
     ///////////////////////
@@ -568,7 +636,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
         quote! { #name: #name, }
     });
 
-    let checks: Vec<_> = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks: Vec<_> = attrs.checks.iter().map(|(key, val)|
         quote! {
             dict.expect(#typ, #key, #val, true)?;
         }
@@ -603,7 +671,15 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
 
 fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
     let id = &ast.ident;
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+    let mut generics = ast.generics.clone();
+    for g in generics.params.iter_mut() {
+        if let GenericParam::Type(p) = g {
+            p.bounds.push(
+                parse_quote!(pdf::object::ObjectWrite)
+            );
+        }
+    }
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let attrs = GlobalAttrs::from_ast(ast);
 
     let parts: Vec<_> = fields.iter()
@@ -612,25 +688,32 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
     }).collect();
 
     let fields_ser = parts.iter()
-    .map( |&(ref field, ref attrs, ref opt)|
+    .map( |(field, attrs, _opt)|
         if attrs.skip | attrs.other {
             quote!()
         } else {
             let key = attrs.key();
-            if opt.is_some() {
+            let tr = if attrs.indirect {
                 quote! {
-                    if let Some(ref val) = self.#field {
-                        dict.insert(#key, pdf::object::ObjectWrite::to_primitive(val, updater)?);
+                    match val {
+                       pdf::primitive::Primitive::Reference(r) => val,
+                       p => updater.create(p)?.into(),
                     }
                 }
             } else {
-                quote! {
-                    dict.insert(#key, pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?);
+                quote! { val }
+            };
+
+            quote! {
+                let val = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
+                if !matches!(val, pdf::primitive::Primitive::Null) {
+                    let val2 = #tr;
+                    dict.insert(#key, val2);
                 }
             }
         }
     );
-    let checks_code = attrs.checks.iter().map(|&(ref key, ref val)|
+    let checks_code = attrs.checks.iter().map(|(key, val)|
         quote! {
             dict.insert(#key, pdf::primitive::Primitive::Name(#val.into()));
         }
@@ -655,6 +738,42 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
                 #( #checks_code )*
                 #(#fields_ser)*
                 Ok(dict)
+            }
+        }
+    }
+}
+fn impl_deepclone_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
+    let id = &ast.ident;
+    let mut generics = ast.generics.clone();
+    for g in generics.params.iter_mut() {
+        if let GenericParam::Type(p) = g {
+            p.bounds.push(
+                parse_quote!(pdf::object::DeepClone)
+            );
+        }
+    }
+    let (impl_generics, mut ty_generics, where_clause) = generics.split_for_impl();
+
+    let parts: Vec<_> = fields.iter()
+    .map(|field| {
+        (field.ident.clone(), is_option(field))
+    }).collect();
+
+    let field_parts = parts.iter()
+    .map( |(field, _opt)|
+        {
+            quote! {
+                #field: self.#field.deep_clone(cloner)?,
+            }
+        }
+    );
+
+    quote! {
+        impl #impl_generics pdf::object::DeepClone for #id #ty_generics #where_clause {
+            fn deep_clone(&self, cloner: &mut impl pdf::object::Cloner) -> Result<Self> {
+                Ok(#id {
+                    #( #field_parts )*
+                })
             }
         }
     }

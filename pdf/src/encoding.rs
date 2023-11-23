@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use istring::SmallString;
 use crate as pdf;
-use crate::object::{Object, Resolve};
-use crate::primitive::Primitive;
+use crate::object::{Object, Resolve, ObjectWrite, DeepClone};
+use crate::primitive::{Primitive, Dictionary};
 use crate::error::{Result};
 use datasize::DataSize;
 
@@ -12,7 +12,7 @@ pub struct Encoding {
     pub differences: HashMap<u32, SmallString>,
 }
 
-#[derive(Object, Debug, Clone, Eq, PartialEq, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, Eq, PartialEq, DataSize)]
 pub enum BaseEncoding {
     StandardEncoding,
     SymbolEncoding,
@@ -52,7 +52,7 @@ impl Object for Encoding {
                                 differences.insert(gid, name);
                                 gid += 1;
                             }
-                            _ => panic!("Unknown part primitive in dictionary: {:?}", part),
+                            _ => bail!("Unknown part primitive in dictionary: {:?}", part),
                         }
                     }
                 }
@@ -60,7 +60,36 @@ impl Object for Encoding {
             }
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
             Primitive::Stream(s) => Self::from_primitive(Primitive::Dictionary(s.info), resolve),
-            _ => panic!("Unknown element: {:?}", p),
+            _ => bail!("Unknown element: {:?}", p),
+        }
+    }
+}
+impl ObjectWrite for Encoding {
+    fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<Primitive> {
+        let base = self.base.to_primitive(update)?;
+        if self.differences.len() == 0 {
+            Ok(base)
+        } else {
+            let mut list = vec![];
+
+            let mut diff_list: Vec<_> = self.differences.iter().collect();
+            diff_list.sort();
+            let mut last = None;
+
+            for &(&gid, name) in diff_list.iter() {
+                if !last.map(|n| n + 1 == gid).unwrap_or(false) {
+                    list.push(Primitive::Integer(gid as i32));
+                }
+
+                list.push(Primitive::Name(name.clone()));
+
+                last = Some(gid);
+            }
+
+            let mut dict = Dictionary::new();
+            dict.insert("BaseEncoding", base);
+            dict.insert("Differences", Primitive::Array(list));
+            Ok(Primitive::Dictionary(dict))
         }
     }
 }
@@ -70,5 +99,10 @@ impl Encoding {
             base: BaseEncoding::StandardEncoding,
             differences: HashMap::new()
         }
+    }
+}
+impl DeepClone for Encoding {
+    fn deep_clone(&self, cloner: &mut impl pdf::object::Cloner) -> Result<Self> {
+        Ok(self.clone())
     }
 }

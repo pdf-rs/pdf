@@ -3,7 +3,7 @@ use crate as pdf;
 use crate::object::*;
 use crate::error::*;
 
-#[derive(Object, Debug, DataSize)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
 pub struct IccInfo {
     #[pdf(key="N")]
     pub components: u32,
@@ -18,7 +18,7 @@ pub struct IccInfo {
     pub metadata: Option<Stream<()>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DeepClone)]
 pub enum ColorSpace {
     DeviceGray,
     DeviceRGB,
@@ -27,7 +27,7 @@ pub enum ColorSpace {
     CalGray(Dictionary),
     CalRGB(Dictionary),
     CalCMYK(Dictionary),
-    Indexed(Box<ColorSpace>, Arc<[u8]>),
+    Indexed(Box<ColorSpace>, u8, Arc<[u8]>),
     Separation(Name, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
     Pattern,
@@ -51,7 +51,7 @@ impl DataSize for ColorSpace {
             ColorSpace::CalGray(ref d) | ColorSpace::CalRGB(ref d) | ColorSpace::CalCMYK(ref d) => {
                 d.estimate_heap_size()
             }
-            ColorSpace::Indexed(ref cs, ref data) => {
+            ColorSpace::Indexed(ref cs, _, ref data) => {
                 cs.estimate_heap_size() + data.estimate_heap_size()
             }
             ColorSpace::Separation(ref name, ref cs, ref f) => {
@@ -77,6 +77,7 @@ impl Object for ColorSpace {
 impl ColorSpace {
     fn from_primitive_depth(p: Primitive, resolve: &impl Resolve, depth: usize) -> Result<ColorSpace> {
         let p = p.resolve(resolve)?;
+
         if let Ok(name) = p.as_name() {
             let cs = match name {
                 "DeviceGray" => ColorSpace::DeviceGray,
@@ -88,7 +89,8 @@ impl ColorSpace {
             return Ok(cs);
         }
         let arr = t!(p.into_array());
-        let typ = t!(t!(get_index(&arr, 0)).as_name());
+        let typ_p = t!(get_index(&arr, 0)).clone().resolve(resolve)?;
+        let typ = t!(typ_p.as_name());
         
         if depth == 0 {
             bail!("ColorSpace base recursion");
@@ -96,6 +98,7 @@ impl ColorSpace {
         match typ {
             "Indexed" => {
                 let base = Box::new(t!(ColorSpace::from_primitive_depth(t!(get_index(&arr, 1)).clone(), resolve, depth-1)));
+                let hival = t!(t!(get_index(&arr, 2)).as_u8());
                 let lookup = match t!(get_index(&arr, 3)) {
                     &Primitive::Reference(r) => resolve.resolve(r)?,
                     p => p.clone()
@@ -114,7 +117,7 @@ impl ColorSpace {
                         found: p.get_debug_name()
                     })
                 };
-                Ok(ColorSpace::Indexed(base, lookup))
+                Ok(ColorSpace::Indexed(base, hival, lookup))
             }
             "Separation" => {
                 let name = t!(t!(get_index(&arr, 1)).clone().into_name());
@@ -154,11 +157,24 @@ impl ColorSpace {
     }
 }
 impl ObjectWrite for ColorSpace {
-    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match *self {
             ColorSpace::DeviceCMYK => Ok(Primitive::name("DeviceCMYK")),
             ColorSpace::DeviceRGB => Ok(Primitive::name("DeviceRGB")),
-            _ => unimplemented!()
+            ColorSpace::Indexed(ref  base, hival, ref lookup) => {
+                let base = base.to_primitive(update)?;
+                let hival = Primitive::Integer(hival.into());
+                let lookup = if lookup.len() < 100 {
+                    PdfString::new((**lookup).into()).into()
+                } else {
+                    Stream::new((), lookup.clone()).to_primitive(update)?
+                };
+                Ok(Primitive::Array(vec![Primitive::name("Indexed"), base, hival, lookup]))
+            }
+            ref p => {
+                dbg!(p);
+                unimplemented!()
+            }
         }
     }
 }

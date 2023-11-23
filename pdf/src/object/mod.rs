@@ -25,7 +25,8 @@ use std::sync::Arc;
 use std::ops::{Deref, Range};
 use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
-use datasize::{DataSize};
+use datasize::DataSize;
+use itertools::Itertools;
 
 pub type ObjNr = u64;
 pub type GenNr = u64;
@@ -62,6 +63,7 @@ pub trait Resolve: {
     }
     fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>>;
     fn options(&self) -> &ParseOptions;
+    fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>>;
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>>;
 }
 
@@ -80,12 +82,27 @@ impl Resolve for NoResolve {
     fn get_data_or_decode(&self, _: PlainRef, _: Range<usize>, _: &[StreamFilter]) -> Result<Arc<[u8]>> {
         Err(PdfError::Reference)
     }
+    fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>> {
+        Err(PdfError::Reference)
+    }
+
 }
 
 /// A PDF Object
 pub trait Object: Sized + Sync + Send + 'static {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self>;
+}
+
+pub trait Cloner: Updater + Resolve {
+    fn clone_plainref(&mut self, old: PlainRef) -> Result<PlainRef>;
+    fn clone_ref<T: DeepClone + Object + DataSize + ObjectWrite>(&mut self, old: Ref<T>) -> Result<Ref<T>>;
+    fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(&mut self, old: &RcRef<T>) -> Result<RcRef<T>>;
+    fn clone_shared<T: DeepClone>(&mut self, old: &Shared<T>) -> Result<Shared<T>>;
+}
+
+pub trait DeepClone: Sized + Sync + Send + 'static {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self>;
 }
 
 pub trait Updater {
@@ -140,6 +157,11 @@ impl ObjectWrite for PlainRef {
         Ok(Primitive::Reference(*self))
     }
 }
+impl DeepClone for PlainRef {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        cloner.clone_plainref(*self)
+    }
+}
 
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
 
@@ -150,10 +172,7 @@ pub struct Ref<T> {
 }
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Ref<T> {
-        Ref {
-            inner: self.inner,
-            _marker: PhantomData
-        }
+        *self
     }
 }
 impl<T> Copy for Ref<T> {}
@@ -162,13 +181,13 @@ impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
         Ref {
             inner,
-            _marker:    PhantomData::default(),
+            _marker:    PhantomData,
         }
     }
     pub fn from_id(id: ObjNr) -> Ref<T> {
         Ref {
             inner:      PlainRef {id, gen: 0},
-            _marker:    PhantomData::default(),
+            _marker:    PhantomData,
         }
     }
     pub fn get_inner(&self) -> PlainRef {
@@ -186,6 +205,11 @@ impl<T: Object> Object for Ref<T> {
 impl<T> ObjectWrite for Ref<T> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         self.inner.to_primitive(update)
+    }
+}
+impl<T: DeepClone+Object+DataSize+ObjectWrite> DeepClone for Ref<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        cloner.clone_ref(*self)
     }
 }
 impl<T> Trace for Ref<T> {
@@ -218,6 +242,11 @@ pub struct RcRef<T> {
     inner: PlainRef,
     data: Shared<T>
 }
+impl<T> From<RcRef<T>> for Primitive {
+    fn from(value: RcRef<T>) -> Self {
+        Primitive::Reference(value.inner)
+    }
+}
 
 impl<T> RcRef<T> {
     pub fn new(inner: PlainRef, data: Shared<T>) -> RcRef<T> {
@@ -243,10 +272,16 @@ impl<T> ObjectWrite for RcRef<T> {
         self.inner.to_primitive(update)
     }
 }
+impl<T: DeepClone + std::fmt::Debug + DataSize + Object + ObjectWrite> DeepClone for RcRef<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        cloner.clone_rcref(self)
+    }
+}
+
 impl<T> Deref for RcRef<T> {
     type Target = T;
     fn deref(&self) -> &T {
-        &*self.data
+        &self.data
     }
 }
 impl<T> Clone for RcRef<T> {
@@ -314,12 +349,20 @@ impl<T: ObjectWrite> ObjectWrite for MaybeRef<T> {
         }
     }
 }
+impl<T: DeepClone + std::fmt::Debug + DataSize + Object + ObjectWrite> DeepClone for MaybeRef<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        match *self {
+            MaybeRef::Direct(ref old) => cloner.clone_shared(old).map(MaybeRef::Direct),
+            MaybeRef::Indirect(ref old) => cloner.clone_rcref(old).map(MaybeRef::Indirect)
+        }
+    }
+}
 impl<T> Deref for MaybeRef<T> {
     type Target = T;
     fn deref(&self) -> &T {
         match *self {
             MaybeRef::Direct(ref t) => t,
-            MaybeRef::Indirect(ref r) => &**r
+            MaybeRef::Indirect(ref r) => r
         }
     }
 }
@@ -497,6 +540,11 @@ impl<T: ObjectWrite> ObjectWrite for Vec<T> {
         Primitive::array::<T, _, _, _>(self.iter(), update)
     }
 }
+impl<T: DeepClone> DeepClone for Vec<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        self.iter().map(|t| t.deep_clone(cloner)).collect()
+    }
+}
 impl<T: Trace> Trace for Vec<T> {
     fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
         for i in self.iter() {
@@ -538,6 +586,23 @@ impl ObjectWrite for Primitive {
         Ok(self.clone())
     }
 }
+impl DeepClone for Primitive {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        match *self {
+            Primitive::Array(ref parts) => Ok(Primitive::Array(parts.into_iter().map(|p| p.deep_clone(cloner)).try_collect()?)),
+            Primitive::Boolean(b) => Ok(Primitive::Boolean(b)),
+            Primitive::Dictionary(ref dict) => Ok(Primitive::Dictionary(dict.deep_clone(cloner)?)),
+            Primitive::Integer(i) => Ok(Primitive::Integer(i)),
+            Primitive::Name(ref name) => Ok(Primitive::Name(name.clone())),
+            Primitive::Null => Ok(Primitive::Null),
+            Primitive::Number(n) => Ok(Primitive::Number(n)),
+            Primitive::Reference(r) => Ok(Primitive::Reference(r.deep_clone(cloner)?)),
+            Primitive::Stream(ref s) => Ok(Primitive::Stream(s.deep_clone(cloner)?)),
+            Primitive::String(ref s) => Ok(Primitive::String(s.clone()))
+        }
+    }
+}
+
 impl Trace for Primitive {
     fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
         match *self {
@@ -578,7 +643,11 @@ impl<V: ObjectWrite> ObjectWrite for HashMap<Name, V> {
         }
     }
 }
-
+impl<V: DeepClone> DeepClone for HashMap<Name, V> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        self.iter().map(|(k, v)| Ok((k.clone(), v.deep_clone(cloner)?))).collect()
+    }
+}
 
 impl<T: Object> Object for Option<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
@@ -606,6 +675,15 @@ impl<T: ObjectWrite> ObjectWrite for Option<T> {
         }
     }
 }
+impl<T: DeepClone> DeepClone for Option<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        match self {
+            None => Ok(None),
+            Some(t) => t.deep_clone(cloner).map(Some)
+        }
+    }
+}
+
 impl<T: Trace> Trace for Option<T> {
     fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
         if let Some(ref t) = *self {
@@ -663,5 +741,29 @@ impl<T: Trace, U: Trace> Trace for (T, U) {
     fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
         self.0.trace(cb);
         self.1.trace(cb);
+    }
+}
+
+impl<T: DeepClone> DeepClone for Box<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        Ok(Box::new((&**self).deep_clone(cloner)?))
+    }
+}
+macro_rules! deep_clone_simple {
+    ($($t:ty),*) => (
+        $(
+            impl DeepClone for $t {
+                fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+                    Ok(self.clone())
+                }
+            }
+        )*
+    )
+}
+deep_clone_simple!(f32, i32, u32, bool, Name, (), Date, PdfString, Rect, u8, Arc<[u8]>, Vec<u16>);
+
+impl<A: DeepClone, B: DeepClone> DeepClone for (A, B) {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        Ok((self.0.deep_clone(cloner)?, self.1.deep_clone(cloner)?))
     }
 }

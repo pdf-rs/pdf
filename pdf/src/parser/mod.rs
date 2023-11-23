@@ -9,9 +9,9 @@ pub use self::parse_object::*;
 pub use self::parse_xref::*;
 
 use crate::error::*;
+use crate::primitive::StreamInner;
 use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
-use self::lexer::{HexStringLexer, StringLexer};
 use crate::crypt::Decoder;
 use bitflags::bitflags;
 use istring::{SmallBytes, SmallString, IBytes};
@@ -107,9 +107,11 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     t!(lexer.next_expect("endstream"));
 
     Ok(PdfStream {
-        file_range: stream_substr.file_range(),
+        inner: StreamInner::InFile {
+            id: ctx.id,
+            file_range: stream_substr.file_range(),
+        },
         info: dict,
-        id: ctx.id,
     })
 }
 
@@ -172,13 +174,13 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
             } else {
                 check(flags, ParseFlags::INTEGER)?;
                 // We are probably in an array of numbers - it's not a reference anyway
-                lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
+                lexer.set_pos(pos_bk); // (roll back the lexer first)
                 Primitive::Integer(t!(first_lexeme.to::<i32>()))
             }
         } else {
             check(flags, ParseFlags::INTEGER)?;
             // It is but a number
-            lexer.set_pos(pos_bk as usize); // (roll back the lexer first)
+            lexer.set_pos(pos_bk); // (roll back the lexer first)
             Primitive::Integer(t!(first_lexeme.to::<i32>()))
         }
     } else if let Some(s) = first_lexeme.real_number() {
@@ -189,7 +191,7 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
         check(flags, ParseFlags::NAME)?;
         // Name
 
-        let mut rest: &[u8] = &*first_lexeme.reslice(1..);
+        let mut rest: &[u8] = &first_lexeme.reslice(1..);
         let s = if rest.contains(&b'#') {
             let mut s = IBytes::new();
             while let Some(idx) = rest.iter().position(|&b| b == b'#') {
@@ -355,7 +357,7 @@ mod tests {
             let dict = primitive.into_dictionary().unwrap();
 
             assert_eq!(dict.len(), 1);
-            assert_eq!(dict.get("").unwrap().as_bool().unwrap(), true);
+            assert!(dict.get("").unwrap().as_bool().unwrap());
         }
 
         {
@@ -383,7 +385,7 @@ mod tests {
     fn compact_array() {
         use crate::object::NoResolve;
         use crate::primitive::{Primitive, PdfString};
-        use super::lexer::{Lexer};
+        use super::lexer::Lexer;
         use super::*;
         let mut lx = Lexer::new(b"[(Complete L)20(egend for Physical and P)20(olitical Maps)]TJ");
         assert_eq!(parse_with_lexer(&mut lx, &NoResolve, ParseFlags::ANY).unwrap(),

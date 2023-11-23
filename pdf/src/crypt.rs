@@ -132,7 +132,7 @@ pub struct CryptFilter {
 
 pub struct Decoder {
     key_size: usize,
-    key: [u8; 32], // maximum length
+    key: Vec<u8>, // maximum length
     method: CryptMethod,
     /// A reference to the /Encrypt dictionary, if it is in an indirect
     /// object. The strings in this dictionary are not encrypted, so
@@ -156,7 +156,7 @@ impl Decoder {
         &self.key[.. std::cmp::min(self.key_size, 16)]
     }
 
-    pub fn new(key: [u8; 32], key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
+    pub fn new(key: Vec<u8>, key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
         Decoder {
             key_size,
             key,
@@ -179,13 +179,13 @@ impl Decoder {
             compute_u_rev_2(key) == document_u
         }
 
-        fn compute_u_rev_3_4(id: &[u8], key: &[u8]) -> Vec<u8> {
+        fn compute_u_rev_3_4(id: &[u8], key: &[u8]) -> [u8; 16] {
             // algorithm 5
             // a) we derived the key already.
 
             // b)
             let mut hash = md5::Context::new();
-            hash.consume(&PADDING);
+            hash.consume(PADDING);
 
             // c)
             hash.consume(id);
@@ -204,11 +204,11 @@ impl Decoder {
             }
 
             // f)
-            data.to_vec()
+            data
         }
 
         fn check_password_rev_3_4(document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
-            compute_u_rev_3_4(id, key) == document_u[..16]
+            document_u.starts_with(&compute_u_rev_3_4(id, key))
         }
 
         fn check_password_rc4(revision: u32, document_u: &[u8], id: &[u8], key: &[u8]) -> bool {
@@ -225,7 +225,7 @@ impl Decoder {
             dict: &CryptDict,
             id: &[u8],
             pass: &[u8],
-        ) -> [u8; 32] {
+        ) -> Vec<u8> {
             let o = dict.o.as_bytes();
             let p = dict.p;
             // 7.6.3.3 - Algorithm 2
@@ -262,7 +262,7 @@ impl Decoder {
                 }
             }
 
-            let mut key = [0u8; 32];
+            let mut key = vec![0u8; key_size.max(16)];
             key[..16].copy_from_slice(&data);
             key
         }
@@ -272,6 +272,10 @@ impl Decoder {
             key_size: usize,
             pass: &[u8],
         ) -> Result<Vec<u8>> {
+            if key_size > 16 {
+                bail!("key size > 16");
+            }
+
             let mut hash = md5::Context::new();
             if pass.len() < 32 {
                 hash.consume(pass);
@@ -294,7 +298,7 @@ impl Decoder {
         let (key_bits, method) = match dict.v {
             1 => (40, CryptMethod::V2),
             2 => (dict.bits, CryptMethod::V2),
-            4 | 5 | 6 => {
+            4 ..= 6 => {
                 let default = dict
                     .crypt_filters
                     .get(try_opt!(dict.default_crypt_filter.as_ref()).as_str())
@@ -456,10 +460,8 @@ impl Decoder {
             let key_slice = t!(Aes256CbcDec::new(&intermediate_key, zero_iv)
                 .decrypt_padded_mut::<NoPadding>(&mut wrapped_key)
                 .map_err(|_| PdfError::InvalidPassword));
-            let mut key = [0u8; 32];
-            key.copy_from_slice(key_slice);
 
-            let decoder = Decoder::new(key,  32, method, dict.encrypt_metadata);
+            let decoder = Decoder::new(key_slice.into(),  32, method, dict.encrypt_metadata);
             Ok(decoder)
         } else {
             err!(format!("unsupported V value {}", level).into())
