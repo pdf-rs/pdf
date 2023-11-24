@@ -656,6 +656,7 @@ impl ImageXObject {
                 let global_data = p.globals.as_ref().map(|s| s.data(resolve)).transpose()?;
                 jbig2_decode(&data, global_data.as_deref().unwrap_or_default())?
             },
+            StreamFilter::FlateDecode(ref p) => flate_decode(&data, p)?,
             _ => unreachable!()
         };
         if let Some(ref decode) = self.decode {
