@@ -1054,7 +1054,7 @@ impl<T: Object> Object for NameTree<T> {
             (None, Some(names)) => {
                 let names = names.resolve(resolve)?.into_array()?;
                 let mut new_names = Vec::new();
-                for pair in names.chunks(2) {
+                for pair in names.chunks_exact(2) {
                     let name = pair[0].clone().resolve(resolve)?.into_string()?;
                     let value = t!(T::from_primitive(pair[1].clone(), resolve));
                     new_names.push((name, value));
