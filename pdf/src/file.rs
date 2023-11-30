@@ -396,7 +396,7 @@ where
     pub fn save(&mut self, trailer: &mut Trailer) -> Result<&[u8]> {
         // writing the trailer generates another id for the info dictionary
         trailer.size = (self.refs.len() + 2) as _;
-        let trailer = trailer.to_dict(self)?;
+        let trailer_dict = trailer.to_dict(self)?;
         
         let xref_promise = self.promise::<Stream<XRefInfo>>();
 
@@ -419,8 +419,8 @@ where
 
         writeln!(self.backend, "{} {} obj", xref_promise.get_inner().id, 0)?;
         let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
-        for (k, v) in trailer.into_iter() {
-            xref_and_trailer.info.insert(k, v);
+        for (k, v) in trailer_dict.iter() {
+            xref_and_trailer.info.insert(k.clone(), v.clone());
         }
 
         xref_and_trailer.serialize(&mut self.backend)?;
@@ -429,6 +429,9 @@ where
         let _ = self.fulfill(xref_promise, stream)?;
 
         write!(self.backend, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
+
+        // update trailer which may have change now.
+        *trailer = Trailer::from_dict(trailer_dict, &self.resolver())?;
 
         Ok(&self.backend)
     }
