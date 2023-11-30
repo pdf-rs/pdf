@@ -924,13 +924,13 @@ pub struct SignatureReferenceDictionary {
     pub other: Dictionary
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Clone)]
 pub struct FieldDictionary {
     #[pdf(key="FT")]
     pub typ: Option<FieldType>,
     
     #[pdf(key="Parent")]
-    pub parent: Option<MaybeRef<FieldDictionary>>,
+    pub parent: Option<Ref<FieldDictionary>>,
     
     #[pdf(key="Kids")]
     pub kids: Vec<Ref<FieldDictionary>>,
