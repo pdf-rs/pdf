@@ -725,6 +725,17 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
         None => quote! {}
     };
 
+    let other = parts.iter().filter(|(field, attrs, _)| attrs.other).flat_map(|(field, _, _)| field).next();
+    let init_dict = if let Some(other) = other {
+        quote! {
+            let mut dict = self.#other.clone();
+        }
+    } else {
+        quote! {
+            let mut dict = pdf::primitive::Dictionary::new();
+        }
+    };
+
     quote! {
         impl #impl_generics pdf::object::ObjectWrite for #id #ty_generics #where_clause {
             fn to_primitive(&self, update: &mut impl pdf::object::Updater) -> Result<pdf::primitive::Primitive> {
@@ -733,7 +744,7 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
         }
         impl #impl_generics pdf::object::ToDict for #id #ty_generics #where_clause {
             fn to_dict(&self, updater: &mut impl pdf::object::Updater) -> Result<pdf::primitive::Dictionary> {
-                let mut dict = pdf::primitive::Dictionary::new();
+                #init_dict
                 #pdf_type
                 #( #checks_code )*
                 #(#fields_ser)*

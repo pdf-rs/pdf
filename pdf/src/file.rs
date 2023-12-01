@@ -39,18 +39,23 @@ impl<T> PromisedRef<T> {
 
 pub trait Cache<T: Clone> {
     fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T;
+    fn clear(&self);
 }
 pub struct NoCache;
 impl<T: Clone> Cache<T> for NoCache {
     fn get_or_compute(&self, _key: PlainRef, compute: impl FnOnce() -> T) -> T {
         compute()
     }
+    fn clear(&self) {}
 }
 
 #[cfg(feature="cache")]
 impl<T: Clone + ValueSize + Send + 'static> Cache<T> for Arc<SyncCache<PlainRef, T>> {
     fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
         self.get(key, compute)
+    }
+    fn clear(&self) {
+        (**self).clear()
     }
 }
 
@@ -67,7 +72,7 @@ pub struct Storage<B, OC, SC, L> {
     stream_cache: SC,
 
     // objects that differ from the backend
-    changes:    HashMap<ObjNr, Primitive>,
+    changes:    HashMap<ObjNr, (Primitive, GenNr)>,
 
     refs:       XRefTable,
 
@@ -226,7 +231,7 @@ where
     }
     fn resolve_ref(&self, r: PlainRef, flags: ParseFlags, resolve: &impl Resolve) -> Result<Primitive> {
         match self.changes.get(&r.id) {
-            Some(p) => Ok((*p).clone()),
+            Some((p, _)) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
                     let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..)), self.start_offset + pos);
@@ -347,7 +352,7 @@ where
         let id = self.refs.len() as u64;
         self.refs.push(XRef::Promised);
         let primitive = obj.to_primitive(self)?;
-        self.changes.insert(id, primitive);
+        self.changes.insert(id, (primitive, 0));
         let rc = Shared::new(obj);
         let r = PlainRef { id, gen: 0 };
         
@@ -362,7 +367,7 @@ where
             XRef::Invalid => panic!()
         };
         let primitive = obj.to_primitive(self)?;
-        self.changes.insert(old.id, primitive);
+        self.changes.insert(old.id, (primitive, r.gen));
         let rc = Shared::new(obj);
         
         Ok(RcRef::new(r, rc))
@@ -400,14 +405,13 @@ where
         
         let xref_promise = self.promise::<Stream<XRefInfo>>();
 
-
         let mut changes: Vec<_> = self.changes.iter().collect();
         changes.sort_unstable_by_key(|&(id, _)| id);
 
-        for (&id, primitive) in changes.iter() {
+        for &(&id, &(ref primitive, gen)) in changes.iter() {
             let pos = self.backend.len();
-            self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: 0 });
-            writeln!(self.backend, "{} {} obj", id, 0)?;
+            self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: gen });
+            writeln!(self.backend, "{} {} obj", id, gen)?;
             primitive.serialize(&mut self.backend)?;
             writeln!(self.backend, "endobj")?;
         }
@@ -431,6 +435,7 @@ where
         write!(self.backend, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
 
         // update trailer which may have change now.
+        self.cache.clear();
         *trailer = Trailer::from_dict(trailer_dict, &self.resolver())?;
 
         Ok(&self.backend)

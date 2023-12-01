@@ -958,6 +958,9 @@ pub struct FieldDictionary {
     
     #[pdf(key="AA")]
     pub actions: Option<Dictionary>,
+
+    #[pdf(other)]
+    pub other: Dictionary
 }
 
 #[derive(Debug, DataSize)]

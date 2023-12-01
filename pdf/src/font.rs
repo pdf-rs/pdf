@@ -517,7 +517,7 @@ impl ToUnicodeMap {
 pub fn utf16be_to_char(
     data: &[u8],
 ) -> impl Iterator<Item = std::result::Result<char, std::char::DecodeUtf16Error>> + '_ {
-    char::decode_utf16(data.chunks(2).map(|w| u16::from_be_bytes([w[0], w[1]])))
+    char::decode_utf16(data.chunks_exact(2).map(|w| u16::from_be_bytes([w[0], w[1]])))
 }
 /// converts UTF16-BE to a string replacing illegal/unknown characters
 pub fn utf16be_to_string_lossy(data: &[u8]) -> String {
