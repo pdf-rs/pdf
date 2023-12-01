@@ -959,8 +959,56 @@ pub struct FieldDictionary {
     #[pdf(key="AA")]
     pub actions: Option<Dictionary>,
 
+    #[pdf(key="AP")]
+    pub appearance_streams: Option<MaybeRef<AppearanceStreams>>,
+
     #[pdf(other)]
     pub other: Dictionary
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize, Clone)]
+pub struct AppearanceStreams {
+    #[pdf(key="N")]
+    pub normal: AppearanceStreamEntry,
+
+    #[pdf(key="R")]
+    pub rollover: Option<AppearanceStreamEntry>,
+
+    #[pdf(key="D")]
+    pub down: Option<AppearanceStreamEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub enum AppearanceStreamEntry {
+    Single(Stream<Dictionary>),
+    Dict(HashMap<Name, AppearanceStreamEntry>)
+}
+impl Object for AppearanceStreamEntry {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        match dbg!(p.resolve(resolve)?) {
+            p @ Primitive::Dictionary(_) => Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Dict),
+            p @ Primitive::Stream(_) => Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Single),
+            p => Err(PdfError::UnexpectedPrimitive {expected: "Dict or Stream", found: p.get_debug_name()})
+        }
+    }
+}
+impl ObjectWrite for AppearanceStreamEntry {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            AppearanceStreamEntry::Dict(d) => d.to_primitive(update),
+            AppearanceStreamEntry::Single(s) => s.to_primitive(update),
+        }
+    }
+}
+impl DataSize for AppearanceStreamEntry {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = std::mem::size_of::<Self>();
+    fn estimate_heap_size(&self) -> usize {
+        match self {
+            AppearanceStreamEntry::Dict(d) => d.estimate_heap_size(),
+            AppearanceStreamEntry::Single(s) => s.estimate_heap_size()
+        }
+    }
 }
 
 #[derive(Debug, DataSize)]
