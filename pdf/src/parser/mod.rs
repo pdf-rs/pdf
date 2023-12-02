@@ -297,7 +297,7 @@ fn parse_stream_with_lexer(lexer: &mut Lexer, r: &impl Resolve, ctx: &Context) -
     let first_lexeme = t!(lexer.next());
 
     let obj = if first_lexeme.equals(b"<<") {
-        let dict = parse_dictionary_object(lexer, r, None, MAX_DEPTH)?;
+        let dict = t!(parse_dictionary_object(lexer, r, None, MAX_DEPTH));
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
             let ctx = Context {
