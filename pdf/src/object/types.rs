@@ -765,7 +765,7 @@ impl RenderingIntent {
 }
 
 
-#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite)]
+#[derive(Object, Debug, DataSize, DeepClone, ObjectWrite, Clone, Default)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
     #[pdf(key="FormType", default="1")]
@@ -962,30 +962,33 @@ pub struct FieldDictionary {
     #[pdf(key="AP")]
     pub appearance_streams: Option<MaybeRef<AppearanceStreams>>,
 
+    #[pdf(key="Rect")]
+    pub rect: Rect,
+
     #[pdf(other)]
     pub other: Dictionary
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize, Clone)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Clone, DeepClone)]
 pub struct AppearanceStreams {
     #[pdf(key="N")]
-    pub normal: AppearanceStreamEntry,
+    pub normal: Ref<AppearanceStreamEntry>,
 
     #[pdf(key="R")]
-    pub rollover: Option<AppearanceStreamEntry>,
+    pub rollover: Option<Ref<AppearanceStreamEntry>>,
 
     #[pdf(key="D")]
-    pub down: Option<AppearanceStreamEntry>,
+    pub down: Option<Ref<AppearanceStreamEntry>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 pub enum AppearanceStreamEntry {
-    Single(Stream<Dictionary>),
+    Single(FormXObject),
     Dict(HashMap<Name, AppearanceStreamEntry>)
 }
 impl Object for AppearanceStreamEntry {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        match dbg!(p.resolve(resolve)?) {
+        match p.resolve(resolve)? {
             p @ Primitive::Dictionary(_) => Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Dict),
             p @ Primitive::Stream(_) => Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Single),
             p => Err(PdfError::UnexpectedPrimitive {expected: "Dict or Stream", found: p.get_debug_name()})
@@ -1471,7 +1474,7 @@ pub struct Outlines {
 
 }
 
-#[derive(Debug, Copy, Clone, DataSize)]
+#[derive(Debug, Copy, Clone, DataSize, Default)]
 pub struct Rect {
     pub left:   f32,
     pub bottom: f32,
