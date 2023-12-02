@@ -157,8 +157,8 @@ pub struct PdfBuilder<SC, OC, L> {
 }
 impl<SC, OC, L> PdfBuilder<SC, OC, L>
 where
-    SC: Cache<Result<AnySync, Arc<PdfError>>>,
-    OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+    SC: Cache<Result<AnySync, Arc<PdfError>>> + Default,
+    OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>> + Default,
     L: Log,
 {
     pub fn new(fileoptions: FileOptions<'_, SC, OC, L>) -> Self {

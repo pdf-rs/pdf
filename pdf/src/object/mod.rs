@@ -247,6 +247,11 @@ impl<T> From<RcRef<T>> for Primitive {
         Primitive::Reference(value.inner)
     }
 }
+impl<T> From<RcRef<T>> for Ref<T> {
+    fn from(value: RcRef<T>) -> Self {
+        value.get_ref()
+    }
+}
 
 impl<T> RcRef<T> {
     pub fn new(inner: PlainRef, data: Shared<T>) -> RcRef<T> {
@@ -385,6 +390,11 @@ impl<T> Trace for MaybeRef<T> {
 impl<T> From<Shared<T>> for MaybeRef<T> {
     fn from(r: Shared<T>) -> MaybeRef<T> {
         MaybeRef::Direct(r)
+    }
+}
+impl<T> From<T> for MaybeRef<T> {
+    fn from(t: T) -> MaybeRef<T> {
+        MaybeRef::Direct(t.into())
     }
 }
 impl<T> From<MaybeRef<T>> for Shared<T> {

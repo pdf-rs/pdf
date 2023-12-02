@@ -515,7 +515,7 @@ impl Object for Content {
     }
 }
 
-#[derive(Debug, DataSize, DeepClone)]
+#[derive(Debug, DataSize, DeepClone, Clone)]
 pub struct FormXObject {
     pub stream: Stream<FormDict>,
 }
@@ -537,6 +537,13 @@ impl Object for FormXObject {
         Ok(FormXObject {
             stream,
         })
+    }
+}
+impl ObjectWrite for FormXObject {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let mut stream = self.stream.to_pdf_stream(update)?;
+        stream.info.insert("Subtype", Name::from("Form"));
+        Ok(stream.into())
     }
 }
 
