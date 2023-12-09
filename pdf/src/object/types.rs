@@ -72,6 +72,20 @@ impl PageRc {
         self.0.get_ref()
     }
 }
+impl Object for PageRc {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PageRc> {
+        let node = t!(RcRef::from_primitive(p, resolve));
+        match *node {
+            PagesNode::Tree(_) => Err(PdfError::WrongDictionaryType {expected: "Page".into(), found: "Pages".into()}),
+            PagesNode::Leaf(_) => Ok(PageRc(node))
+        }
+    }
+}
+impl ObjectWrite for PageRc {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.0.to_primitive(update)
+    }
+}
 
 /// A `PagesNode::Tree` wrapped in a `RcRef`
 /// 
@@ -278,6 +292,9 @@ pub struct Page {
     #[pdf(key="VP")]
     pub vp:         Option<Primitive>,
 
+    #[pdf(key="Annots", default="vec![]")]
+    pub annotations: Vec<Annot>,
+
     #[pdf(other)]
     pub other: Dictionary,
 }
@@ -307,6 +324,7 @@ impl Page {
             lgi:        None,
             vp:         None,
             other: Dictionary::new(),
+            annotations: vec![]
         }
     }
     pub fn media_box(&self) -> Result<Rect> {
@@ -334,6 +352,7 @@ impl Page {
     }
 }
 impl SubType<PagesNode> for Page {}
+
 
 #[derive(Object, DataSize)]
 pub struct PageLabel {
@@ -764,7 +783,6 @@ impl RenderingIntent {
     }
 }
 
-
 #[derive(Object, Debug, DataSize, DeepClone, ObjectWrite, Clone, Default)]
 #[pdf(Type="XObject?", Subtype="Form")]
 pub struct FormDict {
@@ -924,6 +942,41 @@ pub struct SignatureReferenceDictionary {
     pub other: Dictionary
 }
 
+
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[pdf(Type="Annot?")]
+pub struct Annot {
+    #[pdf(key="Subtype")]
+    pub subtype: Name,
+    
+    #[pdf(key="Rect")]
+    pub rect: Rect,
+
+    #[pdf(key="Contents")]
+    pub contents: Option<PdfString>,
+
+    #[pdf(key="P")]
+    pub page: Option<PageRc>,
+
+    #[pdf(key="NM")]
+    pub annotation_name: Option<PdfString>,
+
+    #[pdf(key="M")]
+    pub date: Option<Date>,
+
+    #[pdf(key="F", default="0")]
+    pub annot_flags: u32,
+
+    #[pdf(key="AP")]
+    pub appearance_streams: Option<MaybeRef<AppearanceStreams>>,
+
+    #[pdf(key="AS")]
+    pub appearance_state: Option<Name>,
+
+    #[pdf(key="Border")]
+    pub border: Option<Primitive>,
+}
+
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone)]
 pub struct FieldDictionary {
     #[pdf(key="FT")]
@@ -956,14 +1009,22 @@ pub struct FieldDictionary {
     #[pdf(key="DV")]
     pub default_value: Primitive,
     
+    #[pdf(key="DR")]
+    pub default_resources: Option<MaybeRef<Resources>>,
+    
     #[pdf(key="AA")]
     pub actions: Option<Dictionary>,
 
-    #[pdf(key="AP")]
-    pub appearance_streams: Option<MaybeRef<AppearanceStreams>>,
-
     #[pdf(key="Rect")]
     pub rect: Rect,
+
+    #[pdf(key="MaxLen")]
+    pub max_len: Option<u32>,
+
+
+
+    #[pdf(key="Subtype")]
+    pub subtype: Name,
 
     #[pdf(other)]
     pub other: Dictionary

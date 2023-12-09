@@ -132,6 +132,7 @@ impl CatalogBuilder {
                 lgi: page.lgi,
                 vp: page.vp,
                 other: page.other,
+                annotations: vec![]
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }
@@ -157,8 +158,8 @@ pub struct PdfBuilder<SC, OC, L> {
 }
 impl<SC, OC, L> PdfBuilder<SC, OC, L>
 where
-    SC: Cache<Result<AnySync, Arc<PdfError>>> + Default,
-    OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>> + Default,
+    SC: Cache<Result<AnySync, Arc<PdfError>>>,
+    OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log,
 {
     pub fn new(fileoptions: FileOptions<'_, SC, OC, L>) -> Self {

@@ -361,7 +361,7 @@ where
     fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
         let r = match self.refs.get(old.id)? {
             XRef::Free { .. } => panic!(),
-            XRef::Raw { gen_nr, .. } => PlainRef { id: old.id, gen: gen_nr + 1 },
+            XRef::Raw { gen_nr, .. } => PlainRef { id: old.id, gen: gen_nr },
             XRef::Stream { .. } => return self.create(obj),
             XRef::Promised => PlainRef { id: old.id, gen: 0 },
             XRef::Invalid => panic!()
