@@ -324,7 +324,15 @@ where
             }
         });
         match res {
-            Ok(any) => Ok(RcRef::new(key, any.downcast()?)),
+            Ok(any) => {
+                match any.downcast() {
+                    Ok(val) => Ok(RcRef::new(key, val)),
+                    Err(_) => {
+                        let p = self.resolve(key)?;
+                        Ok(RcRef::new(key, T::from_primitive(p, self)?.into()))
+                    }
+                }
+            }
             Err(e) => Err(PdfError::Shared { source: e.clone()}),
         }
     }
@@ -359,6 +367,8 @@ where
         Ok(RcRef::new(r, rc))
     }
     fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
+        use std::collections::hash_map::Entry;
+
         let r = match self.refs.get(old.id)? {
             XRef::Free { .. } => panic!(),
             XRef::Raw { gen_nr, .. } => PlainRef { id: old.id, gen: gen_nr },
@@ -367,7 +377,19 @@ where
             XRef::Invalid => panic!()
         };
         let primitive = obj.to_primitive(self)?;
-        self.changes.insert(old.id, (primitive, r.gen));
+        match self.changes.entry(old.id) {
+            Entry::Vacant(e) => {
+                e.insert((primitive, r.gen));
+            }
+            Entry::Occupied(mut e) => match (e.get_mut(), primitive) {
+                ((Primitive::Dictionary(ref mut dict), _), Primitive::Dictionary(new)) => {
+                    dict.append(new);
+                }
+                (old, new) => {
+                    *old = (new, r.gen);
+                }
+            }
+        }
         let rc = Shared::new(obj);
         
         Ok(RcRef::new(r, rc))

@@ -167,6 +167,9 @@ impl Dictionary {
             None => Ok(())
         }
     }
+    pub fn append(&mut self, other: Dictionary) {
+        self.dict.extend(other.dict);
+    }
 }
 impl DataSize for Dictionary {
     const IS_DYNAMIC: bool = true;
@@ -849,7 +852,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn utf16be_invalid_bytelen() {
         let s = PdfString::new([0xfe, 0xff, 0xd8, 0x34, 0x20].as_slice().into());
         let repl_ch = String::from(std::char::REPLACEMENT_CHARACTER);
