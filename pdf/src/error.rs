@@ -4,6 +4,7 @@ use std::error::Error;
 use crate::parser::ParseFlags;
 use std::sync::Arc;
 use datasize::{DataSize, data_size};
+use snafu::ErrorCompat;
 
 #[derive(Debug, Snafu)]
 pub enum PdfError {
@@ -11,17 +12,26 @@ pub enum PdfError {
     #[snafu(display("Unexpected end of file"))]
     EOF,
 
-    #[snafu(display("Shared"))]
-    Shared { source: Arc<PdfError> },
+    #[snafu(display("Shared, caused by\n  {}", source))]
+    Shared {
+        #[snafu(source)]
+        source: Arc<PdfError>
+    },
 
     #[snafu(display("Not enough Operator arguments"))]
     NoOpArg,
 
-    #[snafu(display("Error parsing from string: {}", source))]
-    Parse { source: Box<dyn Error + Send + Sync> },
+    #[snafu(display("Error parsing from string, caused by\n  {}", source))]
+    Parse {
+        #[snafu(source)]
+        source: Box<dyn Error + Send + Sync>
+    },
 
-    #[snafu(display("Invalid encoding: {}", source))]
-    Encoding { source: Box<dyn Error + Send + Sync> },
+    #[snafu(display("Invalid encoding, caused by\n  {}", source))]
+    Encoding { 
+        #[snafu(source)]
+        source: Box<dyn Error + Send + Sync>
+    },
 
     #[snafu(display("Out of bounds: index {}, but len is {}", index, len))]
     Bounds { index: usize, len: usize },
@@ -63,10 +73,11 @@ pub enum PdfError {
 
     //////////////////
     // Dictionary
-    #[snafu(display("Can't parse field {} of struct {}.", field, typ))]
+    #[snafu(display("Can't parse field {} of struct {}, caused by\n  {}", field, typ, source))]
     FromPrimitive {
         typ: &'static str,
         field: &'static str,
+        #[snafu(source)]
         source: Box<PdfError>
     },
 
@@ -84,7 +95,10 @@ pub enum PdfError {
     },
 
     #[snafu(display("Expected dictionary /Type = {}. Found /Type = {}.", expected, found))]
-    WrongDictionaryType {expected: String, found: String},
+    WrongDictionaryType {
+        expected: String,
+        found: String
+    },
 
     //////////////////
     // Misc
@@ -120,11 +134,17 @@ pub enum PdfError {
     #[snafu(display("Decryption failure"))]
     DecryptionFailure,
 
-    #[snafu(display("JPEG"))]
-    Jpeg { source: jpeg_decoder::Error },
+    #[snafu(display("JPEG Error, caused by\n  {}", source))]
+    Jpeg {
+        #[snafu(source)]
+        source: jpeg_decoder::Error
+    },
 
-    #[snafu(display("IO Error"))]
-    Io { source: io::Error },
+    #[snafu(display("IO Error, caused by\n  {}", source))]
+    Io {
+        #[snafu(source)]
+        source: io::Error
+    },
 
     #[snafu(display("{}", msg))]
     Other { msg: String },
@@ -132,8 +152,15 @@ pub enum PdfError {
     #[snafu(display("NoneError at {}:{}:{}:{}", file, line, column, context))]
     NoneError { file: &'static str, line: u32, column: u32, context: Context },
 
-    #[snafu(display("Try at {}:{}:{}:{}", file, line, column, context))]
-    Try { file: &'static str, line: u32, column: u32, context: Context, source: Box<PdfError> },
+    #[snafu(display("Try at {}:{}:{}:{}, caused by\n  {}", file, line, column, context, source))]
+    Try {
+        file: &'static str,
+        line: u32,
+        column: u32,
+        context: Context, 
+        #[snafu(source)]
+        source: Box<PdfError>
+    },
 
     #[snafu(display("PostScriptParseError"))]
     PostScriptParse,

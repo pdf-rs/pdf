@@ -1016,15 +1016,13 @@ pub struct FieldDictionary {
     pub actions: Option<Dictionary>,
 
     #[pdf(key="Rect")]
-    pub rect: Rect,
+    pub rect: Option<Rect>,
 
     #[pdf(key="MaxLen")]
     pub max_len: Option<u32>,
 
-
-
     #[pdf(key="Subtype")]
-    pub subtype: Name,
+    pub subtype: Option<Name>,
 
     #[pdf(other)]
     pub other: Dictionary

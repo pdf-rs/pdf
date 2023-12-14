@@ -619,7 +619,7 @@ fn impl_object_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream {
                             match <#ty as pdf::object::Object>::from_primitive(pdf::primitive::Primitive::Null, resolve) {
                                 Ok(obj) => obj,
                                 Err(_) => return Err(pdf::error::PdfError::MissingEntry {
-                                    typ: stringify!(#ty),
+                                    typ: #typ,
                                     field: String::from(stringify!(#name)),
                                 })
                             },
