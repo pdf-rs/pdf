@@ -12,7 +12,6 @@ macro_rules! run {
         match $e {
             Ok(v) => v,
             Err(e) => {
-                e.trace();
                 panic!("{}", e);
             }
         }

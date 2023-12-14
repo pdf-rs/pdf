@@ -184,9 +184,6 @@ pub enum PdfError {
     Invalid,
 }
 impl PdfError {
-    pub fn trace(&self) {
-        trace(self, 0);
-    }
     pub fn is_eof(&self) -> bool {
         match self {
             PdfError::EOF => true,
@@ -202,13 +199,6 @@ impl globalcache::ValueSize for PdfError {
     #[inline]
     fn size(&self) -> usize {
         data_size(self)
-    }
-}
-
-fn trace(err: &dyn Error, depth: usize) {
-    println!("{}: {}", depth, err);
-    if let Some(source) = err.source() {
-        trace(source, depth+1);
     }
 }
 
