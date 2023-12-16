@@ -293,7 +293,7 @@ pub struct Page {
     pub vp:         Option<Primitive>,
 
     #[pdf(key="Annots", default="vec![]")]
-    pub annotations: Vec<Ref<Annot>>,
+    pub annotations: Vec<MaybeRef<Annot>>,
 
     #[pdf(other)]
     pub other: Dictionary,
