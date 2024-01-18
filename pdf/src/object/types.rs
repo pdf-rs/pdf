@@ -1550,7 +1550,7 @@ pub struct Rectangle {
     pub top:    f32,
 }
 #[deprecated]
-pub type Rect = Rectangle;
+pub type ViewRect = Rectangle;
 
 impl Object for Rectangle {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
