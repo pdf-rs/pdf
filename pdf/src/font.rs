@@ -392,7 +392,7 @@ pub struct FontDescriptor {
     pub flags: u32,
 
     #[pdf(key="FontBBox")]
-    pub font_bbox: Rect,
+    pub font_bbox: Rectangle,
 
     #[pdf(key="ItalicAngle")]
     pub italic_angle: f32,

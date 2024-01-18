@@ -770,7 +770,7 @@ macro_rules! deep_clone_simple {
         )*
     )
 }
-deep_clone_simple!(f32, i32, u32, bool, Name, (), Date, PdfString, Rect, u8, Arc<[u8]>, Vec<u16>);
+deep_clone_simple!(f32, i32, u32, bool, Name, (), Date, PdfString, Rectangle, u8, Arc<[u8]>, Vec<u16>);
 
 impl<A: DeepClone, B: DeepClone> DeepClone for (A, B) {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {

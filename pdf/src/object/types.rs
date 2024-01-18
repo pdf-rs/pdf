@@ -186,10 +186,10 @@ pub struct PageTree {
     pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
-    pub media_box:  Option<Rect>,
+    pub media_box:  Option<Rectangle>,
     
     #[pdf(key="CropBox")]
-    pub crop_box:   Option<Rect>,
+    pub crop_box:   Option<Rectangle>,
 }
 impl PageTree {
     pub fn page(&self, resolve: &impl Resolve, page_nr: u32) -> Result<PageRc> {
@@ -269,13 +269,13 @@ pub struct Page {
     pub resources: Option<MaybeRef<Resources>>,
     
     #[pdf(key="MediaBox")]
-    pub media_box:  Option<Rect>,
+    pub media_box:  Option<Rectangle>,
     
     #[pdf(key="CropBox")]
-    pub crop_box:   Option<Rect>,
+    pub crop_box:   Option<Rectangle>,
     
     #[pdf(key="TrimBox")]
-    pub trim_box:   Option<Rect>,
+    pub trim_box:   Option<Rectangle>,
     
     #[pdf(key="Contents")]
     pub contents:   Option<Content>,
@@ -327,14 +327,14 @@ impl Page {
             annotations: vec![]
         }
     }
-    pub fn media_box(&self) -> Result<Rect> {
+    pub fn media_box(&self) -> Result<Rectangle> {
         match self.media_box {
             Some(b) => Ok(b),
             None => inherit(&self.parent, |pt| pt.media_box)?
                 .ok_or_else(|| PdfError::MissingEntry { typ: "Page", field: "MediaBox".into() })
         }
     }
-    pub fn crop_box(&self) -> Result<Rect> {
+    pub fn crop_box(&self) -> Result<Rectangle> {
         match self.crop_box {
             Some(b) => Ok(b),
             None => match inherit(&self.parent, |pt| pt.crop_box)? {
@@ -403,7 +403,7 @@ pub struct PatternDict {
     pub tiling_type: Option<i32>,
 
     #[pdf(key="BBox")]
-    pub bbox: Rect,
+    pub bbox: Rectangle,
 
     #[pdf(key="XStep")]
     pub x_step: f32,
@@ -796,7 +796,7 @@ pub struct FormDict {
     pub last_modified: Option<PdfString>,
 
     #[pdf(key="BBox")]
-    pub bbox: Rect,
+    pub bbox: Rectangle,
 
     #[pdf(key="Matrix")]
     pub matrix: Option<Primitive>,
@@ -950,7 +950,7 @@ pub struct Annot {
     pub subtype: Name,
     
     #[pdf(key="Rect")]
-    pub rect: Rect,
+    pub rect: Rectangle,
 
     #[pdf(key="Contents")]
     pub contents: Option<PdfString>,
@@ -1016,7 +1016,7 @@ pub struct FieldDictionary {
     pub actions: Option<Dictionary>,
 
     #[pdf(key="Rect")]
-    pub rect: Option<Rect>,
+    pub rect: Option<Rectangle>,
 
     #[pdf(key="MaxLen")]
     pub max_len: Option<u32>,
@@ -1201,7 +1201,7 @@ pub enum DestView {
     Fit,
     FitH { top: f32 },
     FitV { left: f32 },
-    FitR(Rect),
+    FitR(Rectangle),
     FitB,
     FitBH { top: f32 }
 }
@@ -1264,7 +1264,7 @@ impl Dest {
             "FitV" => DestView::FitV {
                 left: try_opt!(array.get(2)).as_number()?
             },
-            "FitR" => DestView::FitR(Rect {
+            "FitR" => DestView::FitR(Rectangle {
                 left:   try_opt!(array.get(2)).as_number()?,
                 bottom: try_opt!(array.get(3)).as_number()?,
                 right:  try_opt!(array.get(4)).as_number()?,
@@ -1533,20 +1533,32 @@ pub struct Outlines {
 
 }
 
+/// ISO 32000-2:2020(E) 7.9.5 Rectangles (Pg 134)
+/// specifying the lower-left x, lower-left y,
+/// upper-right x, and upper-right y coordinates
+/// of the rectangle, in that order. The other two
+/// corners of the rectangle are then assumed to
+/// have coordinates (ll x , ur y ) and
+/// (ur x , ll y ).
+/// Also see Table 74, key BBox definition Pg 221
+/// defining top, left, bottom, right labeling
 #[derive(Debug, Copy, Clone, DataSize, Default)]
-pub struct Rect {
+pub struct Rectangle {
     pub left:   f32,
     pub bottom: f32,
     pub right:  f32,
     pub top:    f32,
 }
-impl Object for Rect {
+#[deprecated]
+pub type Rect = Rectangle;
+
+impl Object for Rectangle {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         let arr = p.resolve(r)?.into_array()?;
         if arr.len() != 4 {
             bail!("len != 4 {:?}", arr);
         }
-        Ok(Rect {
+        Ok(Rectangle {
             left:   arr[0].as_number()?,
             bottom: arr[1].as_number()?,
             right:  arr[2].as_number()?,
@@ -1554,7 +1566,7 @@ impl Object for Rect {
         })
     }
 }
-impl ObjectWrite for Rect {
+impl ObjectWrite for Rectangle {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         Primitive::array::<f32, _, _, _>([self.left, self.bottom, self.right, self.top].iter(), update)
     }
