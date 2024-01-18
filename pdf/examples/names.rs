@@ -60,6 +60,7 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
     }
 }
 
+#[cfg(feature="cache")]
 fn main() {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
