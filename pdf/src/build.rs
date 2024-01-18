@@ -5,27 +5,27 @@ use std::sync::Arc;
 
 use datasize::DataSize;
 
-use crate::PdfError;
 use crate::any::AnySync;
+use crate::content::*;
 use crate::enc::StreamFilter;
+use crate::error::Result;
 use crate::file::Cache;
 use crate::file::FileOptions;
 use crate::file::Log;
 use crate::file::Storage;
 use crate::file::Trailer;
 use crate::object::*;
-use crate::content::*;
-use crate::error::Result;
 use crate::parser::ParseFlags;
 use crate::primitive::Dictionary;
 use crate::primitive::Primitive;
+use crate::PdfError;
 
 #[derive(Default)]
 pub struct PageBuilder {
     pub ops: Vec<Op>,
-    pub media_box: Option<Rect>,
-    pub crop_box: Option<Rect>,
-    pub trim_box: Option<Rect>,
+    pub media_box: Option<Rectangle>,
+    pub crop_box: Option<Rectangle>,
+    pub trim_box: Option<Rectangle>,
     pub resources: Resources,
     pub rotate: i32,
     pub metadata: Option<Primitive>,
@@ -37,12 +37,17 @@ impl PageBuilder {
     pub fn from_content(content: Content, resolve: &impl Resolve) -> Result<PageBuilder> {
         Ok(PageBuilder {
             ops: content.operations(resolve)?,
-            .. PageBuilder::default()
+            ..PageBuilder::default()
         })
     }
     pub fn from_page(page: &Page, resolve: &impl Resolve) -> Result<PageBuilder> {
         Ok(PageBuilder {
-            ops: page.contents.as_ref().map(|c| c.operations(resolve)).transpose()?.unwrap_or_default(),
+            ops: page
+                .contents
+                .as_ref()
+                .map(|c| c.operations(resolve))
+                .transpose()?
+                .unwrap_or_default(),
             media_box: Some(page.media_box()?),
             crop_box: Some(page.crop_box()?),
             trim_box: page.trim_box,
@@ -58,12 +63,17 @@ impl PageBuilder {
         let old_resources = &**page.resources()?.data();
 
         let mut resources = Resources::default();
-        let ops = page.contents.as_ref()
-            .map(|content| content.operations(cloner)).transpose()?
+        let ops = page
+            .contents
+            .as_ref()
+            .map(|content| content.operations(cloner))
+            .transpose()?
             .map(|ops| {
-                ops.into_iter().map(|op| -> Result<Op, PdfError> {
-                    deep_clone_op(&op, cloner, old_resources, &mut resources)
-                }).collect()
+                ops.into_iter()
+                    .map(|op| -> Result<Op, PdfError> {
+                        deep_clone_op(&op, cloner, old_resources, &mut resources)
+                    })
+                    .collect()
             })
             .transpose()?
             .unwrap_or_default();
@@ -82,7 +92,7 @@ impl PageBuilder {
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
-        self.media_box = Some(Rect {
+        self.media_box = Some(Rectangle {
             top: 0.,
             left: 0.,
             bottom: height,
@@ -92,30 +102,34 @@ impl PageBuilder {
 }
 
 pub struct CatalogBuilder {
-    pages: Vec<PageBuilder>
+    pages: Vec<PageBuilder>,
 }
 impl CatalogBuilder {
     pub fn from_pages(pages: Vec<PageBuilder>) -> CatalogBuilder {
-        CatalogBuilder {
-            pages
-        }
+        CatalogBuilder { pages }
     }
     pub fn build(self, update: &mut impl Updater) -> Result<Catalog> {
-        let kids_promise: Vec<_> = self.pages.iter()
+        let kids_promise: Vec<_> = self
+            .pages
+            .iter()
             .map(|_page| update.promise::<PagesNode>())
             .collect();
-        let kids: Vec<_> = kids_promise.iter()
+        let kids: Vec<_> = kids_promise
+            .iter()
             .map(|p| Ref::new(p.get_inner()))
             .collect();
 
-        let tree = PagesRc::create(PageTree {
-            parent: None,
-            count: kids.len() as _,
-            kids,
-            resources: None,
-            media_box: None,
-            crop_box: None
-        }, update)?;
+        let tree = PagesRc::create(
+            PageTree {
+                parent: None,
+                count: kids.len() as _,
+                kids,
+                resources: None,
+                media_box: None,
+                crop_box: None,
+            },
+            update,
+        )?;
 
         for (page, promise) in self.pages.into_iter().zip(kids_promise) {
             let content = Content::from_ops(page.ops);
@@ -132,7 +146,7 @@ impl CatalogBuilder {
                 lgi: page.lgi,
                 vp: page.vp,
                 other: page.other,
-                annotations: vec![]
+                annotations: vec![],
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }
@@ -154,7 +168,6 @@ pub struct PdfBuilder<SC, OC, L> {
     pub storage: Storage<Vec<u8>, SC, OC, L>,
     pub info: Option<InfoDict>,
     pub id: Option<[String; 2]>,
-
 }
 impl<SC, OC, L> PdfBuilder<SC, OC, L>
 where
@@ -167,7 +180,7 @@ where
         PdfBuilder {
             storage,
             info: None,
-            id: None
+            id: None,
         }
     }
     pub fn info(mut self, info: InfoDict) -> Self {
@@ -180,7 +193,7 @@ where
     }
     pub fn build(mut self, catalog: CatalogBuilder) -> Result<Vec<u8>> {
         let catalog = catalog.build(&mut self.storage)?;
-        
+
         let mut trailer = Trailer {
             root: self.storage.create(catalog)?,
             encrypt_dict: None,
@@ -220,11 +233,19 @@ impl<'a, R, U> Importer<'a, R, U> {
 }
 impl<'a, R: Resolve, U> Importer<'a, R, U> {
     pub fn finish(self) -> ImporterMap<R> {
-        ImporterMap { resolver: self.resolver, map: self.map }
+        ImporterMap {
+            resolver: self.resolver,
+            map: self.map,
+        }
     }
 }
 impl<R: Resolve> ImporterMap<R> {
-    fn compare_dict(&self, a_dict: &Dictionary, b_dict: &Dictionary, new_resolve: &impl Resolve) -> Result<bool> {
+    fn compare_dict(
+        &self,
+        a_dict: &Dictionary,
+        b_dict: &Dictionary,
+        new_resolve: &impl Resolve,
+    ) -> Result<bool> {
         let mut same = true;
         let mut b_unvisited: HashSet<_> = b_dict.keys().collect();
         for (a_key, a_val) in a_dict.iter() {
@@ -244,7 +265,12 @@ impl<R: Resolve> ImporterMap<R> {
         }
         Ok(same && !b_unvisited.is_empty())
     }
-    fn compare_prim(&self, a: &Primitive, b: &Primitive, new_resolve: &impl Resolve) -> Result<bool> {
+    fn compare_prim(
+        &self,
+        a: &Primitive,
+        b: &Primitive,
+        new_resolve: &impl Resolve,
+    ) -> Result<bool> {
         match (a, b) {
             (Primitive::Array(a_parts), Primitive::Array(b_parts)) => {
                 if a_parts.len() != b_parts.len() {
@@ -264,22 +290,20 @@ impl<R: Resolve> ImporterMap<R> {
             (Primitive::Dictionary(a_dict), Primitive::Dictionary(b_dict)) => {
                 self.compare_dict(a_dict, b_dict, new_resolve)
             }
-            (Primitive::Reference(r1), Primitive::Reference(r2)) => {
-                match self.map.get(&r1) {
-                    Some(r) if r == r2 => Ok(true),
-                    _ => Ok(false)
-                }
-            }
+            (Primitive::Reference(r1), Primitive::Reference(r2)) => match self.map.get(&r1) {
+                Some(r) if r == r2 => Ok(true),
+                _ => Ok(false),
+            },
             (Primitive::Stream(a_s), Primitive::Stream(b_s)) => {
                 if !self.compare_dict(&a_s.info, &b_s.info, new_resolve)? {
                     println!("stream dicts differ");
-                    return Ok(false)
+                    return Ok(false);
                 }
                 let a_data = a_s.raw_data(&self.resolver)?;
                 let b_data = b_s.raw_data(new_resolve)?;
                 if a_data != b_data {
                     println!("data differs.");
-                    return Ok(false)
+                    return Ok(false);
                 }
                 Ok(true)
             }
@@ -315,13 +339,18 @@ impl<R: Resolve> ImporterMap<R> {
         }
         Ok(same)
     }
-} 
+}
 
 impl<'a, R: Resolve, U> Resolve for Importer<'a, R, U> {
-    fn get<T: Object+datasize::DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object + datasize::DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         self.resolver.get(r)
     }
-    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+    fn get_data_or_decode(
+        &self,
+        id: PlainRef,
+        range: Range<usize>,
+        filters: &[StreamFilter],
+    ) -> Result<Arc<[u8]>> {
         self.resolver.get_data_or_decode(id, range, filters)
     }
     fn options(&self) -> &ParseOptions {
@@ -352,7 +381,10 @@ impl<'a, R, U: Updater> Updater for Importer<'a, R, U> {
     }
 }
 impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
-    fn clone_ref<T: DeepClone + Object + DataSize + ObjectWrite>(&mut self, old: Ref<T>) -> Result<Ref<T>> {
+    fn clone_ref<T: DeepClone + Object + DataSize + ObjectWrite>(
+        &mut self,
+        old: Ref<T>,
+    ) -> Result<Ref<T>> {
         if let Some(&new_ref) = self.map.get(&old.get_inner()) {
             return Ok(Ref::new(new_ref));
         }
@@ -371,14 +403,16 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
         let obj = self.resolver.resolve(old)?;
         let clone = obj.deep_clone(self)?;
 
-        let new = self.updater.create(clone)?
-            .get_ref().get_inner();
+        let new = self.updater.create(clone)?.get_ref().get_inner();
 
         self.map.insert(old, new);
 
         Ok(new)
     }
-    fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(&mut self, old: &RcRef<T>) -> Result<RcRef<T>> {
+    fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(
+        &mut self,
+        old: &RcRef<T>,
+    ) -> Result<RcRef<T>> {
         let old_ref = old.get_ref().get_inner();
         if let Some(&new_ref) = self.map.get(&old_ref) {
             let arc = self.rcrefs.get(&new_ref).unwrap().clone().downcast()?;
@@ -387,7 +421,8 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
 
         let new = old.data().deep_clone(self)?;
         let new = self.updater.create::<T>(new)?;
-        self.rcrefs.insert(new.get_ref().get_inner(), AnySync::new(new.data().clone()));
+        self.rcrefs
+            .insert(new.get_ref().get_inner(), AnySync::new(new.data().clone()));
         self.map.insert(old_ref, new.get_ref().get_inner());
 
         Ok(new)
@@ -398,7 +433,13 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
             return new.clone().downcast();
         }
         let new = Shared::new(old.as_ref().deep_clone(self)?);
-        self.shared.insert(key, (AnySync::new_without_size(old.clone()), AnySync::new_without_size(new.clone())));
+        self.shared.insert(
+            key,
+            (
+                AnySync::new_without_size(old.clone()),
+                AnySync::new_without_size(new.clone()),
+            ),
+        );
         Ok(new)
     }
 }
