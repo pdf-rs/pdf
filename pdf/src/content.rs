@@ -71,12 +71,12 @@ fn point(args: &mut impl Iterator<Item=Primitive>) -> Result<Point> {
     let y = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
     Ok(Point { x, y })
 }
-fn rect(args: &mut impl Iterator<Item=Primitive>) -> Result<Rect> {
+fn rect(args: &mut impl Iterator<Item=Primitive>) -> Result<ViewRect> {
     let x = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
     let y = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
     let width = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
     let height = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
-    Ok(Rect { x, y, width, height })
+    Ok(ViewRect { x, y, width, height })
 }
 fn rgb(args: &mut impl Iterator<Item=Primitive>) -> Result<Rgb> {
     let red = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
@@ -828,23 +828,32 @@ impl From<euclid::Vector2D<f32, PdfSpace>> for Point {
     }
 }
 
+/// ISO 32000-2:2020(E) Table 58 Pg 186 - ViewRect
+/// Path construction operators - {x y width height re}
+/// Append a rectangle to the current path as a complete
+/// subpath, with lower-left corner (x, y) and dimensions
+/// width and height in user space.
 #[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 #[repr(C, align(8))]
-pub struct Rect {
+pub struct ViewRect {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
 }
-impl Display for Rect {
+
+#[deprecated]
+pub type Rect = ViewRect;
+
+impl Display for ViewRect {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {} {}", self.x, self.y, self.width, self.height)
     }
 }
 #[cfg(feature = "euclid")]
-impl Into<euclid::Box2D<f32, PdfSpace>> for Rect {
+impl Into<euclid::Box2D<f32, PdfSpace>> for ViewRect {
     fn into(self) -> euclid::Box2D<f32, PdfSpace> {
-        let Rect { x, y, width, height } = self;
+        let ViewRect { x, y, width, height } = self;
 
         assert!(width > 0.0);
         assert!(height > 0.0);
@@ -853,14 +862,14 @@ impl Into<euclid::Box2D<f32, PdfSpace>> for Rect {
     }
 }
 #[cfg(feature = "euclid")]
-impl From<euclid::Box2D<f32, PdfSpace>> for Rect {
+impl From<euclid::Box2D<f32, PdfSpace>> for ViewRect {
     fn from(from: euclid::Box2D<f32, PdfSpace>) -> Self {
         let euclid::Box2D { min: euclid::Point2D { x, y, .. }, max: euclid::Point2D { x: x2, y: y2, .. }, .. } = from;
 
         assert!(x < x2);
         assert!(y < y2);
 
-        Rect {
+        ViewRect {
             x, y, width: x2 - x, height: y2 - y
         }
     }
@@ -1010,7 +1019,7 @@ pub enum Op {
     MoveTo { p: Point },
     LineTo { p: Point },
     CurveTo { c1: Point, c2: Point, p: Point },
-    Rect { rect: Rect },
+    Rect { rect: ViewRect },
     EndPath,
 
     Stroke,

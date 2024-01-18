@@ -1,4 +1,4 @@
-use pdf::content::Rect;
+use pdf::content::ViewRect;
 use pdf::error::PdfError;
 use pdf::file::FileOptions;
 use pdf::object::Resolve;
@@ -47,8 +47,8 @@ fn main() -> Result<(), PdfError> {
 fn annotation_strikethrough(
     other_dict: &Dictionary,
     resolver: &impl Resolve,
-) -> Result<Vec<(String, Vec<pdf::content::Rect>)>, PdfError> {
-    let mut strikethroughs: Vec<(String, Vec<pdf::content::Rect>)> = Vec::new();
+) -> Result<Vec<(String, Vec<pdf::content::ViewRect>)>, PdfError> {
+    let mut strikethroughs: Vec<(String, Vec<pdf::content::ViewRect>)> = Vec::new();
 
     if !other_dict.is_empty() {
         let annotations = other_dict.get("Annots".into());
@@ -56,7 +56,7 @@ fn annotation_strikethrough(
             let annotations_resolved = annotations.clone().resolve(resolver)?;
             let annotations_array = annotations_resolved.into_array()?;
             for annotation in annotations_array.iter() {
-                let mut paths: Vec<pdf::content::Rect> = Vec::new();
+                let mut paths: Vec<pdf::content::ViewRect> = Vec::new();
                 let annotation_resolved = annotation.clone().resolve(resolver)?;
                 let annotation_dict = annotation_resolved.into_dictionary()?;
 
@@ -88,7 +88,7 @@ fn annotation_strikethrough(
                                         quad_points.push(number);
                                     }
                                     if quad_points.len() == 8 {
-                                        paths.push(Rect {
+                                        paths.push(ViewRect {
                                             x: quad_points[0],
                                             y: quad_points[1],
                                             width: quad_points[2] - quad_points[0],
