@@ -23,9 +23,9 @@ use crate::primitive::Primitive;
 #[derive(Default)]
 pub struct PageBuilder {
     pub ops: Vec<Op>,
-    pub media_box: Option<ViewRect>,
-    pub crop_box: Option<ViewRect>,
-    pub trim_box: Option<ViewRect>,
+    pub media_box: Option<Rectangle>,
+    pub crop_box: Option<Rectangle>,
+    pub trim_box: Option<Rectangle>,
     pub resources: Resources,
     pub rotate: i32,
     pub metadata: Option<Primitive>,
@@ -82,7 +82,7 @@ impl PageBuilder {
         })
     }
     pub fn size(&mut self, width: f32, height: f32) {
-        self.media_box = Some(ViewRect {
+        self.media_box = Some(Rectangle {
             top: 0.,
             left: 0.,
             bottom: height,
