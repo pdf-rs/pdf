@@ -21,7 +21,7 @@ macro_rules! run {
 #[test]
 fn open_file() {
     let _ = run!(FileOptions::uncached().open(file_path!("example.pdf")));
-    #[cfg(feature = "mmap")]
+    #[cfg(all(feature = "mmap", feature = "cache"))]
     let _ = run!({
         use memmap2::Mmap;
         let file = std::fs::File::open(file_path!("example.pdf")).expect("can't open file");

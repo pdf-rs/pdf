@@ -8,6 +8,7 @@ use std::env::args;
 /// Extract data from a page entry that is under "other".
 /// This example looks for stikethroughs in the annotations entry
 /// and returns a Vec<Rect> for the bounds of the struckthrough text.
+#[cfg(feature="cache")]
 fn main() -> Result<(), PdfError> {
     let path = args()
         .nth(1)

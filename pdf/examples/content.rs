@@ -14,6 +14,7 @@ use pdf::build::*;
 
 use pdf::primitive::PdfString;
 
+#[cfg(feature="cache")]
 fn main() -> Result<(), PdfError> {
     let path = PathBuf::from(env::args_os().nth(1).expect("no file given"));
     

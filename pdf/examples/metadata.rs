@@ -5,6 +5,7 @@ use pdf::file::{FileOptions};
 use pdf::object::{FieldDictionary, FieldType, Resolve};
 
 /// extract and print a PDF's metadata
+#[cfg(feature="cache")]
 fn main() -> Result<(), PdfError> {
     let path = args()
         .nth(1)

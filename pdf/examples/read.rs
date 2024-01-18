@@ -21,6 +21,7 @@ impl Log for VerboseLog {
     }
 }
 
+#[cfg(feature="cache")]
 fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
