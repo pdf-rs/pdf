@@ -10,11 +10,11 @@ use pdf::font::{Font, FontData, TFont};
 use pdf::object::*;
 use pdf::primitive::{PdfString, Primitive, Name};
 
-fn main() -> Result<(), PdfError> {
+fn run() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
 
-    let mut file = FileOptions::cached().open(&path).unwrap();
+    let mut file = FileOptions::cached().open(&path)?;
     let mut to_update_field: Option<_> = None;
 
 
@@ -43,8 +43,7 @@ fn main() -> Result<(), PdfError> {
     let resources = file.create(resources)?;
 
     let page0 = file.get_page(0).unwrap();
-    for &annot in &page0.annotations {
-        let annot = file.resolver().get(annot)?;
+    for annot in &page0.annotations {
         if let Some(ref a) = annot.appearance_streams {
             let normal = file.resolver().get(a.normal);
             if let Ok(normal) = normal {
@@ -116,4 +115,10 @@ fn main() -> Result<(), PdfError> {
     }
 
     Ok(())
+}
+
+fn main() {
+    if let Err(e) = run() {
+        println!("{e}");
+    }
 }
