@@ -129,7 +129,9 @@ pub struct Catalog {
     #[pdf(key="Pages")]
     pub pages: PagesRc,
 
-// PageLabels: number_tree,
+    #[pdf(key="PageLabels")]
+    pub page_labels: Option<NameTree<PdfString>>,
+
     #[pdf(key="Names")]
     pub names: Option<MaybeRef<NameDictionary>>,
     
