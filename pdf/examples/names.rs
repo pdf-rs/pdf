@@ -119,6 +119,11 @@ fn main() {
         }
     }
 
-
     println!("{} items", count);
+
+    if let Some(ref labels) = catalog.page_labels {
+        labels.walk(&resolver, &mut |page: i32, label| {
+            println!("{page} -> {:?}", label);
+        });
+    }
 }
