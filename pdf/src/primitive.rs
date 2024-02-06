@@ -766,9 +766,7 @@ impl Object for Date {
         match p.resolve(r)? {
             Primitive::String (PdfString {data}) => {
                 let s = str::from_utf8(&data)?;
-                let len = s.len();
-                if len > 2 && &s[0..2] == "D:" {
-
+                if s.starts_with("D:") {
                     let year = match s.get(2..6) {
                         Some(year) => {
                             str::parse::<u16>(year)?
