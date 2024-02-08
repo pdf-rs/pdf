@@ -1,15 +1,15 @@
 extern crate pdf;
 
-use std::env::args;
-use std::time::SystemTime;
-use std::fs;
 use std::collections::HashMap;
+use std::env::args;
+use std::fs;
+use std::time::SystemTime;
 
+use pdf::enc::StreamFilter;
+use pdf::error::PdfError;
 use pdf::file::{FileOptions, Log};
 use pdf::object::*;
 use pdf::primitive::Primitive;
-use pdf::error::PdfError;
-use pdf::enc::StreamFilter;
 
 struct VerboseLog;
 impl Log for VerboseLog {
@@ -21,7 +21,7 @@ impl Log for VerboseLog {
     }
 }
 
-#[cfg(feature="cache")]
+#[cfg(feature = "cache")]
 fn main() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
@@ -38,7 +38,7 @@ fn main() -> Result<(), PdfError> {
             (Some(title), None) => title,
             (None, Some(author)) => format!("[no title] – {}", author),
             (Some(title), Some(author)) => format!("{} – {}", title, author),
-            _ => "PDF".into()
+            _ => "PDF".into(),
         };
         println!("{}", descr);
     }
@@ -56,15 +56,19 @@ fn main() -> Result<(), PdfError> {
             };
             fonts.insert(name, font.clone());
         }
-        images.extend(resources.xobjects.iter().map(|(_name, &r)| resolver.get(r).unwrap())
-            .filter(|o| matches!(**o, XObject::Image(_)))
+        images.extend(
+            resources
+                .xobjects
+                .iter()
+                .map(|(_name, &r)| resolver.get(r).unwrap())
+                .filter(|o| matches!(**o, XObject::Image(_))),
         );
     }
 
     for (i, o) in images.iter().enumerate() {
         let img = match **o {
             XObject::Image(ref im) => im,
-            _ => continue
+            _ => continue,
         };
         let (data, filter) = img.raw_image_data(&resolver)?;
         let ext = match filter {
@@ -76,7 +80,7 @@ fn main() -> Result<(), PdfError> {
         };
 
         let fname = format!("extracted_image_{}.{}", i, ext);
-        
+
         fs::write(fname.as_str(), data).unwrap();
         println!("Wrote file {}", fname);
     }
@@ -105,8 +109,10 @@ fn main() -> Result<(), PdfError> {
     }
 
     if let Ok(elapsed) = now.elapsed() {
-        println!("Time: {}s", elapsed.as_secs() as f64
-                 + elapsed.subsec_nanos() as f64 * 1e-9);
+        println!(
+            "Time: {}s",
+            elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9
+        );
     }
     Ok(())
 }
