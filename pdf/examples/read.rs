@@ -70,12 +70,16 @@ fn main() -> Result<(), PdfError> {
             XObject::Image(ref im) => im,
             _ => continue,
         };
-        let (data, filter) = img.raw_image_data(&resolver)?;
+        let (mut data, filter) = img.raw_image_data(&resolver)?;
         let ext = match filter {
             Some(StreamFilter::DCTDecode(_)) => "jpeg",
             Some(StreamFilter::JBIG2Decode(_)) => "jbig2",
             Some(StreamFilter::JPXDecode) => "jp2k",
             Some(StreamFilter::FlateDecode(_)) => "png",
+            Some(StreamFilter::CCITTFaxDecode(_)) => {
+                data = fax::tiff::wrap(&data, img.width, img.height).into();
+                "tiff"
+            }
             _ => continue,
         };
 
