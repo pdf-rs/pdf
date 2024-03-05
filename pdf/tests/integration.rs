@@ -1,12 +1,10 @@
 use std::str;
+use std::path::{Path, PathBuf};
 use pdf::file::FileOptions;
 use pdf::object::*;
 use pdf::parser::{parse, ParseFlags};
 use glob::glob;
 
-macro_rules! file_path {
-    ( $subdir:expr ) => { concat!("../files/", $subdir) }
-}
 macro_rules! run {
     ($e:expr) => (
         match $e {
@@ -18,9 +16,22 @@ macro_rules! run {
     )
 }
 
+fn files() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("files")
+}
+fn file_path(s: &str) -> PathBuf {
+    files().join(s)
+}
+fn dir_pdfs(path: PathBuf) -> impl Iterator<Item=PathBuf> {
+    path.read_dir().unwrap()
+        .filter_map(|r| r.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|e| e == "pdf").unwrap_or(false))
+}
+
 #[test]
 fn open_file() {
-    let _ = run!(FileOptions::uncached().open(file_path!("example.pdf")));
+    let _ = run!(FileOptions::uncached().open(file_path("example.pdf")));
     #[cfg(all(feature = "mmap", feature = "cache"))]
     let _ = run!({
         use memmap2::Mmap;
@@ -33,61 +44,42 @@ fn open_file() {
 #[cfg(feature="cache")]
 #[test]
 fn read_pages() {
-    for entry in glob(file_path!("*.pdf")).expect("Failed to read glob pattern") {
-        match entry {
-            Ok(path) => {
-                println!("\n == Now testing `{}` ==", path.to_str().unwrap());
+    for path in dir_pdfs(files()) {
+        println!("\n == Now testing `{}` ==", path.to_str().unwrap());
 
-                let path = path.to_str().unwrap();
-                let file = run!(FileOptions::cached().open(path));
-                for i in 0 .. file.num_pages() {
-                    println!("Read page {}", i);
-                    let _ = file.get_page(i);
-                }
-            }
-            Err(e) => println!("{:?}", e)
+        let path = path.to_str().unwrap();
+        let file = run!(FileOptions::cached().open(path));
+        for i in 0 .. file.num_pages() {
+            println!("Read page {}", i);
+            let _ = file.get_page(i);
         }
     }
 }
 
 #[test]
 fn user_password() {
-    for entry in glob(file_path!("password_protected/*.pdf"))
-        .expect("Failed to read glob pattern")
-    {
-        match entry {
-            Ok(path) => {
-                println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
+    for path in dir_pdfs(file_path("password_protected")) {
+        println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
-                let path = path.to_str().unwrap();
-                let file = run!(FileOptions::uncached().password(b"userpassword").open(path));
-                for i in 0 .. file.num_pages() {
-                    println!("\nRead page {}", i);
-                    let _ = file.get_page(i);
-                }
-            }
-            Err(e) => println!("{:?}", e)
+        let path = path.to_str().unwrap();
+        let file = run!(FileOptions::uncached().password(b"userpassword").open(path));
+        for i in 0 .. file.num_pages() {
+            println!("\nRead page {}", i);
+            let _ = file.get_page(i);
         }
     }
 }
 
 #[test]
 fn owner_password() {
-    for entry in glob(file_path!("password_protected/*.pdf"))
-        .expect("Failed to read glob pattern")
-    {
-        match entry {
-            Ok(path) => {
-                println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
+    for path in dir_pdfs(file_path("password_protected")) {
+        println!("\n\n == Now testing `{}` ==\n", path.to_str().unwrap());
 
-                let path = path.to_str().unwrap();
-                let file = run!(FileOptions::uncached().password(b"ownerpassword").open(path));
-                for i in 0 .. file.num_pages() {
-                    println!("\nRead page {}", i);
-                    let _ = file.get_page(i);
-                }
-            }
-            Err(e) => println!("{:?}", e)
+        let path = path.to_str().unwrap();
+        let file = run!(FileOptions::uncached().password(b"ownerpassword").open(path));
+        for i in 0 .. file.num_pages() {
+            println!("\nRead page {}", i);
+            let _ = file.get_page(i);
         }
     }
 }
@@ -97,26 +89,19 @@ fn owner_password() {
 #[cfg(feature="cache")]
 #[test]
 fn invalid_pdfs() {
-    for entry in glob(file_path!("invalid/*.pdf"))
-        .expect("Failed to read glob pattern")
-    {
-        match entry {
-            Ok(path) => {
-                let path = path.to_str().unwrap();
-                println!("\n\n == Now testing `{}` ==\n", path);
+    for path in dir_pdfs(file_path("invalid")) {
+        let path = path.to_str().unwrap();
+        println!("\n\n == Now testing `{}` ==\n", path);
 
-                match FileOptions::cached().open(path) {
-                    Ok(file) => {
-                        for i in 0 .. file.num_pages() {
-                            let _ = file.get_page(i);
-                        }
-                    }
-                    Err(_) => {
-                        continue;
-                    }
+        match FileOptions::cached().open(path) {
+            Ok(file) => {
+                for i in 0 .. file.num_pages() {
+                    let _ = file.get_page(i);
                 }
             }
-            Err(e) => panic!("error when reading glob patterns: {:?}", e),
+            Err(_) => {
+                continue;
+            }
         }
     }
 }
@@ -125,7 +110,7 @@ fn invalid_pdfs() {
 #[test]
 fn parse_objects_from_stream() {
     use pdf::object::NoResolve;
-    let file = run!(FileOptions::cached().open(file_path!("xelatex.pdf")));
+    let file = run!(FileOptions::cached().open(file_path("xelatex.pdf")));
     let resolver = file.resolver();
 
     // .. we know that object 13 of that file is an ObjectStream
