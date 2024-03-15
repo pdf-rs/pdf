@@ -43,7 +43,8 @@ fn run() -> Result<(), PdfError> {
     let resources = file.create(resources)?;
 
     let page0 = file.get_page(0).unwrap();
-    for annot in &page0.annotations {
+    let annots = page0.annotations.load(&file.resolver()).expect("can't load annotations");
+    for annot in &annots {
         if let Some(ref a) = annot.appearance_streams {
             let normal = file.resolver().get(a.normal);
             if let Ok(normal) = normal {

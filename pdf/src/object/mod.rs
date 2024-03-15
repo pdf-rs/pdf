@@ -430,6 +430,32 @@ impl<T> PartialEq for MaybeRef<T> {
 }
 impl<T> Eq for MaybeRef<T> {}
 
+#[derive(Debug, Clone, DataSize)]
+pub struct Lazy<T> {
+    primitive: Primitive,
+    _marker: PhantomData<T>
+}
+impl<T: Object> Lazy<T> {
+    pub fn load(&self, resolve: &impl Resolve) -> Result<T> {
+        T::from_primitive(self.primitive.clone(), resolve)
+    }
+}
+impl<T: Object> Object for Lazy<T> {
+    fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
+        Ok(Self { primitive: p, _marker: PhantomData })
+    }
+}
+impl<T: ObjectWrite> ObjectWrite for Lazy<T> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        Ok(self.primitive.clone())
+    }
+}
+impl<T> Default for Lazy<T> {
+    fn default() -> Self {
+        Lazy { primitive: Primitive::Null, _marker: PhantomData }
+    }
+}
+
 //////////////////////////////////////
 // Object for Primitives & other types
 //////////////////////////////////////

@@ -132,7 +132,7 @@ impl CatalogBuilder {
                 lgi: page.lgi,
                 vp: page.vp,
                 other: page.other,
-                annotations: vec![]
+                annotations: Default::default(),
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
         }

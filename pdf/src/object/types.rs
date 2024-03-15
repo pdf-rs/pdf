@@ -294,8 +294,8 @@ pub struct Page {
     #[pdf(key="VP")]
     pub vp:         Option<Primitive>,
 
-    #[pdf(key="Annots", default="vec![]")]
-    pub annotations: Vec<MaybeRef<Annot>>,
+    #[pdf(key="Annots")]
+    pub annotations: Lazy<Vec<MaybeRef<Annot>>>,
 
     #[pdf(other)]
     pub other: Dictionary,
@@ -326,7 +326,7 @@ impl Page {
             lgi:        None,
             vp:         None,
             other: Dictionary::new(),
-            annotations: vec![]
+            annotations: Default::default(),
         }
     }
     pub fn media_box(&self) -> Result<Rectangle> {
