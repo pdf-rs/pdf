@@ -1,4 +1,4 @@
-# pdf-rs [![test](https://github.com/pdf-rs/pdf/actions/workflows/test.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/test.yml) [![clippy&fmt](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/lint.yml)
+# pdf-rs [![test](https://github.com/pdf-rs/pdf/actions/workflows/test.yml/badge.svg)](https://github.com/pdf-rs/pdf/actions/workflows/test.yml) 
 Read, alter and write PDF files.
 
 Modifying and writing PDFs is still experimental.
