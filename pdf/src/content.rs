@@ -729,8 +729,12 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                     }
                 }
                 writeln!(f, "] TJ")?;
-            },
-            Op::InlineImage { image: _ } => unimplemented!(),
+            }
+            Op::InlineImage { ref image } => {
+                writeln!(f, "BI")?;
+                image.serialize(f)?;
+                writeln!(f, "EI")?;
+            }
             Op::XObject { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " Do")?;
@@ -1148,7 +1152,17 @@ Gb"0F_%"1&#XD6"#B1qiGGG^V6GZ#ZkijB5'RjB4S^5I61&$Ni:Xh=4S_9KYN;c9MUZPn/h,c]oCLUmg
 1KkO\Ls5+g0aoD*btT?l^#mD&ORf[0~>
 EI
 "###;
+        let before = data.to_vec();
         let mut lexer = Lexer::new(data);
-        assert!(inline_image(&mut lexer, &NoResolve).is_ok()); 
+        let image = inline_image(&mut lexer, &NoResolve);
+        assert!(image.is_ok());
+
+        // serialize the image and compare
+        let image = image.unwrap();
+        let mut after = Vec::<u8>::with_capacity(before.len());
+        after.push(b'\n');
+        image.serialize(&mut after).unwrap();
+        after.extend_from_slice(b"EI\n");
+        assert_eq!(&before, &after);
     }
 }
