@@ -90,11 +90,18 @@ impl<I: Object> Stream<I> {
             }
         }
     }
+
+    pub fn len(&self) -> usize {
+        match self.inner.data {
+            StreamData::Generated(ref data) => data.len(),
+            StreamData::Original(ref range, _) => range.len()
+        }
+    }
 }
 
 impl<I: Object + fmt::Debug> fmt::Debug for Stream<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        self.info.info.fmt(f)
+        write!(f, "Stream info={:?}, len={}", self.info.info, self.len())
     }
 }
 
