@@ -186,6 +186,7 @@ impl CatalogBuilder {
             struct_tree_root: None,
             forms: None,
             page_labels: None,
+            page_layout: None,
             open_action: None
         })
     }

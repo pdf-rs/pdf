@@ -75,7 +75,8 @@ pub struct Catalog {
     pub dests: Option<MaybeRef<Dictionary>>,
 
     // ViewerPreferences: dict
-    // PageLayout: name
+    #[pdf(key = "PageLayout")]
+    pub page_layout: Option<Name>,
     // PageMode: name
     #[pdf(key = "Outlines")]
     pub outlines: Option<Outlines>,
