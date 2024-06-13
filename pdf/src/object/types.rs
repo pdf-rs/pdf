@@ -1797,7 +1797,7 @@ pub struct InfoDict {
     #[pdf(key="Creator")]
     pub creator: Option<PdfString>,
 
-    #[pdf(key="Author")]
+    #[pdf(key="Producer")]
     pub producer: Option<PdfString>,
 
     #[pdf(key="CreationDate")]
