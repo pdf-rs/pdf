@@ -96,7 +96,7 @@ extern crate quote;
 
 use proc_macro::{TokenStream};
 use proc_macro2::{TokenStream as TokenStream2, Span};
-use syn::{*, punctuated::Punctuated, token::Where};
+use syn::*;
 type SynStream = TokenStream2;
 
 // Debugging:
@@ -163,31 +163,43 @@ impl FieldAttrs {
     }
     fn parse(list: &[Attribute]) -> FieldAttrs {
         let mut attrs = FieldAttrs::new();
-        for attr in list.iter().filter(|attr| attr.path.is_ident("pdf")) {
-            let list = match attr.parse_meta() {
-                Ok(Meta::List(list)) => list,
-                Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
-                Err(e) => panic!("can't parse meta attributes: {}", e)
-            };
-            for meta in list.nested.iter() {
-                match *meta {
-                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref path, lit: Lit::Str(ref value), ..})) => {
-                        if path.is_ident("key") {
-                            attrs.key = Some(value.clone());
-                        } else if path.is_ident("default") {
-                            attrs.default = Some(value.clone());
-                        } else if path.is_ident("name") {
-                            attrs.name = Some(value.clone());
-                        } else {
-                            panic!("unsupported key {}", path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<String>>().join("::"))
-                        }
-                    },
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("skip") => attrs.skip = true,
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("other") => attrs.other = true,
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("indirect") => attrs.indirect = true,
-                    _ => panic!(r#"Derive error - Supported derive attributes: `key="Key"`, `default="some code", skip, other, indirect`."#)
+        for attr in list.iter().filter(|attr| attr.path().is_ident("pdf")) {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("key") {
+                    let value = meta.value()?;
+                    attrs.key = Some(value.parse()?);
+                    return Ok(());
                 }
-            }
+
+                if meta.path.is_ident("default") {
+                    let value = meta.value()?;
+                    attrs.default = Some(value.parse()?);
+                    return Ok(());
+                }
+
+                if meta.path.is_ident("name") {
+                    let value = meta.value()?;
+                    attrs.name = Some(value.parse()?);
+                    return Ok(());
+                }
+
+                if meta.path.is_ident("skip") {
+                    attrs.skip = true;
+                    return Ok(());
+                }
+
+                if meta.path.is_ident("other") {
+                    attrs.other = true;
+                    return Ok(());
+                }
+
+                if meta.path.is_ident("indirect") {
+                    attrs.indirect = true;
+                    return Ok(());
+                }
+
+                Err(meta.error("unsupported key"))
+            }).expect("parse error");
         }
         attrs
     }
@@ -209,42 +221,51 @@ impl GlobalAttrs {
     fn from_ast(ast: &DeriveInput) -> GlobalAttrs {
         let mut attrs = GlobalAttrs::default();
 
-        for attr in ast.attrs.iter().filter(|attr| attr.path.is_ident("pdf")) {
-            let list = match attr.parse_meta() {
-                Ok(Meta::List(list)) => list,
-                Ok(_) => panic!("only #[pdf(attrs...)] is allowed"),
-                Err(e) => panic!("can't parse meta attributes: {}", e)
-            };
-
-            // Loop through list of attributes
-            for meta in list.nested.iter() {
-                match *meta {
-                    NestedMeta::Meta(Meta::NameValue(MetaNameValue { ref path, ref lit, ..})) => {
-                        if path.is_ident("Type") {
-                            match lit {
-                                Lit::Str(ref value) => {
-                                    let mut value = value.value();
-                                    attrs.type_required = if value.ends_with('?') {
-                                        value.pop(); // remove '?'
-                                        false
-                                    } else {
-                                        true
-                                    };
-                                    attrs.type_name = Some(value);
-                                },
-                                _ => panic!("Value of 'Type' attribute must be a String."),
-                            }
-                        } else {
-                            match lit {
-                                Lit::Str(ref value) => attrs.checks.push((path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<String>>().join("::"), value.value())),
-                                _ => panic!("Other checks must have RHS String."),
-                            }
-                        }
-                    },
-                    NestedMeta::Meta(Meta::Path(ref path)) if path.is_ident("is_stream") => attrs.is_stream = true,
-                    _ => {}
+        for attr in ast.attrs.iter().filter(|attr| attr.path().is_ident("pdf")) {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("Type") {
+                    let value = meta.value()?;
+                    let lit = value.parse()?;
+                    match lit {
+                        Lit::Str(ref value) => {
+                            let mut value = value.value();
+                            attrs.type_required = if value.ends_with('?') {
+                                value.pop(); // remove '?'
+                                false
+                            } else {
+                                true
+                            };
+                            attrs.type_name = Some(value);
+                        },
+                        _ => panic!("Value of 'Type' attribute must be a String."),
+                    };
+                    return Ok(())
                 }
-            }
+
+                if meta.path.is_ident("is_stream") {
+                    attrs.is_stream = true;
+                    return Ok(())
+                }
+
+                if let Ok(value) = meta.value() {
+                    let path = &meta.path;
+                    let lit = value.parse()?;
+                    match lit {
+                        Lit::Str(ref value) => {
+                            let segments = path.segments
+                                     .iter()
+                                     .map(|s| s.ident.to_string())
+                                     .collect::<Vec<String>>()
+                                     .join("::");
+                            attrs.checks.push((segments, value.value()));
+                        }
+                        _ => panic!("Other checks must have RHS String."),
+                    };
+                    return Ok(())
+                }
+
+                Ok(())
+            }).expect("error with global attrs parsing");
         }
 
         attrs
@@ -322,9 +343,9 @@ fn impl_object_for_enum(ast: &DeriveInput, data: &DataEnum) -> SynStream {
         assert_eq!(int_count, data.variants.len(), "either none or all variants can have a descriminant");
 
         let parts = data.variants.iter().map(|var| {
-            if let Some((_, ref expr)) = var.discriminant {
+            if let Some((_, Expr::Lit(ref lit_expr))) = var.discriminant {
                 let var_ident = &var.ident;
-                let pat = Pat::Lit(PatLit { expr: Box::new(expr.clone()), attrs: vec![] });
+                let pat = Pat::from(lit_expr.clone());
                 quote! {
                     #pat => Ok(#id::#var_ident)
                 }
