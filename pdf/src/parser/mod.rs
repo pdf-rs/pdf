@@ -20,6 +20,8 @@ const MAX_DEPTH: usize = 20;
 
 
 bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ParseFlags: u16 {
         const INTEGER = 1 << 0;
         const STREAM = 1 << 1;
