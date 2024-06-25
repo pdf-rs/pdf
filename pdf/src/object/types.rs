@@ -1,6 +1,7 @@
 //! Models of PDF types
 
 use std::collections::HashMap;
+use std::io;
 use datasize::DataSize;
 
 use crate as pdf;
@@ -686,6 +687,89 @@ impl ImageXObject {
             }
         }
         Ok(data.into())
+    }
+
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+        println!("serialize image");
+        // println!("{:?}", self);
+        /* write dictionary (width, height, color space, bits per component, intent,
+        imagemask, mask, decode, decode params, interpolate, struct_parent, id, smask, other) */
+        writeln!(out, "/W {}", self.inner.width)?;
+        writeln!(out, "/H {}", self.inner.height)?;
+        match &self.inner.color_space {
+            Some(ColorSpace::DeviceGray) => writeln!(out, "/ColorSpace /DeviceGray")?,
+            Some(ColorSpace::DeviceRGB) => writeln!(out, "/ColorSpace /DeviceRGB")?,
+            Some(ColorSpace::DeviceCMYK) => writeln!(out, "/ColorSpace /DeviceCMYK")?,
+            Some(_) => unimplemented!(),
+            None => {}
+        }
+        writeln!(out, "/BPC {}", self.inner.bits_per_component.unwrap_or(8))?;
+        match self.inner.intent {
+            Some(intent) => match intent {
+                RenderingIntent::AbsoluteColorimetric => {
+                    writeln!(out, "/Intent /AbsoluteColorimetric")?
+                }
+                RenderingIntent::RelativeColorimetric => {
+                    writeln!(out, "/Intent /RelativeColorimetric")?
+                }
+                RenderingIntent::Perceptual => writeln!(out, "/Intent /Perceptual")?,
+                RenderingIntent::Saturation => writeln!(out, "/Intent /Saturation")?,
+            },
+            None => {}
+        }
+        writeln!(out, "/IM {}", self.inner.image_mask)?;
+        if let Some(mask) = &self.inner.mask {
+            writeln!(out, "/Mask {}", mask)?;
+        }
+        if let Some(decode) = &self.inner.decode {
+            writeln!(
+                out,
+                "/Decode {}",
+                decode
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )?;
+        }
+        // print filters
+        if !self.inner.filters.is_empty() {
+            write!(out, "/F [")?;
+            for (i, filter) in self.inner.filters.iter().enumerate() {
+                if i != 0 {
+                    write!(out, " ")?;
+                }
+                write!(out, "/{}", filter)?;
+            }
+            writeln!(out, "]")?;
+        }
+        // writeln!(out, "/Interpolate {}", self.inner.interpolate)?;
+        if let Some(struct_parent) = self.inner.struct_parent {
+            writeln!(out, "/StructParent {}", struct_parent)?;
+        }
+        if let Some(id) = &self.inner.id {
+            write!(out, "/ID ")?;
+            id.serialize(out)?;
+        }
+        if let Some(smask) = &self.inner.smask {
+            // write!(out, "/SMask ")?;
+            unimplemented!()
+        }
+        /* write ID
+        encode data and write it */
+        writeln!(out, "ID")?;
+        match &self.inner.inner_data {
+            StreamData::Generated(data) => {
+                out.write_all(&data)?;
+                writeln!(out)?;
+            }
+            StreamData::Original(range, id) => {
+                println!("range: {:?}", range);
+                println!("id: {:?}", id);
+                unimplemented!()
+            }
+        }
+        Ok(())
     }
 }
 
