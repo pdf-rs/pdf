@@ -75,7 +75,7 @@ impl Object for CidToGidMap {
             p @ Primitive::Stream(_) | p @ Primitive::Reference(_) => {
                 let stream: Stream<()> = Stream::from_primitive(p, resolve)?;
                 let data = stream.data(resolve)?;
-                Ok(CidToGidMap::Table(data.chunks(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
+                Ok(CidToGidMap::Table(data.chunks_exact(2).map(|c| (c[0] as u16) << 8 | c[1] as u16).collect()))
             },
             p => Err(PdfError::UnexpectedPrimitive {
                 expected: "/Identity or Stream",
