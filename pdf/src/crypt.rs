@@ -562,7 +562,7 @@ impl Decoder {
             CryptMethod::V2 => {
                 // b)
                 let mut key = [0; 16 + 5];
-                let n = self.key_size;
+                let n = self.key().len();
                 key[..n].copy_from_slice(self.key());
                 key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
                 key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
