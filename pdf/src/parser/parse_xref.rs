@@ -26,10 +26,10 @@ fn parse_xref_section_from_stream(first_id: u32, mut num_entries: usize, width: 
         let _type = if w0 == 0 {
             1
         } else {
-            read_u64_from_stream(w0, data)
+            read_u64_from_stream(w0, data)?
         };
-        let field1 = read_u64_from_stream(w1, data);
-        let field2 = read_u64_from_stream(w2, data);
+        let field1 = read_u64_from_stream(w1, data)?;
+        let field2 = read_u64_from_stream(w2, data)?;
 
         let entry =
         match _type {
@@ -45,8 +45,14 @@ fn parse_xref_section_from_stream(first_id: u32, mut num_entries: usize, width: 
         entries,
     })
 }
-/// Helper to read an integer with a certain amount of bits `width` from stream.
-fn read_u64_from_stream(width: usize, data: &mut &[u8]) -> u64 {
+/// Helper to read an integer with a certain amount of bytes `width` from stream.
+fn read_u64_from_stream(width: usize, data: &mut &[u8]) -> Result<u64> {
+    if width > std::mem::size_of::<u64>() {
+        return Err(PdfError::Other { msg: format!("xref stream entry has invalid width {}", width) });
+    }
+    if width > data.len() {
+        return Err(PdfError::Other { msg: format!("xref stream entry has width {} but only {} bytes left to read", width, data.len()) });
+    }
     let mut result = 0;
     for i in (0..width).rev() {
         let base = 8 * i; // (width, 0]
@@ -54,7 +60,7 @@ fn read_u64_from_stream(width: usize, data: &mut &[u8]) -> u64 {
         *data = &data[1..]; // Consume byte
         result += u64::from(c) << base;
     }
-    result
+    Ok(result)
 }
 
 
