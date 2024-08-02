@@ -164,7 +164,12 @@ where
                     typ: "Trailer",
                     field: "ID".into(),
                 })?
-                .as_array()?[0]
+                .as_array()?
+                .get(0)
+                .ok_or(PdfError::MissingEntry {
+                    typ: "Trailer",
+                    field: "ID[0]".into()
+                })?
                 .as_string()?
                 .as_bytes();
 
