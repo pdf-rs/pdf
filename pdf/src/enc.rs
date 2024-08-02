@@ -7,7 +7,7 @@ use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, Resolve, Stream};
 use crate::primitive::{Primitive, Dictionary};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Write};
 use once_cell::sync::OnceCell;
 use datasize::DataSize;
@@ -168,10 +168,12 @@ fn sym_85(byte: u8) -> Option<u8> {
 }
 
 fn word_85([a, b, c, d, e]: [u8; 5]) -> Option<[u8; 4]> {
-    fn s(b: u8) -> Option<u32> { sym_85(b).map(|n| n as u32) }
+    fn s(b: u8) -> Option<u64> { sym_85(b).map(|n| n as u64) }
     let (a, b, c, d, e) = (s(a)?, s(b)?, s(c)?, s(d)?, s(e)?);
     let q = (((a * 85 + b) * 85 + c) * 85 + d) * 85 + e;
-    Some(q.to_be_bytes())
+    // 85^5 > 256^4, the result might not fit in an u32.
+    let r = u32::try_from(q).ok()?;
+    Some(r.to_be_bytes())
 }
 
 pub fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
