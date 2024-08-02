@@ -297,7 +297,13 @@ impl Decoder {
 
         let (key_bits, method) = match dict.v {
             1 => (40, CryptMethod::V2),
-            2 => (dict.bits, CryptMethod::V2),
+            2 => {
+                if dict.bits % 8 != 0 {
+                    err!(other!("invalid key length {}", dict.bits))
+                } else {
+                    (dict.bits, CryptMethod::V2)
+                }
+            },
             4 ..= 6 => {
                 let default = dict
                     .crypt_filters
