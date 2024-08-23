@@ -40,7 +40,7 @@ euclid = { version = "0.22.7", optional = true }
 bitflags = "2.5"
 istring = { version = "0.3.3", features = ["std", "size"] }
 datasize = "0.2.13"
-globalcache = { version = "0.2.2", features = ["sync"], optional = true }
+globalcache = { version = "0.2.3", features = ["sync"], optional = true }
 indexmap = "2.1.0"
 
 [dev-dependencies]
