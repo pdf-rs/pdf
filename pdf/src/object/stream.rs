@@ -92,7 +92,7 @@ impl<I: Object> Stream<I> {
     }
 
     pub fn len(&self) -> usize {
-        match self.inner.data {
+        match self.inner_data {
             StreamData::Generated(ref data) => data.len(),
             StreamData::Original(ref range, _) => range.len()
         }
