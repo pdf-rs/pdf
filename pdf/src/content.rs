@@ -629,7 +629,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             Op::Restore => writeln!(f, "Q")?,
             Op::Transform { matrix } => writeln!(f, "{} cm", matrix)?,
             Op::LineWidth { width } => writeln!(f, "{} w", width)?,
-            Op::Dash { ref pattern, phase } => write!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
+            Op::Dash { ref pattern, phase } => writeln!(f, "[{}] {} d", pattern.iter().format(" "), phase)?,
             Op::LineJoin { join } => writeln!(f, "{} j", join as u8)?,
             Op::LineCap { cap } => writeln!(f, "{} J", cap as u8)?,
             Op::MiterLimit { limit } => writeln!(f, "{} M", limit)?,
