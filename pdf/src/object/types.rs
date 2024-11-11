@@ -1556,7 +1556,7 @@ pub struct EmbeddedFileParamDict {
     mac: Option<Date>,
 
     #[pdf(key="CheckSum")]
-    checksum: Option<Date>,
+    checksum: Option<PdfString>,
 }
 
 #[derive(Object, Debug, Clone, DataSize)]
