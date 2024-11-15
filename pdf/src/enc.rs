@@ -8,6 +8,7 @@ use crate::error::*;
 use crate::object::{Object, Resolve, Stream};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::TryInto;
+use std::fmt;
 use std::io::{Read, Write};
 use once_cell::sync::OnceCell;
 use datasize::DataSize;
@@ -112,6 +113,23 @@ impl StreamFilter {
            ty => bail!("Unrecognized filter type {:?}", ty),
        } 
        )
+    }
+}
+
+impl fmt::Display for StreamFilter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            StreamFilter::ASCIIHexDecode => write!(f, "AHx"),
+            StreamFilter::ASCII85Decode => write!(f, "A85"),
+            StreamFilter::LZWDecode(_) => write!(f, "LZW"),
+            StreamFilter::FlateDecode(_) => write!(f, "Fl"),
+            StreamFilter::JPXDecode => write!(f, "JPX"),
+            StreamFilter::DCTDecode(_) => write!(f, "DCT"),
+            StreamFilter::CCITTFaxDecode(_) => write!(f, "CCF"),
+            StreamFilter::JBIG2Decode(_) => write!(f, "JBIG2"),
+            StreamFilter::Crypt => write!(f, "Crypt"),
+            StreamFilter::RunLengthDecode => write!(f, "RL"),
+        }
     }
 }
 
