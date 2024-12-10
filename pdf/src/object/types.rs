@@ -977,6 +977,15 @@ pub struct Annot {
 
     #[pdf(key="Border")]
     pub border: Option<Primitive>,
+
+    #[pdf(key="C")]
+    pub color: Option<Primitive>,
+
+    #[pdf(key="InkList")]
+    pub inkList: Option<Primitive>,
+
+    #[pdf(other)]
+    pub other: Dictionary,
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone)]
