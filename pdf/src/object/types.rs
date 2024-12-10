@@ -952,7 +952,7 @@ pub struct Annot {
     pub subtype: Name,
     
     #[pdf(key="Rect")]
-    pub rect: Rectangle,
+    pub rect: Option<Rectangle>,
 
     #[pdf(key="Contents")]
     pub contents: Option<PdfString>,
@@ -982,7 +982,7 @@ pub struct Annot {
     pub color: Option<Primitive>,
 
     #[pdf(key="InkList")]
-    pub inkList: Option<Primitive>,
+    pub ink_list: Option<Primitive>,
 
     #[pdf(other)]
     pub other: Dictionary,
