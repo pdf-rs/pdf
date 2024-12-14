@@ -68,6 +68,9 @@ impl PageRc {
     pub fn create(page: Page, update: &mut impl Updater) -> Result<PageRc> {
         Ok(PageRc(update.create(PagesNode::Leaf(page))?))
     }
+    pub fn update(page: Page, old_page: &PageRc, update: &mut impl Updater) -> Result<PageRc> {
+        update.update(old_page.get_plain_ref(), PagesNode::Leaf(page)).map(PageRc)
+    }
     pub fn get_ref(&self) -> Ref<PagesNode> {
         self.0.get_ref()
     }

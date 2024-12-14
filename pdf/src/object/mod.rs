@@ -108,6 +108,9 @@ pub trait DeepClone: Sized + Sync + Send + 'static {
 pub trait Updater {
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>>;
     fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>>;
+    fn update_ref<T: ObjectWrite>(&mut self, old: &RcRef<T>, obj: T) -> Result<RcRef<T>> {
+        self.update(old.get_ref().inner, obj)
+    }
     fn promise<T: Object>(&mut self) -> PromisedRef<T>;
     fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>>;
 }
@@ -439,6 +442,12 @@ impl<T: Object> Lazy<T> {
     pub fn load(&self, resolve: &impl Resolve) -> Result<T> {
         T::from_primitive(self.primitive.clone(), resolve)
     }
+    pub fn safe(value: T, update: &mut impl Updater) -> Result<Self>
+    where T: ObjectWrite
+    {
+        let primitive = value.to_primitive(update)?;
+        Ok(Lazy { primitive, _marker: PhantomData })
+    }
 }
 impl<T: Object> Object for Lazy<T> {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
@@ -461,7 +470,6 @@ impl<T> From<RcRef<T>> for Lazy<T> {
         Lazy { primitive: Primitive::Reference(value.inner), _marker: PhantomData }
     }
 }
-
 
 //////////////////////////////////////
 // Object for Primitives & other types

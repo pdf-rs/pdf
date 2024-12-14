@@ -18,7 +18,8 @@ fn run() -> Result<(), PdfError> {
     let mut old_file = FileOptions::cached().open(&path)?;
     let mut old_page: PageRc = old_file.get_page(0).unwrap();
     
-    let mut annots = old_page.annotations.load(&old_file.resolver()).expect("can't load annotations");
+    let old_annots = old_page.annotations.load(&old_file.resolver()).expect("can't load annotations");
+    let mut annots: Vec<_> = (*old_annots).clone();
     // let mut new_annots = annots.deref().clone();
     // for annot in &new_annots {
         // dbg!(&annot.subtype);
@@ -79,23 +80,24 @@ fn run() -> Result<(), PdfError> {
     let annot_ref = old_file.create(new_annot)?;
     annots.push(MaybeRef::Indirect(annot_ref));
 
-    // let lazy_annots = Lazy::from_primitive(
-    //     annots.to_primitive(&mut FileOptions::cached().storage()).unwrap(), 
-    //     &file.resolver()
-    // );
 
-    // old_page.update_annots(annots, &old_file.resolver(), &mut FileOptions::cached().storage());
-    // let old_annots = old_page.annotations.to_primitive(&mut old_file).unwrap();
+    match old_annots {
+        MaybeRef::Direct(_) => {
+            // need to update the whole page
+            let mut new_page: Page = (*old_page).clone();
 
-
-    // let layz_annots = Lazy::from(annots);
-    // match annots {
-    //     MaybeRef::Indirect(annot) => {
-    //         old_page.annotations = Lazy::from(annot);
-    //     }
-    // }
-
-    old_file.update(old_page.get_plain_ref(), old_page);
+            let lazy_annots = Lazy::safe(
+                MaybeRef::Indirect(old_file.create(annots).unwrap()),
+                &mut old_file
+            ).unwrap();
+            new_page.annotations = lazy_annots;
+            PageRc::update(new_page, &old_page, &mut old_file).unwrap();
+        }
+        MaybeRef::Indirect(r) => {
+            // can just update the annot reference
+            old_file.update_ref(&r, annots).unwrap();
+        }
+    }
     old_file.save_to("/Users/apple/Downloads/test_pdf/out.pdf")?;
 
     Ok(())
