@@ -456,6 +456,13 @@ impl<T> Default for Lazy<T> {
     }
 }
 
+impl<T> From<RcRef<T>> for Lazy<T> {
+    fn from(value: RcRef<T>) -> Self {
+        Lazy { primitive: Primitive::Reference(value.inner), _marker: PhantomData }
+    }
+}
+
+
 //////////////////////////////////////
 // Object for Primitives & other types
 //////////////////////////////////////

@@ -71,6 +71,9 @@ impl PageRc {
     pub fn get_ref(&self) -> Ref<PagesNode> {
         self.0.get_ref()
     }
+    pub fn get_plain_ref(&self) -> PlainRef {
+        self.0.inner
+    }
 }
 impl Object for PageRc {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<PageRc> {
@@ -295,7 +298,7 @@ pub struct Page {
     pub vp:         Option<Primitive>,
 
     #[pdf(key="Annots")]
-    pub annotations: Lazy<Vec<MaybeRef<Annot>>>,
+    pub annotations: Lazy<MaybeRef<Vec<MaybeRef<Annot>>>>,
 
     #[pdf(other)]
     pub other: Dictionary,
@@ -983,6 +986,9 @@ pub struct Annot {
 
     #[pdf(key="InkList")]
     pub ink_list: Option<Primitive>,
+
+    #[pdf(key="L")]
+    pub line: Option<Primitive>,
 
     #[pdf(other)]
     pub other: Dictionary,
