@@ -440,7 +440,7 @@ where
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: gen });
             writeln!(self.backend, "{} {} obj", id, gen)?;
             primitive.serialize(&mut self.backend)?;
-            writeln!(self.backend, "endobj")?;
+            writeln!(self.backend, "\nendobj")?;
         }
 
         let xref_pos = self.backend.len();
