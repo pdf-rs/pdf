@@ -268,23 +268,26 @@ impl Object for PdfStream {
 }
 impl ObjectWrite for PdfStream {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        Ok(self.clone().into())
+        match self.inner {
+            StreamInner::InFile { id, .. } => Ok(Primitive::Reference(id)),
+            StreamInner::Pending { .. } => Ok(self.clone().into()),
+        }
     }
 }
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        self.info.serialize(out)?;
 
-        writeln!(out, "stream")?;
         match self.inner {
-            StreamInner::InFile { .. } => {
-                unimplemented!()
+            StreamInner::InFile { id, .. } => {
+                Primitive::Reference(id).serialize(out)?;
             }
             StreamInner::Pending { ref data } => {
+                self.info.serialize(out)?;
+                writeln!(out, "stream")?;
                 out.write_all(data)?;
+                writeln!(out, "\nendstream")?;
             }
         }
-        writeln!(out, "\nendstream")?;
         Ok(())
     }
     pub fn raw_data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {

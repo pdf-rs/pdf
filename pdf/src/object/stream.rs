@@ -170,7 +170,10 @@ impl<I: ObjectWrite> Stream<I> {
 }
 impl<I: ObjectWrite> ObjectWrite for Stream<I> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        self.to_pdf_stream(update).map(Primitive::Stream)
+        match self.inner_data {
+            StreamData::Original(_, id) => Ok(Primitive::Reference(id)),
+            _ => self.to_pdf_stream(update).map(Primitive::Stream),
+        }
     }
 }
 impl<I: DeepClone> DeepClone for Stream<I> {

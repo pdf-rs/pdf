@@ -754,7 +754,10 @@ impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.parts.len() == 1 {
             let obj = self.parts[0].to_primitive(update)?;
-            update.create(obj)?.to_primitive(update)
+            match obj {
+                Primitive::Reference(_) => Ok(obj),
+                _ => update.create(obj)?.to_primitive(update)
+            }
         } else {
             self.parts.to_primitive(update)
         }

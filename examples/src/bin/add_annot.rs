@@ -46,7 +46,7 @@ fn run() -> Result<(), PdfError> {
         //     right: 300.961,
         //     top: 742.55,
         // }),
-        rect: None,
+        rect: Some(Rectangle { left: 10., bottom: 10., right: 200., top: 200. }),
         contents: None,
         page: Some(old_page.clone()),
         border: None,
@@ -61,10 +61,10 @@ fn run() -> Result<(), PdfError> {
         ink_list: None,
         line: Some(Primitive::Array(
             vec![
-                Primitive::Number(95.774), 
-                Primitive::Number(734.237), 
-                Primitive::Number(320.961),
-                Primitive::Number(734.863)
+                Primitive::Number(10.), 
+                Primitive::Number(100.), 
+                Primitive::Number(20.),
+                Primitive::Number(200.)
                 ]
         )),
         // creation_date: None,
@@ -98,7 +98,7 @@ fn run() -> Result<(), PdfError> {
             old_file.update_ref(&r, annots).unwrap();
         }
     }
-    old_file.save_to("/Users/apple/Downloads/test_pdf/out.pdf")?;
+    old_file.save_to("out.pdf")?;
 
     Ok(())
 }
