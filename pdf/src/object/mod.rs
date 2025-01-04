@@ -443,6 +443,14 @@ impl<T> Clone for Lazy<T> {
         }
     }
 }
+impl<T: Object> DeepClone for Lazy<T> {
+    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+        Ok(Lazy {
+            primitive: self.primitive.deep_clone(cloner)?,
+            _marker: PhantomData
+        })
+    }
+}
 impl<T: Object> Lazy<T> {
     pub fn load(&self, resolve: &impl Resolve) -> Result<T> {
         T::from_primitive(self.primitive.clone(), resolve)
@@ -461,6 +469,14 @@ impl<T: ObjectWrite> ObjectWrite for Lazy<T> {
 impl<T> Default for Lazy<T> {
     fn default() -> Self {
         Lazy { primitive: Primitive::Null, _marker: PhantomData }
+    }
+}
+impl<T: Object> From<RcRef<T>> for Lazy<T> {
+    fn from(value: RcRef<T>) -> Self {
+        Lazy {
+            primitive: Primitive::Reference(value.inner),
+            _marker: PhantomData
+        }
     }
 }
 
