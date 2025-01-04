@@ -430,10 +430,18 @@ impl<T> PartialEq for MaybeRef<T> {
 }
 impl<T> Eq for MaybeRef<T> {}
 
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, DataSize)]
 pub struct Lazy<T> {
     primitive: Primitive,
     _marker: PhantomData<T>
+}
+impl<T> Clone for Lazy<T> {
+    fn clone(&self) -> Self {
+        Lazy {
+            primitive: self.primitive.clone(),
+            _marker: PhantomData
+        }
+    }
 }
 impl<T: Object> Lazy<T> {
     pub fn load(&self, resolve: &impl Resolve) -> Result<T> {
