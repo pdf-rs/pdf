@@ -451,9 +451,12 @@ impl<T: Object> DeepClone for Lazy<T> {
         })
     }
 }
-impl<T: Object> Lazy<T> {
-    pub fn load(&self, resolve: &impl Resolve) -> Result<T> {
-        T::from_primitive(self.primitive.clone(), resolve)
+impl<T: Object + DataSize> Lazy<T> {
+    pub fn load(&self, resolve: &impl Resolve) -> Result<MaybeRef<T>> {
+        match self.primitive {
+            Primitive::Reference(r) => resolve.get(Ref::new(r)).map(MaybeRef::Indirect),
+            ref p => T::from_primitive(p.clone(), resolve).map(|o| MaybeRef::Direct(Arc::new(o))),
+        }
     }
 }
 impl<T: Object> Object for Lazy<T> {

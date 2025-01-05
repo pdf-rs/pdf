@@ -44,7 +44,7 @@ fn run() -> Result<(), PdfError> {
 
     let page0 = file.get_page(0).unwrap();
     let annots = page0.annotations.load(&file.resolver()).expect("can't load annotations");
-    for annot in &annots {
+    for annot in &*annots {
         if let Some(ref a) = annot.appearance_streams {
             let normal = file.resolver().get(a.normal);
             if let Ok(normal) = normal {
