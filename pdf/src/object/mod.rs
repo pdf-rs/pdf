@@ -27,6 +27,7 @@ use std::hash::{Hash, Hasher};
 use std::convert::TryInto;
 use datasize::DataSize;
 use itertools::Itertools;
+use once_cell::sync::OnceCell;
 
 pub type ObjNr = u64;
 pub type GenNr = u64;
@@ -430,15 +431,24 @@ impl<T> PartialEq for MaybeRef<T> {
 }
 impl<T> Eq for MaybeRef<T> {}
 
-#[derive(Debug, DataSize)]
+#[derive(Debug)]
 pub struct Lazy<T> {
     primitive: Primitive,
+    cache: OnceCell<MaybeRef<T>>,
     _marker: PhantomData<T>
+}
+impl<T: DataSize> DataSize for Lazy<T> {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = size_of::<Self>();
+    fn estimate_heap_size(&self) -> usize {
+        self.cache.get().map(|value| value.estimate_heap_size()).unwrap_or(0) + size_of::<Self>()
+    }
 }
 impl<T> Clone for Lazy<T> {
     fn clone(&self) -> Self {
         Lazy {
             primitive: self.primitive.clone(),
+            cache: self.cache.clone(),
             _marker: PhantomData
         }
     }
@@ -447,21 +457,28 @@ impl<T: Object> DeepClone for Lazy<T> {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
         Ok(Lazy {
             primitive: self.primitive.deep_clone(cloner)?,
+            cache: OnceCell::new(),
             _marker: PhantomData
         })
     }
 }
 impl<T: Object + DataSize> Lazy<T> {
     pub fn load(&self, resolve: &impl Resolve) -> Result<MaybeRef<T>> {
-        match self.primitive {
-            Primitive::Reference(r) => resolve.get(Ref::new(r)).map(MaybeRef::Indirect),
-            ref p => T::from_primitive(p.clone(), resolve).map(|o| MaybeRef::Direct(Arc::new(o))),
-        }
+        self.cache.get_or_try_init(|| {
+            match self.primitive {
+                Primitive::Reference(r) => resolve.get(Ref::new(r)).map(MaybeRef::Indirect),
+                ref p => T::from_primitive(p.clone(), resolve).map(|o| MaybeRef::Direct(Arc::new(o))),
+            }
+        }).cloned()
     }
 }
 impl<T: Object> Object for Lazy<T> {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
-        Ok(Self { primitive: p, _marker: PhantomData })
+        Ok(Self {
+            primitive: p,
+            cache: OnceCell::new(),
+            _marker: PhantomData
+        })
     }
 }
 impl<T: ObjectWrite> ObjectWrite for Lazy<T> {
@@ -471,13 +488,18 @@ impl<T: ObjectWrite> ObjectWrite for Lazy<T> {
 }
 impl<T> Default for Lazy<T> {
     fn default() -> Self {
-        Lazy { primitive: Primitive::Null, _marker: PhantomData }
+        Lazy {
+            primitive: Primitive::Null,
+            cache: OnceCell::new(),
+            _marker: PhantomData
+        }
     }
 }
 impl<T: Object> From<RcRef<T>> for Lazy<T> {
     fn from(value: RcRef<T>) -> Self {
         Lazy {
             primitive: Primitive::Reference(value.inner),
+            cache: OnceCell::with_value(MaybeRef::Direct(value.data)),
             _marker: PhantomData
         }
     }
