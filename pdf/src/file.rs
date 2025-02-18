@@ -118,12 +118,17 @@ where
     pub fn into_inner(self) -> B {
         self.backend
     }
+    pub fn version(&self) -> Result<String> {
+        Ok(String::from_utf8(self.backend.read(self.start_offset+1..self.start_offset+8)?.to_owned())?)
+    }
     pub fn resolver(&self) -> impl Resolve + '_ {
         StorageResolver::new(self)
     }
     pub fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
+        let start_offset = backend.locate_start_offset()?;
+
         Ok(Storage {
-            start_offset: backend.locate_start_offset()?,
+            start_offset,
             backend,
             refs: XRefTable::new(0),
             cache: object_cache,
@@ -655,6 +660,12 @@ where
 
     pub fn log(&self) -> &L {
         &self.storage.log
+    }
+
+    /// the version string in the file header.
+    /// if the version field in the Catalog is set, this should be used instead.
+    pub fn version(&self) -> Result<String> {
+        self.storage.version()
     }
 }
 

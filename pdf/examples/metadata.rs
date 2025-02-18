@@ -12,13 +12,17 @@ fn main() -> Result<(), PdfError> {
         .expect("Please provide a file path to the PDF you want to explore.");
 
     let file = FileOptions::cached().open(&path).unwrap();
+    dbg!(file.version());
     let resolver = file.resolver();
 
     if let Some(ref info) = file.trailer.info_dict {
         dbg!(info);
     }
 
-    if let Some(ref forms) = file.get_root().forms {
+    let catalog = file.get_root();
+    dbg!(&catalog.version);
+
+    if let Some(ref forms) = catalog.forms {
         for field in forms.fields.iter() {
             print_field(field, &resolver);
         }
