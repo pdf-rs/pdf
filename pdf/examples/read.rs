@@ -50,6 +50,7 @@ fn main() -> Result<(), PdfError> {
         let page = page.unwrap();
         let resources = page.resources().unwrap();
         for (i, font) in resources.fonts.values().enumerate() {
+            let font = font.load(&resolver)?;
             let name = match &font.name {
                 Some(name) => name.as_str().into(),
                 None => i.to_string(),
