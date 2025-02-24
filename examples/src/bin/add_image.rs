@@ -8,7 +8,7 @@ use pdf::{
 
 use clap::Parser;
 use std::io::Cursor;
-use image::io::Reader as ImageReader;
+use image::{io::Reader as ImageReader, GenericImageView};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     page2.contents = Some(Content::from_ops(ops));
     page2.resources = Some(file.create(resources2)?.into());
 
-    file.update(page.get_ref().get_inner(), page2)?;
+    PageRc::update(page2, &page, &mut file)?;
 
     file.save_to(&args.output)?;
 
