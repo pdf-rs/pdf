@@ -68,8 +68,11 @@ impl PageRc {
     pub fn create(page: Page, update: &mut impl Updater) -> Result<PageRc> {
         Ok(PageRc(update.create(PagesNode::Leaf(page))?))
     }
-    pub fn get_ref(&self) -> Ref<PagesNode> {
-        self.0.get_ref()
+    pub fn update(page: Page, old_page: &PageRc, update: &mut impl Updater) -> Result<PageRc> {
+        update.update(old_page.get_ref(), PagesNode::Leaf(page)).map(PageRc)
+    }
+    pub fn get_ref(&self) -> PlainRef {
+        self.0.inner
     }
 }
 impl Object for PageRc {
@@ -978,6 +981,9 @@ pub struct Annot {
 
     #[pdf(key="InkList")]
     pub ink_list: Option<Primitive>,
+
+    #[pdf(key="L")]
+    pub line: Option<Vec<f32>>,
 
     #[pdf(other)]
     pub other: Dictionary,
