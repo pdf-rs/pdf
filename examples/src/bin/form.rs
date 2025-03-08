@@ -3,12 +3,12 @@ extern crate pdf;
 use std::collections::HashMap;
 use std::env::args;
 
-use pdf::content::{FormXObject, Op, serialize_ops};
+use pdf::content::{serialize_ops, FormXObject, Op};
 use pdf::error::PdfError;
-use pdf::file::{FileOptions, Log};
+use pdf::file::FileOptions;
 use pdf::font::{Font, FontData, TFont};
 use pdf::object::*;
-use pdf::primitive::{PdfString, Primitive, Name};
+use pdf::primitive::{Name, PdfString, Primitive};
 
 fn run() -> Result<(), PdfError> {
     let path = args().nth(1).expect("no file given");
@@ -17,9 +17,8 @@ fn run() -> Result<(), PdfError> {
     let mut file = FileOptions::cached().open(&path)?;
     let mut to_update_field: Option<_> = None;
 
-
     let font = Font {
-        data: FontData::TrueType(TFont{
+        data: FontData::TrueType(TFont {
             base_font: Some(Name::from("Helvetica")),
             first_char: None,
             font_descriptor: None,
@@ -30,7 +29,7 @@ fn run() -> Result<(), PdfError> {
         name: None,
         subtype: pdf::font::FontType::TrueType,
         to_unicode: None,
-        _other: Default::default()
+        _other: Default::default(),
     };
     let font_name = Name::from("Helvetica");
     let font = file.create(font)?;
@@ -38,12 +37,15 @@ fn run() -> Result<(), PdfError> {
     fonts.insert("Helvetica".into(), font.into());
     let resources = Resources {
         fonts,
-        .. Default::default()
+        ..Default::default()
     };
     let resources = file.create(resources)?;
 
     let page0 = file.get_page(0).unwrap();
-    let annots = page0.annotations.load(&file.resolver()).expect("can't load annotations");
+    let annots = page0
+        .annotations
+        .load(&file.resolver())
+        .expect("can't load annotations");
     for annot in &*annots {
         if let Some(ref a) = annot.appearance_streams {
             let normal = file.resolver().get(a.normal);
@@ -51,18 +53,23 @@ fn run() -> Result<(), PdfError> {
                 match *normal {
                     AppearanceStreamEntry::Single(ref s) => {
                         //dbg!(&s.stream.resources);
-                        
+
                         let form_dict = FormDict {
                             resources: Some(resources.clone().into()),
-                            .. (**s.stream).clone()
+                            ..(**s.stream).clone()
                         };
 
                         let ops = vec![
                             Op::Save,
-                            Op::TextFont { name: font_name.clone(), size: 14.0 },
-                            Op::TextDraw { text: PdfString::from("Hello World!") },
+                            Op::TextFont {
+                                name: font_name.clone(),
+                                size: 14.0,
+                            },
+                            Op::TextDraw {
+                                text: PdfString::from("Hello World!"),
+                            },
                             Op::EndText,
-                            Op::Restore
+                            Op::Restore,
                         ];
                         let stream = Stream::new(form_dict, serialize_ops(&ops)?);
 
@@ -103,11 +110,8 @@ fn run() -> Result<(), PdfError> {
         updated_field.value = Primitive::String(new_value);
 
         //dbg!(&updated_field);
-        
-        let reference = file.update(
-            to_update_field.get_ref().get_inner(),
-            updated_field,
-        )?;
+
+        let _reference = file.update(to_update_field.get_ref().get_inner(), updated_field)?;
 
         file.save_to("output/out.pdf")?;
 

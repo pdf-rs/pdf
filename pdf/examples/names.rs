@@ -1,23 +1,29 @@
 extern crate pdf;
 
+use pdf::file::FileOptions;
+use pdf::object::*;
+use pdf::primitive::{PdfString, Primitive};
+use std::collections::HashMap;
 use std::env::args;
 use std::fmt;
-use std::collections::HashMap;
-use pdf::file::{FileOptions};
-use pdf::object::*;
-use pdf::primitive::{Primitive, PdfString};
 
 struct Indent(usize);
 impl fmt::Display for Indent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for _ in 0 .. self.0 {
+        for _ in 0..self.0 {
             write!(f, "    ")?;
         }
         Ok(())
     }
 }
 
-fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl Fn(&str) -> usize, page_map: &impl Fn(PlainRef) -> usize, depth: usize) {
+fn walk_outline(
+    r: &impl Resolve,
+    mut node: RcRef<OutlineItem>,
+    name_map: &impl Fn(&str) -> usize,
+    page_map: &impl Fn(PlainRef) -> usize,
+    depth: usize,
+) {
     let indent = Indent(depth);
     loop {
         if let Some(ref title) = node.title {
@@ -36,11 +42,14 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
                         println!("{}dest: {:?} -> page nr. {:?}", indent, a, page_nr);
                     }
                     _ => unimplemented!("invalid reference in array"),
-                }
+                },
                 _ => unimplemented!("invalid dest"),
             }
         }
-        if let Some(Action::Goto(MaybeNamedDest::Direct(Dest { page: Some(page), ..}))) = node.action {
+        if let Some(Action::Goto(MaybeNamedDest::Direct(Dest {
+            page: Some(page), ..
+        }))) = node.action
+        {
             let page_nr = page_map(page.get_inner());
             println!("{}action -> page nr. {:?}", indent, page_nr);
         }
@@ -60,7 +69,7 @@ fn walk_outline(r: &impl Resolve, mut node: RcRef<OutlineItem>, name_map: &impl 
     }
 }
 
-#[cfg(feature="cache")]
+#[cfg(feature = "cache")]
 fn main() {
     let path = args().nth(1).expect("no file given");
     println!("read: {}", path);
@@ -74,7 +83,10 @@ fn main() {
     let mut count = 0;
     let mut dests_cb = |key: &PdfString, val: &Option<Dest>| {
         //println!("{:?} {:?}", key, val);
-        if let Some(Dest { page: Some(page), ..}) = val {
+        if let Some(Dest {
+            page: Some(page), ..
+        }) = val
+        {
             pages_map.insert(key.to_string_lossy(), page.get_inner());
         }
 
@@ -88,7 +100,12 @@ fn main() {
     }
 
     let mut pages = HashMap::new();
-    fn add_tree(r: &impl Resolve, pages: &mut HashMap<PlainRef, usize>, tree: &PageTree, current_page: &mut usize) {
+    fn add_tree(
+        r: &impl Resolve,
+        pages: &mut HashMap<PlainRef, usize>,
+        tree: &PageTree,
+        current_page: &mut usize,
+    ) {
         for &node_ref in &tree.kids {
             let node = r.get(node_ref).unwrap();
             match *node {
@@ -108,9 +125,7 @@ fn main() {
         let page = pages_map[name];
         pages[&page]
     };
-    let page_nr = |r: PlainRef| -> usize {
-        pages[&r]
-    };
+    let page_nr = |r: PlainRef| -> usize { pages[&r] };
 
     if let Some(ref outlines) = catalog.outlines {
         if let Some(entry_ref) = outlines.first {
@@ -122,8 +137,10 @@ fn main() {
     println!("{} items", count);
 
     if let Some(ref labels) = catalog.page_labels {
-        labels.walk(&resolver, &mut |page: i32, label| {
-            println!("{page} -> {:?}", label);
-        });
+        labels
+            .walk(&resolver, &mut |page: i32, label| {
+                println!("{page} -> {:?}", label);
+            })
+            .unwrap();
     }
 }

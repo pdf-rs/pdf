@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use istring::SmallString;
 use crate as pdf;
-use crate::object::{Object, Resolve, ObjectWrite, DeepClone};
-use crate::primitive::{Primitive, Dictionary};
-use crate::error::{Result};
+use crate::error::Result;
+use crate::object::{DeepClone, Object, ObjectWrite, Resolve};
+use crate::primitive::{Dictionary, Primitive};
 use datasize::DataSize;
+use istring::SmallString;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, DataSize)]
 pub struct Encoding {
@@ -29,16 +29,14 @@ pub enum BaseEncoding {
 impl Object for Encoding {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
-            name @ Primitive::Name(_) => { 
-                Ok(Encoding {
+            name @ Primitive::Name(_) => Ok(Encoding {
                 base: BaseEncoding::from_primitive(name, resolve)?,
                 differences: HashMap::new(),
-                })
-            }
+            }),
             Primitive::Dictionary(mut dict) => {
                 let base = match dict.remove("BaseEncoding") {
                     Some(p) => BaseEncoding::from_primitive(p, resolve)?,
-                    None => BaseEncoding::None
+                    None => BaseEncoding::None,
                 };
                 let mut gid = 0;
                 let mut differences = HashMap::new();
@@ -97,12 +95,12 @@ impl Encoding {
     pub fn standard() -> Encoding {
         Encoding {
             base: BaseEncoding::StandardEncoding,
-            differences: HashMap::new()
+            differences: HashMap::new(),
         }
     }
 }
 impl DeepClone for Encoding {
-    fn deep_clone(&self, cloner: &mut impl pdf::object::Cloner) -> Result<Self> {
+    fn deep_clone(&self, _cloner: &mut impl pdf::object::Cloner) -> Result<Self> {
         Ok(self.clone())
     }
 }

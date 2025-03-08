@@ -1,9 +1,8 @@
+use crate::error::{PdfError, Result};
+use datasize::DataSize;
 use std::any::TypeId;
 use std::rc::Rc;
 use std::sync::Arc;
-use datasize::DataSize;
-use crate::object::{Object};
-use crate::error::{Result, PdfError};
 
 pub trait AnyObject {
     fn type_name(&self) -> &'static str;
@@ -43,8 +42,9 @@ impl<T: DataSize + 'static> AnyObject for WithSize<T> {
 pub struct Any(Rc<dyn AnyObject>);
 
 impl Any {
-    pub fn downcast<T>(self) -> Result<Rc<T>> 
-        where T: AnyObject + 'static
+    pub fn downcast<T>(self) -> Result<Rc<T>>
+    where
+        T: AnyObject + 'static,
     {
         if TypeId::of::<T>() == self.0.type_id() {
             unsafe {
@@ -56,18 +56,18 @@ impl Any {
         }
     }
     pub fn new<T>(rc: Rc<T>) -> Any
-        where WithSize<T>: AnyObject, T: 'static
+    where
+        WithSize<T>: AnyObject,
+        T: 'static,
     {
-        Any(unsafe {
-            std::mem::transmute::<Rc<T>, Rc<WithSize<T>>>(rc)
-        } as _)
+        Any(unsafe { std::mem::transmute::<Rc<T>, Rc<WithSize<T>>>(rc) } as _)
     }
     pub fn new_without_size<T>(rc: Rc<T>) -> Any
-        where NoSize<T>: AnyObject, T: 'static
+    where
+        NoSize<T>: AnyObject,
+        T: 'static,
     {
-        Any(unsafe {
-            std::mem::transmute::<Rc<T>, Rc<NoSize<T>>>(rc)
-        } as _)
+        Any(unsafe { std::mem::transmute::<Rc<T>, Rc<NoSize<T>>>(rc) } as _)
     }
     pub fn type_name(&self) -> &'static str {
         self.0.type_name()
@@ -75,9 +75,9 @@ impl Any {
 }
 
 #[derive(Clone, DataSize)]
-pub struct AnySync(Arc<dyn AnyObject+Sync+Send>);
+pub struct AnySync(Arc<dyn AnyObject + Sync + Send>);
 
-#[cfg(feature="cache")]
+#[cfg(feature = "cache")]
 impl globalcache::ValueSize for AnySync {
     #[inline]
     fn size(&self) -> usize {
@@ -86,12 +86,13 @@ impl globalcache::ValueSize for AnySync {
 }
 
 impl AnySync {
-    pub fn downcast<T>(self) -> Result<Arc<T>> 
-        where T: 'static
+    pub fn downcast<T>(self) -> Result<Arc<T>>
+    where
+        T: 'static,
     {
         if TypeId::of::<T>() == self.0.type_id() {
             unsafe {
-                let raw: *const (dyn AnyObject+Sync+Send) = Arc::into_raw(self.0);
+                let raw: *const (dyn AnyObject + Sync + Send) = Arc::into_raw(self.0);
                 Ok(Arc::from_raw(raw as *const T))
             }
         } else {
@@ -99,23 +100,25 @@ impl AnySync {
         }
     }
     pub fn new<T>(arc: Arc<T>) -> AnySync
-        where WithSize<T>: AnyObject, T: Sync + Send + 'static
+    where
+        WithSize<T>: AnyObject,
+        T: Sync + Send + 'static,
     {
-        AnySync(unsafe {
-            std::mem::transmute::<Arc<T>, Arc<WithSize<T>>>(arc)
-        } as _)
+        AnySync(unsafe { std::mem::transmute::<Arc<T>, Arc<WithSize<T>>>(arc) } as _)
     }
     pub fn new_without_size<T>(arc: Arc<T>) -> AnySync
-        where NoSize<T>: AnyObject, T: Sync + Send + 'static
+    where
+        NoSize<T>: AnyObject,
+        T: Sync + Send + 'static,
     {
-        AnySync(unsafe {
-            std::mem::transmute::<Arc<T>, Arc<NoSize<T>>>(arc)
-        } as _)
+        AnySync(unsafe { std::mem::transmute::<Arc<T>, Arc<NoSize<T>>>(arc) } as _)
     }
     pub fn type_name(&self) -> &'static str {
         self.0.type_name()
     }
 }
 fn type_mismatch<T>(name: &str) -> PdfError {
-    PdfError::Other { msg: format!("expected {}, found {}", std::any::type_name::<T>(), name) }
+    PdfError::Other {
+        msg: format!("expected {}, found {}", std::any::type_name::<T>(), name),
+    }
 }

@@ -2,32 +2,32 @@
 //!
 //! Some of the structs are incomplete (missing fields that are in the PDF references).
 
-mod types;
-mod stream;
 mod color;
 mod function;
+mod stream;
+mod types;
 
-pub use self::types::*;
-pub use self::stream::*;
 pub use self::color::*;
 pub use self::function::*;
+pub use self::stream::*;
+pub use self::types::*;
 pub use crate::file::PromisedRef;
 use crate::parser::ParseFlags;
 
-use crate::primitive::*;
-use crate::error::*;
 use crate::enc::*;
+use crate::error::*;
+use crate::primitive::*;
 
-use std::fmt;
-use std::marker::PhantomData;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::ops::{Deref, Range};
-use std::hash::{Hash, Hasher};
-use std::convert::TryInto;
 use datasize::DataSize;
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
+use std::ops::{Deref, Range};
+use std::sync::Arc;
 
 pub type ObjNr = u64;
 pub type GenNr = u64;
@@ -57,15 +57,20 @@ impl ParseOptions {
     }
 }
 
-pub trait Resolve: {
+pub trait Resolve {
     fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, depth: usize) -> Result<Primitive>;
     fn resolve(&self, r: PlainRef) -> Result<Primitive> {
         self.resolve_flags(r, ParseFlags::ANY, 16)
     }
-    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>>;
+    fn get<T: Object + DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>>;
     fn options(&self) -> &ParseOptions;
     fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>>;
-    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>>;
+    fn get_data_or_decode(
+        &self,
+        id: PlainRef,
+        range: Range<usize>,
+        filters: &[StreamFilter],
+    ) -> Result<Arc<[u8]>>;
 }
 
 pub struct NoResolve;
@@ -73,20 +78,24 @@ impl Resolve for NoResolve {
     fn resolve_flags(&self, _: PlainRef, _: ParseFlags, _: usize) -> Result<Primitive> {
         Err(PdfError::Reference)
     }
-    fn get<T: Object+DataSize>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
+    fn get<T: Object + DataSize>(&self, _r: Ref<T>) -> Result<RcRef<T>> {
         Err(PdfError::Reference)
     }
     fn options(&self) -> &ParseOptions {
         static STRICT: ParseOptions = ParseOptions::strict();
         &STRICT
     }
-    fn get_data_or_decode(&self, _: PlainRef, _: Range<usize>, _: &[StreamFilter]) -> Result<Arc<[u8]>> {
+    fn get_data_or_decode(
+        &self,
+        _: PlainRef,
+        _: Range<usize>,
+        _: &[StreamFilter],
+    ) -> Result<Arc<[u8]>> {
         Err(PdfError::Reference)
     }
-    fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>> {
+    fn stream_data(&self, _id: PlainRef, _range: Range<usize>) -> Result<Arc<[u8]>> {
         Err(PdfError::Reference)
     }
-
 }
 
 /// A PDF Object
@@ -97,8 +106,14 @@ pub trait Object: Sized + Sync + Send + 'static {
 
 pub trait Cloner: Updater + Resolve {
     fn clone_plainref(&mut self, old: PlainRef) -> Result<PlainRef>;
-    fn clone_ref<T: DeepClone + Object + DataSize + ObjectWrite>(&mut self, old: Ref<T>) -> Result<Ref<T>>;
-    fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(&mut self, old: &RcRef<T>) -> Result<RcRef<T>>;
+    fn clone_ref<T: DeepClone + Object + DataSize + ObjectWrite>(
+        &mut self,
+        old: Ref<T>,
+    ) -> Result<Ref<T>>;
+    fn clone_rcref<T: DeepClone + ObjectWrite + DataSize>(
+        &mut self,
+        old: &RcRef<T>,
+    ) -> Result<RcRef<T>>;
     fn clone_shared<T: DeepClone>(&mut self, old: &Shared<T>) -> Result<Shared<T>>;
 }
 
@@ -118,10 +133,18 @@ pub trait Updater {
 
 pub struct NoUpdate;
 impl Updater for NoUpdate {
-    fn create<T: ObjectWrite>(&mut self, _obj: T) -> Result<RcRef<T>> { panic!() }
-    fn update<T: ObjectWrite>(&mut self, _old: PlainRef, _obj: T) -> Result<RcRef<T>> { panic!() }
-    fn promise<T: Object>(&mut self) -> PromisedRef<T> { panic!() }
-    fn fulfill<T: ObjectWrite>(&mut self, _promise: PromisedRef<T>, _obj: T) -> Result<RcRef<T>> { panic!() }
+    fn create<T: ObjectWrite>(&mut self, _obj: T) -> Result<RcRef<T>> {
+        panic!()
+    }
+    fn update<T: ObjectWrite>(&mut self, _old: PlainRef, _obj: T) -> Result<RcRef<T>> {
+        panic!()
+    }
+    fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        panic!()
+    }
+    fn fulfill<T: ObjectWrite>(&mut self, _promise: PromisedRef<T>, _obj: T) -> Result<RcRef<T>> {
+        panic!()
+    }
 }
 
 pub trait ObjectWrite {
@@ -148,8 +171,8 @@ pub trait Trace {
 // TODO move to primitive.rs
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, DataSize)]
 pub struct PlainRef {
-    pub id:     ObjNr,
-    pub gen:    GenNr,
+    pub id: ObjNr,
+    pub gen: GenNr,
 }
 impl Object for PlainRef {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
@@ -171,8 +194,8 @@ impl DeepClone for PlainRef {
 
 #[derive(DataSize)]
 pub struct Ref<T> {
-    inner:      PlainRef,
-    _marker:    PhantomData<T>
+    inner: PlainRef,
+    _marker: PhantomData<T>,
 }
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Ref<T> {
@@ -185,19 +208,22 @@ impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
         Ref {
             inner,
-            _marker:    PhantomData,
+            _marker: PhantomData,
         }
     }
     pub fn from_id(id: ObjNr) -> Ref<T> {
         Ref {
-            inner:      PlainRef {id, gen: 0},
-            _marker:    PhantomData,
+            inner: PlainRef { id, gen: 0 },
+            _marker: PhantomData,
         }
     }
     pub fn get_inner(&self) -> PlainRef {
         self.inner
     }
-    pub fn upcast<U>(self) -> Ref<U> where T: SubType<U> {
+    pub fn upcast<U>(self) -> Ref<U>
+    where
+        T: SubType<U>,
+    {
         Ref::new(self.inner)
     }
 }
@@ -211,7 +237,7 @@ impl<T> ObjectWrite for Ref<T> {
         self.inner.to_primitive(update)
     }
 }
-impl<T: DeepClone+Object+DataSize+ObjectWrite> DeepClone for Ref<T> {
+impl<T: DeepClone + Object + DataSize + ObjectWrite> DeepClone for Ref<T> {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
         cloner.clone_ref(*self)
     }
@@ -240,11 +266,10 @@ impl<T> Eq for Ref<T> {}
 
 pub type Shared<T> = Arc<T>;
 
-
 #[derive(Debug, DataSize)]
 pub struct RcRef<T> {
     inner: PlainRef,
-    data: Shared<T>
+    data: Shared<T>,
 }
 impl<T> From<RcRef<T>> for Primitive {
     fn from(value: RcRef<T>) -> Self {
@@ -272,7 +297,10 @@ impl<T: Object + std::fmt::Debug + DataSize> Object for RcRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(r) => resolve.get(Ref::new(r)),
-            p => Err(PdfError::UnexpectedPrimitive {expected: "Reference", found: p.get_debug_name()})
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Reference",
+                found: p.get_debug_name(),
+            }),
         }
     }
 }
@@ -332,21 +360,21 @@ impl<T> MaybeRef<T> {
     pub fn as_ref(&self) -> Option<Ref<T>> {
         match *self {
             MaybeRef::Indirect(ref r) => Some(r.get_ref()),
-            _ => None
+            _ => None,
         }
     }
     pub fn data(&self) -> &Shared<T> {
         match *self {
             MaybeRef::Direct(ref t) => t,
-            MaybeRef::Indirect(ref r) => &r.data
+            MaybeRef::Indirect(ref r) => &r.data,
         }
     }
 }
-impl<T: Object+DataSize> Object for MaybeRef<T> {
+impl<T: Object + DataSize> Object for MaybeRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         Ok(match p {
             Primitive::Reference(r) => MaybeRef::Indirect(resolve.get(Ref::new(r))?),
-            p => MaybeRef::Direct(Shared::new(T::from_primitive(p, resolve)?))
+            p => MaybeRef::Direct(Shared::new(T::from_primitive(p, resolve)?)),
         })
     }
 }
@@ -354,7 +382,7 @@ impl<T: ObjectWrite> ObjectWrite for MaybeRef<T> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match self {
             MaybeRef::Direct(ref inner) => inner.to_primitive(update),
-            MaybeRef::Indirect(r) => r.to_primitive(update)
+            MaybeRef::Indirect(r) => r.to_primitive(update),
         }
     }
 }
@@ -362,7 +390,7 @@ impl<T: DeepClone + std::fmt::Debug + DataSize + Object + ObjectWrite> DeepClone
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
         match *self {
             MaybeRef::Direct(ref old) => cloner.clone_shared(old).map(MaybeRef::Direct),
-            MaybeRef::Indirect(ref old) => cloner.clone_rcref(old).map(MaybeRef::Indirect)
+            MaybeRef::Indirect(ref old) => cloner.clone_rcref(old).map(MaybeRef::Indirect),
         }
     }
 }
@@ -371,7 +399,7 @@ impl<T> Deref for MaybeRef<T> {
     fn deref(&self) -> &T {
         match *self {
             MaybeRef::Direct(ref t) => t,
-            MaybeRef::Indirect(ref r) => r
+            MaybeRef::Indirect(ref r) => r,
         }
     }
 }
@@ -379,7 +407,7 @@ impl<T> Clone for MaybeRef<T> {
     fn clone(&self) -> Self {
         match *self {
             MaybeRef::Direct(ref rc) => MaybeRef::Direct(rc.clone()),
-            MaybeRef::Indirect(ref r) => MaybeRef::Indirect(r.clone())
+            MaybeRef::Indirect(ref r) => MaybeRef::Indirect(r.clone()),
         }
     }
 }
@@ -387,7 +415,7 @@ impl<T> Trace for MaybeRef<T> {
     fn trace(&self, cb: &mut impl FnMut(PlainRef)) {
         match *self {
             MaybeRef::Indirect(ref rc) => rc.trace(cb),
-            MaybeRef::Direct(_) => ()
+            MaybeRef::Direct(_) => (),
         }
     }
 }
@@ -405,7 +433,7 @@ impl<T> From<MaybeRef<T>> for Shared<T> {
     fn from(r: MaybeRef<T>) -> Shared<T> {
         match r {
             MaybeRef::Direct(rc) => rc,
-            MaybeRef::Indirect(r) => r.data
+            MaybeRef::Indirect(r) => r.data,
         }
     }
 }
@@ -413,7 +441,7 @@ impl<'a, T> From<&'a MaybeRef<T>> for Shared<T> {
     fn from(r: &'a MaybeRef<T>) -> Shared<T> {
         match r {
             MaybeRef::Direct(ref rc) => rc.clone(),
-            MaybeRef::Indirect(ref r) => r.data.clone()
+            MaybeRef::Indirect(ref r) => r.data.clone(),
         }
     }
 }
@@ -438,13 +466,17 @@ impl<T> Eq for MaybeRef<T> {}
 pub struct Lazy<T> {
     primitive: Primitive,
     cache: OnceCell<MaybeRef<T>>,
-    _marker: PhantomData<T>
+    _marker: PhantomData<T>,
 }
 impl<T: DataSize> DataSize for Lazy<T> {
     const IS_DYNAMIC: bool = true;
     const STATIC_HEAP_SIZE: usize = size_of::<Self>();
     fn estimate_heap_size(&self) -> usize {
-        self.cache.get().map(|value| value.estimate_heap_size()).unwrap_or(0) + size_of::<Self>()
+        self.cache
+            .get()
+            .map(|value| value.estimate_heap_size())
+            .unwrap_or(0)
+            + size_of::<Self>()
     }
 }
 impl<T> Clone for Lazy<T> {
@@ -452,7 +484,7 @@ impl<T> Clone for Lazy<T> {
         Lazy {
             primitive: self.primitive.clone(),
             cache: self.cache.clone(),
-            _marker: PhantomData
+            _marker: PhantomData,
         }
     }
 }
@@ -461,18 +493,20 @@ impl<T: Object> DeepClone for Lazy<T> {
         Ok(Lazy {
             primitive: self.primitive.deep_clone(cloner)?,
             cache: OnceCell::new(),
-            _marker: PhantomData
+            _marker: PhantomData,
         })
     }
 }
 impl<T: Object + DataSize> Lazy<T> {
     pub fn load(&self, resolve: &impl Resolve) -> Result<MaybeRef<T>> {
-        self.cache.get_or_try_init(|| {
-            match self.primitive {
+        self.cache
+            .get_or_try_init(|| match self.primitive {
                 Primitive::Reference(r) => resolve.get(Ref::new(r)).map(MaybeRef::Indirect),
-                ref p => T::from_primitive(p.clone(), resolve).map(|o| MaybeRef::Direct(Arc::new(o))),
-            }
-        }).cloned()
+                ref p => {
+                    T::from_primitive(p.clone(), resolve).map(|o| MaybeRef::Direct(Arc::new(o)))
+                }
+            })
+            .cloned()
     }
 }
 impl<T: Object> Object for Lazy<T> {
@@ -480,12 +514,12 @@ impl<T: Object> Object for Lazy<T> {
         Ok(Self {
             primitive: p,
             cache: OnceCell::new(),
-            _marker: PhantomData
+            _marker: PhantomData,
         })
     }
 }
 impl<T: ObjectWrite> ObjectWrite for Lazy<T> {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         Ok(self.primitive.clone())
     }
 }
@@ -494,7 +528,7 @@ impl<T> Default for Lazy<T> {
         Lazy {
             primitive: Primitive::Null,
             cache: OnceCell::new(),
-            _marker: PhantomData
+            _marker: PhantomData,
         }
     }
 }
@@ -503,7 +537,7 @@ impl<T: Object> From<RcRef<T>> for Lazy<T> {
         Lazy {
             primitive: Primitive::Reference(value.inner),
             cache: OnceCell::with_value(MaybeRef::Direct(value.data)),
-            _marker: PhantomData
+            _marker: PhantomData,
         }
     }
 }
@@ -516,7 +550,7 @@ impl Object for i32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_integer(),
-            p => p.as_integer()
+            p => p.as_integer(),
         }
     }
 }
@@ -530,7 +564,7 @@ impl Object for u32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_u32(),
-            p => p.as_u32()
+            p => p.as_u32(),
         }
     }
 }
@@ -544,7 +578,7 @@ impl Object for usize {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => Ok(r.resolve(id)?.as_u32()? as usize),
-            p => Ok(p.as_u32()? as usize)
+            p => Ok(p.as_u32()? as usize),
         }
     }
 }
@@ -558,7 +592,7 @@ impl Object for f32 {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_number(),
-            p => p.as_number()
+            p => p.as_number(),
         }
     }
 }
@@ -572,7 +606,7 @@ impl Object for bool {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Reference(id) => r.resolve(id)?.as_bool(),
-            p => p.as_bool()
+            p => p.as_bool(),
         }
     }
 }
@@ -587,7 +621,10 @@ impl Object for Dictionary {
         match p {
             Primitive::Dictionary(dict) => Ok(dict),
             Primitive::Reference(id) => Dictionary::from_primitive(r.resolve(id)?, r),
-            _ => Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()}),
+            _ => Err(PdfError::UnexpectedPrimitive {
+                expected: "Dictionary",
+                found: p.get_debug_name(),
+            }),
         }
     }
 }
@@ -606,21 +643,17 @@ impl ObjectWrite for Name {
 impl<T: Object> Object for Vec<T> {
     /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        Ok(
-        match p {
-            Primitive::Array(_) => {
-                p.resolve(r)?.into_array()?
-                    .into_iter()
-                    .map(|p| T::from_primitive(p, r))
-                    .collect::<Result<Vec<T>>>()?
-            },
-            Primitive::Null => {
-                Vec::new()
-            }
+        Ok(match p {
+            Primitive::Array(_) => p
+                .resolve(r)?
+                .into_array()?
+                .into_iter()
+                .map(|p| T::from_primitive(p, r))
+                .collect::<Result<Vec<T>>>()?,
+            Primitive::Null => Vec::new(),
             Primitive::Reference(id) => Self::from_primitive(r.resolve(id)?, r)?,
-            _ => vec![T::from_primitive(p, r)?]
-        }
-        )
+            _ => vec![T::from_primitive(p, r)?],
+        })
     }
 }
 impl<T: ObjectWrite> ObjectWrite for Vec<T> {
@@ -659,7 +692,7 @@ impl Object for Data {
                 Vec::new()
             }
             Primitive::Reference(id) => Self::from_primitive(r.resolve(id)?, r)?,
-            _ => 
+            _ =>
         }
     }
 }*/
@@ -677,7 +710,12 @@ impl ObjectWrite for Primitive {
 impl DeepClone for Primitive {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
         match *self {
-            Primitive::Array(ref parts) => Ok(Primitive::Array(parts.into_iter().map(|p| p.deep_clone(cloner)).try_collect()?)),
+            Primitive::Array(ref parts) => Ok(Primitive::Array(
+                parts
+                    .into_iter()
+                    .map(|p| p.deep_clone(cloner))
+                    .try_collect()?,
+            )),
             Primitive::Boolean(b) => Ok(Primitive::Boolean(b)),
             Primitive::Dictionary(ref dict) => Ok(Primitive::Dictionary(dict.deep_clone(cloner)?)),
             Primitive::Integer(i) => Ok(Primitive::Integer(i)),
@@ -686,7 +724,7 @@ impl DeepClone for Primitive {
             Primitive::Number(n) => Ok(Primitive::Number(n)),
             Primitive::Reference(r) => Ok(Primitive::Reference(r.deep_clone(cloner)?)),
             Primitive::Stream(ref s) => Ok(Primitive::Stream(s.deep_clone(cloner)?)),
-            Primitive::String(ref s) => Ok(Primitive::String(s.clone()))
+            Primitive::String(ref s) => Ok(Primitive::String(s.clone())),
         }
     }
 }
@@ -697,7 +735,7 @@ impl Trace for Primitive {
             Primitive::Reference(r) => cb(r),
             Primitive::Array(ref parts) => parts.iter().for_each(|p| p.trace(cb)),
             Primitive::Dictionary(ref dict) => dict.values().for_each(|p| p.trace(cb)),
-            _ => ()
+            _ => (),
         }
     }
 }
@@ -706,15 +744,18 @@ impl<V: Object> Object for HashMap<Name, V> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Null => Ok(HashMap::new()),
-            Primitive::Dictionary (dict) => {
+            Primitive::Dictionary(dict) => {
                 let mut new = Self::new();
                 for (key, val) in dict.iter() {
                     new.insert(key.clone(), V::from_primitive(val.clone(), resolve)?);
                 }
                 Ok(new)
             }
-            Primitive::Reference (id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
-            p => Err(PdfError::UnexpectedPrimitive {expected: "Dictionary", found: p.get_debug_name()})
+            Primitive::Reference(id) => HashMap::from_primitive(resolve.resolve(id)?, resolve),
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Dictionary",
+                found: p.get_debug_name(),
+            }),
         }
     }
 }
@@ -733,7 +774,9 @@ impl<V: ObjectWrite> ObjectWrite for HashMap<Name, V> {
 }
 impl<V: DeepClone> DeepClone for HashMap<Name, V> {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
-        self.iter().map(|(k, v)| Ok((k.clone(), v.deep_clone(cloner)?))).collect()
+        self.iter()
+            .map(|(k, v)| Ok((k.clone(), v.deep_clone(cloner)?)))
+            .collect()
     }
 }
 
@@ -744,14 +787,14 @@ impl<T: Object> Object for Option<T> {
             p => match T::from_primitive(p, resolve) {
                 Ok(p) => Ok(Some(p)),
                 // References to non-existing objects ought not to be an error
-                Err(PdfError::NullRef {..}) => Ok(None),
-                Err(PdfError::FreeObject {..}) => Ok(None),
+                Err(PdfError::NullRef { .. }) => Ok(None),
+                Err(PdfError::FreeObject { .. }) => Ok(None),
                 Err(e) if resolve.options().allow_error_in_option => {
                     warn!("ignoring {:?}", e);
                     Ok(None)
                 }
-                Err(e) => Err(e)
-            }
+                Err(e) => Err(e),
+            },
         }
     }
 }
@@ -759,7 +802,7 @@ impl<T: ObjectWrite> ObjectWrite for Option<T> {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match self {
             None => Ok(Primitive::Null),
-            Some(t) => t.to_primitive(update)
+            Some(t) => t.to_primitive(update),
         }
     }
 }
@@ -767,7 +810,7 @@ impl<T: DeepClone> DeepClone for Option<T> {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
         match self {
             None => Ok(None),
-            Some(t) => t.deep_clone(cloner).map(Some)
+            Some(t) => t.deep_clone(cloner).map(Some),
         }
     }
 }
@@ -808,20 +851,34 @@ impl ObjectWrite for () {
 }
 impl Trace for () {}
 
-impl<T, U> Object for (T, U) where T: Object, U: Object {
+impl<T, U> Object for (T, U)
+where
+    T: Object,
+    U: Object,
+{
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let arr = p.resolve(resolve)?.into_array()?;
         if arr.len() != 2 {
             bail!("expected array of length 2 (found {})", arr.len());
         }
         let [a, b]: [Primitive; 2] = arr.try_into().unwrap();
-        Ok((T::from_primitive(a, resolve)?, U::from_primitive(b, resolve)?))
+        Ok((
+            T::from_primitive(a, resolve)?,
+            U::from_primitive(b, resolve)?,
+        ))
     }
 }
 
-impl<T, U> ObjectWrite for (T, U) where T: ObjectWrite, U: ObjectWrite {
+impl<T, U> ObjectWrite for (T, U)
+where
+    T: ObjectWrite,
+    U: ObjectWrite,
+{
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        Ok(Primitive::Array(vec![self.0.to_primitive(update)?, self.1.to_primitive(update)?]))
+        Ok(Primitive::Array(vec![
+            self.0.to_primitive(update)?,
+            self.1.to_primitive(update)?,
+        ]))
     }
 }
 
@@ -841,17 +898,76 @@ macro_rules! deep_clone_simple {
     ($($t:ty),*) => (
         $(
             impl DeepClone for $t {
-                fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+                fn deep_clone(&self, _cloner: &mut impl Cloner) -> Result<Self> {
                     Ok(self.clone())
                 }
             }
         )*
     )
 }
-deep_clone_simple!(f32, i32, u32, bool, Name, (), Date, PdfString, Rectangle, u8, Arc<[u8]>, Vec<u16>);
+deep_clone_simple!(
+    f32,
+    i32,
+    u32,
+    bool,
+    Name,
+    (),
+    Date,
+    PdfString,
+    Rectangle,
+    u8,
+    Arc<[u8]>,
+    Vec<u16>
+);
 
 impl<A: DeepClone, B: DeepClone> DeepClone for (A, B) {
     fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
         Ok((self.0.deep_clone(cloner)?, self.1.deep_clone(cloner)?))
+    }
+}
+
+#[derive(DataSize)]
+pub struct Merged<A, B> {
+    pub a: Option<A>,
+    pub b: Option<B>,
+}
+impl<A: FromDict, B: FromDict> FromDict for Merged<A, B> {
+    fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
+        let a = A::from_dict(dict.clone(), resolve).ok();
+        let b = B::from_dict(dict, resolve).ok();
+        Ok(Merged { a, b })
+    }
+}
+impl<A: FromDict + Send + Sync + 'static, B: FromDict + Send + Sync + 'static> Object
+    for Merged<A, B>
+{
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let dict = p.resolve(resolve)?.into_dictionary()?;
+        Self::from_dict(dict, resolve)
+    }
+}
+
+impl<A: ToDict, B: ToDict> ToDict for Merged<A, B> {
+    fn to_dict(&self, update: &mut impl Updater) -> Result<Dictionary> {
+        let a = self
+            .a
+            .as_ref()
+            .map(|a| a.to_dict(update))
+            .transpose()?
+            .unwrap_or_default();
+        let b = self
+            .b
+            .as_ref()
+            .map(|b| b.to_dict(update))
+            .transpose()?
+            .unwrap_or_default();
+        let mut out = a;
+        out.append(b);
+        Ok(out)
+    }
+}
+impl<A: ToDict, B: ToDict> ObjectWrite for Merged<A, B> {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        self.to_dict(update).map(Primitive::Dictionary)
     }
 }

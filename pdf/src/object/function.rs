@@ -1,48 +1,48 @@
 use crate as pdf;
-use crate::object::*;
 use crate::error::*;
-use itertools::izip;
+use crate::object::*;
 use datasize::DataSize;
+use itertools::izip;
 
 #[derive(Object, Debug, Clone, ObjectWrite)]
 struct RawFunction {
-    #[pdf(key="FunctionType")]
+    #[pdf(key = "FunctionType")]
     function_type: u32,
 
-    #[pdf(key="Domain")]
+    #[pdf(key = "Domain")]
     domain: Vec<f32>,
 
-    #[pdf(key="Range")]
+    #[pdf(key = "Range")]
     range: Option<Vec<f32>>,
 
-    #[pdf(key="Size")]
+    #[pdf(key = "Size")]
     size: Option<Vec<u32>>,
 
-    #[pdf(key="BitsPerSample")]
+    #[pdf(key = "BitsPerSample")]
     _bits_per_sample: Option<u32>,
 
-    #[pdf(key="Order", default="1")]
+    #[pdf(key = "Order", default = "1")]
     order: u32,
 
-    #[pdf(key="Encode")]
+    #[pdf(key = "Encode")]
     encode: Option<Vec<f32>>,
 
-    #[pdf(key="Decode")]
+    #[pdf(key = "Decode")]
     decode: Option<Vec<f32>>,
 
     #[pdf(other)]
-    other: Dictionary
+    other: Dictionary,
 }
 
 #[derive(Object, Debug, Clone)]
 struct Function2 {
-    #[pdf(key="C0")]
+    #[pdf(key = "C0")]
     c0: Option<Vec<f32>>,
 
-    #[pdf(key="C1")]
+    #[pdf(key = "C1")]
     c1: Option<Vec<f32>>,
 
-    #[pdf(key="N")]
+    #[pdf(key = "N")]
     exponent: f32,
 }
 
@@ -52,17 +52,23 @@ pub enum Function {
     Interpolated(Vec<InterpolatedFunctionDim>),
     Stiching,
     Calculator,
-    PostScript { func: PsFunc, domain: Vec<f32>, range: Vec<f32> },
+    PostScript {
+        func: PsFunc,
+        domain: Vec<f32>,
+        range: Vec<f32>,
+    },
 }
 impl Function {
     pub fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
         match *self {
-            Function::Sampled(ref func) => {
-                func.apply(x, out)
-            }
+            Function::Sampled(ref func) => func.apply(x, out),
             Function::Interpolated(ref parts) => {
                 if parts.len() != out.len() {
-                    bail!("incorrect output length: expected {}, found {}.", parts.len(), out.len())
+                    bail!(
+                        "incorrect output length: expected {}, found {}.",
+                        parts.len(),
+                        out.len()
+                    )
                 }
                 for (f, y) in parts.iter().zip(out) {
                     *y = f.apply(x[0]);
@@ -70,21 +76,21 @@ impl Function {
                 Ok(())
             }
             Function::PostScript { ref func, .. } => func.exec(x, out),
-            _ => bail!("unimplemted function {:?}", self)
+            _ => bail!("unimplemted function {:?}", self),
         }
     }
     pub fn input_dim(&self) -> usize {
         match *self {
             Function::PostScript { ref domain, .. } => domain.len() / 2,
             Function::Sampled(ref f) => f.input.len(),
-            _ => panic!()
+            _ => panic!(),
         }
     }
     pub fn output_dim(&self) -> usize {
         match *self {
             Function::PostScript { ref range, .. } => range.len() / 2,
             Function::Sampled(ref f) => f.output.len(),
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
@@ -95,29 +101,47 @@ impl FromDict for Function {
         match raw.function_type {
             2 => {
                 let f2 = Function2::from_dict(raw.other, resolve)?;
-                
+
                 let n_dim = match (raw.range.as_ref(), f2.c0.as_ref(), f2.c1.as_ref()) {
                     (Some(range), _, _) => range.len() / 2,
                     (_, Some(c0), _) => c0.len(),
                     (_, _, Some(c1)) => c1.len(),
-                    _ => bail!("unknown dimensions")
+                    _ => bail!("unknown dimensions"),
                 };
                 let mut parts = Vec::with_capacity(n_dim);
                 let input_range = (raw.domain[0], raw.domain[1]);
-                for dim in 0 .. n_dim {
+                for dim in 0..n_dim {
                     let output_range = (
-                        raw.range.as_ref().and_then(|r| r.get(2*dim).cloned()).unwrap_or(-INFINITY),
-                        raw.range.as_ref().and_then(|r| r.get(2*dim+1).cloned()).unwrap_or(INFINITY)
+                        raw.range
+                            .as_ref()
+                            .and_then(|r| r.get(2 * dim).cloned())
+                            .unwrap_or(-INFINITY),
+                        raw.range
+                            .as_ref()
+                            .and_then(|r| r.get(2 * dim + 1).cloned())
+                            .unwrap_or(INFINITY),
                     );
-                    let c0 = f2.c0.as_ref().and_then(|c0| c0.get(dim).cloned()).unwrap_or(0.0);
-                    let c1 = f2.c1.as_ref().and_then(|c1| c1.get(dim).cloned()).unwrap_or(1.0);
+                    let c0 = f2
+                        .c0
+                        .as_ref()
+                        .and_then(|c0| c0.get(dim).cloned())
+                        .unwrap_or(0.0);
+                    let c1 = f2
+                        .c1
+                        .as_ref()
+                        .and_then(|c1| c1.get(dim).cloned())
+                        .unwrap_or(1.0);
                     let exponent = f2.exponent;
                     parts.push(InterpolatedFunctionDim {
-                        input_range, output_range, c0, c1, exponent
+                        input_range,
+                        output_range,
+                        c0,
+                        c1,
+                        exponent,
                     });
                 }
                 Ok(Function::Interpolated(parts))
-            },
+            }
             i => {
                 dbg!(raw);
                 bail!("unsupported function type {}", i)
@@ -137,8 +161,12 @@ impl Object for Function {
                         let s = std::str::from_utf8(&data)?;
                         let func = PsFunc::parse(s)?;
                         let info = stream.info.info;
-                        Ok(Function::PostScript { func, domain: info.domain, range: info.range.unwrap() })
-                    },
+                        Ok(Function::PostScript {
+                            func,
+                            domain: info.domain,
+                            range: info.range.unwrap(),
+                        })
+                    }
                     0 => {
                         let info = stream.info.info;
                         let order = match info.order {
@@ -149,37 +177,46 @@ impl Object for Function {
 
                         let size = try_opt!(info.size);
                         let range = try_opt!(info.range);
-                        let encode = info.encode.unwrap_or_else(|| size.iter().flat_map(|&n| [0.0, (n-1) as f32]).collect());
+                        let encode = info.encode.unwrap_or_else(|| {
+                            size.iter().flat_map(|&n| [0.0, (n - 1) as f32]).collect()
+                        });
                         let decode = info.decode.unwrap_or_else(|| range.clone());
 
                         Ok(Function::Sampled(SampledFunction {
-                            input: izip!(info.domain.chunks_exact(2), encode.chunks_exact(2), size.iter()).map(|(c, e, &s)| {
-                                SampledFunctionInput {
-                                    domain: (c[0], c[1]),
-                                    encode_offset: e[0],
-                                    encode_scale: e[1],
-                                    size: s as usize,
-                                }
-                            }).collect(),
-                            output: decode.chunks_exact(2).map(|c| SampledFunctionOutput { 
-                                offset: c[0],
-                                scale: (c[1] - c[0]) / 255.,
-                            }).collect(),
+                            input: izip!(
+                                info.domain.chunks_exact(2),
+                                encode.chunks_exact(2),
+                                size.iter()
+                            )
+                            .map(|(c, e, &s)| SampledFunctionInput {
+                                domain: (c[0], c[1]),
+                                encode_offset: e[0],
+                                encode_scale: e[1],
+                                size: s as usize,
+                            })
+                            .collect(),
+                            output: decode
+                                .chunks_exact(2)
+                                .map(|c| SampledFunctionOutput {
+                                    offset: c[0],
+                                    scale: (c[1] - c[0]) / 255.,
+                                })
+                                .collect(),
                             data,
                             order,
                             range,
                         }))
                     }
-                    ref p => bail!("found a function stream with type {:?}", p)
+                    ref p => bail!("found a function stream with type {:?}", p),
                 }
-            },
+            }
             Primitive::Reference(r) => Self::from_primitive(resolve.resolve(r)?, resolve),
-            _ => bail!("double indirection")
+            _ => bail!("double indirection"),
         }
     }
 }
 impl ObjectWrite for Function {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         unimplemented!()
         /*
         let dict = match self {
@@ -205,7 +242,7 @@ impl ObjectWrite for Function {
     }
 }
 impl DeepClone for Function {
-    fn deep_clone(&self, cloner: &mut impl Cloner) -> Result<Self> {
+    fn deep_clone(&self, _cloner: &mut impl Cloner) -> Result<Self> {
         Ok(self.clone())
     }
 }
@@ -228,7 +265,7 @@ impl SampledFunctionInput {
 #[derive(Debug, Clone, DataSize)]
 struct SampledFunctionOutput {
     offset: f32,
-    scale: f32
+    scale: f32,
 }
 impl SampledFunctionOutput {
     fn map(&self, x: f32) -> f32 {
@@ -239,7 +276,7 @@ impl SampledFunctionOutput {
 #[derive(Debug, Clone, DataSize)]
 enum Interpolation {
     Linear,
-    #[allow(dead_code)]  // TODO
+    #[allow(dead_code)] // TODO
     Cubic,
 }
 
@@ -254,41 +291,47 @@ pub struct SampledFunction {
 impl SampledFunction {
     fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
         if x.len() != self.input.len() {
-            bail!("input dimension mismatch {} != {}", x.len(), self.input.len());
+            bail!(
+                "input dimension mismatch {} != {}",
+                x.len(),
+                self.input.len()
+            );
         }
         let n_out = out.len();
         if out.len() * 2 != self.range.len() {
-            bail!("output dimension mismatch 2 * {} != {}", out.len(), self.range.len())
+            bail!(
+                "output dimension mismatch 2 * {} != {}",
+                out.len(),
+                self.range.len()
+            )
         }
         match x.len() {
-            1 => {
-                match self.order {
-                    Interpolation::Linear => {
-                        let (i, _, s) = self.input[0].map(x[0]);
-                        let idx = i * n_out;
+            1 => match self.order {
+                Interpolation::Linear => {
+                    let (i, _, s) = self.input[0].map(x[0]);
+                    let idx = i * n_out;
 
-                        for (o, &a) in out.iter_mut().zip(&self.data[idx..]) {
-                            *o = a as f32 * (1. - s);
-                        }
-                        for (o, &b) in out.iter_mut().zip(&self.data[idx + n_out..]) {
-                            *o += b as f32 * s;
-                        }
+                    for (o, &a) in out.iter_mut().zip(&self.data[idx..]) {
+                        *o = a as f32 * (1. - s);
                     }
-                    _ => unimplemented!()
+                    for (o, &b) in out.iter_mut().zip(&self.data[idx + n_out..]) {
+                        *o += b as f32 * s;
+                    }
                 }
-            }
+                _ => unimplemented!(),
+            },
             2 => match self.order {
                 Interpolation::Linear => {
                     let (i0, s0, f0) = self.input[0].map(x[0]);
-                    let (i1,  _, f1) = self.input[1].map(x[1]);
-                    let (j0, j1) = (i0+1, i1+1);
+                    let (i1, _, f1) = self.input[1].map(x[1]);
+                    let (j0, j1) = (i0 + 1, i1 + 1);
                     let (g0, g1) = (1. - f0, 1. - f1);
-                    
+
                     out.fill(0.0);
                     let mut add = |i0, i1, f| {
                         let idx = (i0 + s0 * i1) * n_out;
-                        
-                        if let Some(part) = self.data.get(idx .. idx+n_out) {
+
+                        if let Some(part) = self.data.get(idx..idx + n_out) {
                             for (o, &b) in out.iter_mut().zip(part) {
                                 *o += f * b as f32;
                             }
@@ -300,21 +343,21 @@ impl SampledFunction {
                     add(i0, j1, g0 * f1);
                     add(j0, j1, f0 * f1);
                 }
-                _ => unimplemented!()
-            }
+                _ => unimplemented!(),
+            },
             3 => match self.order {
                 Interpolation::Linear => {
                     let (i0, s0, f0) = self.input[0].map(x[0]);
                     let (i1, s1, f1) = self.input[1].map(x[1]);
-                    let (i2,  _, f2) = self.input[2].map(x[2]);
-                    let (j0, j1, j2) = (i0+1, i1+1, i2+1);
+                    let (i2, _, f2) = self.input[2].map(x[2]);
+                    let (j0, j1, j2) = (i0 + 1, i1 + 1, i2 + 1);
                     let (g0, g1, g2) = (1. - f0, 1. - f1, 1. - f2);
-                    
+
                     out.fill(0.0);
                     let mut add = |i0, i1, i2, f| {
                         let idx = (i0 + s0 * (i1 + s1 * i2)) * n_out;
-                        
-                        if let Some(part) = self.data.get(idx .. idx+n_out) {
+
+                        if let Some(part) = self.data.get(idx..idx + n_out) {
                             for (o, &b) in out.iter_mut().zip(part) {
                                 *o += f * b as f32;
                             }
@@ -331,9 +374,9 @@ impl SampledFunction {
                     add(i0, j1, j2, g0 * f1 * f2);
                     add(j0, j1, j2, f0 * f1 * f2);
                 }
-                _ => unimplemented!()
-            }
-            n => bail!("Order {}", n)
+                _ => unimplemented!(),
+            },
+            n => bail!("Order {}", n),
         }
         for (o, y) in self.output.iter().zip(out.iter_mut()) {
             *y = o.map(*y);
@@ -341,7 +384,6 @@ impl SampledFunction {
         Ok(())
     }
 }
-
 
 #[derive(Debug, Clone, DataSize)]
 pub struct InterpolatedFunctionDim {
@@ -362,11 +404,11 @@ impl InterpolatedFunctionDim {
 #[derive(Debug)]
 pub enum PostScriptError {
     StackUnderflow,
-    IncorrectStackSize
+    IncorrectStackSize,
 }
 #[derive(Debug, Clone, DataSize)]
 pub struct PsFunc {
-    pub ops: Vec<PsOp>
+    pub ops: Vec<PsOp>,
 }
 
 macro_rules! op {
@@ -401,7 +443,9 @@ impl PsFunc {
                 }
                 PsOp::Index => {
                     let n = stack.pop().ok_or(PostScriptError::StackUnderflow)? as usize;
-                    if n >= stack.len() { return Err(PostScriptError::StackUnderflow); }
+                    if n >= stack.len() {
+                        return Err(PostScriptError::StackUnderflow);
+                    }
                     let val = stack[stack.len() - n - 1];
                     stack.push(val);
                 }
@@ -417,11 +461,15 @@ impl PsFunc {
         let mut stack = Vec::with_capacity(10);
         stack.extend_from_slice(input);
         match self.exec_inner(&mut stack) {
-            Ok(()) => {},
-            Err(_) => return Err(PdfError::PostScriptExec)
+            Ok(()) => {}
+            Err(_) => return Err(PdfError::PostScriptExec),
         }
         if output.len() != stack.len() {
-            bail!("incorrect output length: expected {}, found {}.", stack.len(), output.len())
+            bail!(
+                "incorrect output length: expected {}, found {}.",
+                stack.len(),
+                output.len()
+            )
         }
         output.copy_from_slice(&stack);
         Ok(())
@@ -430,7 +478,10 @@ impl PsFunc {
         let start = s.find('{').ok_or(PdfError::PostScriptParse)?;
         let end = s.rfind('}').ok_or(PdfError::PostScriptParse)?;
 
-        let ops: Result<Vec<_>, _> = s[start + 1 .. end].split_ascii_whitespace().map(PsOp::parse).collect();
+        let ops: Result<Vec<_>, _> = s[start + 1..end]
+            .split_ascii_whitespace()
+            .map(PsOp::parse)
+            .collect();
         Ok(PsFunc { ops: ops? })
     }
 }
