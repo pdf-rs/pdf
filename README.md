@@ -33,19 +33,40 @@ An interactive tool for visualizing PDF file structure as a hierarchy of primiti
   - [Available Features](#available-features)
 - [Getting Started](#getting-started)
   - [Reading a PDF File](#reading-a-pdf-file)
+  - [Loading PDF from Memory Buffer](#loading-pdf-from-memory-buffer)
   - [Creating a Simple PDF](#creating-a-simple-pdf)
 - [Features](#features)
   - [Core Capabilities](#core-capabilities)
   - [Advanced Features](#advanced-features)
 - [API Reference](#api-reference)
   - [File Operations](#file-operations)
+    - [Opening PDF Files](#opening-pdf-files)
+        - [Opening PDF Files from local disk](#opening-pdf-files-from-local-disk)
+        - [Opening PDF Files from in-memory buffer](#opening-pdf-files-from-in-memory-buffer)
+    - [File Structure Access](#file-structure-access)
   - [PDF Creation](#pdf-creation)
+    - [Using PdfBuilder](#using-pdfbuilder)
+    - [Advanced Page Creation](#advanced-page-creation)
   - [PDF Modification](#pdf-modification)
+    - [Updating Existing PDFs](#updating-existing-pdfs)
+    - [Adding Images to PDFs](#adding-images-to-pdfs)
   - [Content Extraction](#content-extraction)
+    - [Extracting Images](#extracting-images)
+    - [Extracting Fonts](#extracting-fonts)
+    - [Text Extraction](#text-extraction)
   - [Metadata Handling](#metadata-handling)
+    - [Reading Document Information](#reading-document-information)
+    - [Setting Document Metadata](#setting-document-metadata)
   - [Interactive Features](#interactive-features)
+    - [Working with Forms (AcroForms)](#working-with-forms-acroforms)
+    - [Handling Annotations](#handling-annotations)
   - [Navigation Features](#navigation-features)
+    - [Working with Outlines (Bookmarks)](#working-with-outlines-bookmarks)
+    - [Named Destinations](#named-destinations)
   - [Low-level Operations](#low-level-operations)
+    - [Working with Primitives](#working-with-primitives)
+    - [Stream Processing](#stream-processing)
+    - [Custom Content Operations](#custom-content-operations)
 - [Examples](#examples)
   - [Core Examples (pdf/examples/)](#core-examples-(pdf/examples/))
   - [Extended Examples (examples/src/bin/)](#extended-examples-(examples/src/bin/))
@@ -121,6 +142,71 @@ fn main() -> Result<(), PdfError> {
 }
 ```
 
+### Loading PDF from Memory Buffer
+
+For scenarios where you have PDF data in memory (from network requests, embedded resources, or other sources), you can load PDFs directly from byte buffers without writing to disk:
+
+```rust
+use pdf::file::FileOptions;
+use pdf::error::PdfError;
+
+fn load_from_buffer() -> Result<(), PdfError> {
+    // From a byte slice (&[u8])
+    let pdf_data: &[u8] = &your_pdf_bytes;
+    let file = FileOptions::cached().load(pdf_data)?;
+    
+    // From a Vec<u8>
+    let pdf_buffer: Vec<u8> = get_pdf_data_from_somewhere();
+    let file = FileOptions::cached().load(pdf_buffer)?;
+    
+    // From any type that can be dereferenced to [u8]
+    let boxed_data: Box<[u8]> = pdf_data.into();
+    let file = FileOptions::cached().load(boxed_data)?;
+    
+    // Process the file same as file-based loading
+    println!("Loaded PDF with {} pages", file.num_pages());
+    
+    // Access pages and content
+    for (page_num, page) in file.pages().enumerate() {
+        let page = page?;
+        println!("Page {}: {:?}", page_num + 1, page.media_box);
+    }
+    
+    Ok(())
+}
+
+// Example: Loading from HTTP response
+async fn load_from_http() -> Result<(), Box<dyn std::error::Error>> {
+    // Simulate getting PDF data from HTTP (replace with your HTTP client)
+    let pdf_bytes = download_pdf_from_url("https://example.com/document.pdf").await?;
+    
+    // Load directly from the downloaded bytes
+    let file = FileOptions::cached().load(&pdf_bytes)?;
+    
+    println!("Downloaded and loaded PDF with {} pages", file.num_pages());
+    
+    Ok(())
+}
+
+// Example: Loading embedded PDF resource
+fn load_embedded_pdf() -> Result<(), PdfError> {
+    // PDF data embedded in the binary
+    const EMBEDDED_PDF: &[u8] = include_bytes!("../resources/embedded.pdf");
+    
+    let file = FileOptions::cached().load(EMBEDDED_PDF)?;
+    println!("Loaded embedded PDF with {} pages", file.num_pages());
+    
+    Ok(())
+}
+```
+
+The `load()` method accepts any type that implements `Deref<Target=[u8]>`, including:
+- `&[u8]` - Byte slices
+- `Vec<u8>` - Owned byte vectors  
+- `Box<[u8]>` - Boxed byte arrays
+- `Arc<[u8]>` - Reference-counted byte arrays
+- Any custom type that dereferences to `[u8]`
+
 ### Creating a Simple PDF
 
 ```rust
@@ -190,15 +276,25 @@ fn create_pdf() -> Result<(), Box<dyn std::error::Error>> {
 
 #### Opening PDF Files
 
-The [`FileOptions`](pdf/src/file.rs:1) struct provides flexible options for opening PDF files:
+##### Opening PDF Files from local disk
+
+The [`FileOptions`](pdf/src/file.rs:1) struct provides flexible options for opening PDF files from disk or memory:
 
 ```rust
 use pdf::file::{FileOptions, Log};
 
-// Basic file opening
+// Basic file opening from disk
 let file = FileOptions::cached().open("document.pdf")?;
 
-// Custom logging
+// Loading from memory buffer
+let pdf_data: &[u8] = &your_pdf_bytes;
+let file = FileOptions::cached().load(pdf_data)?;
+
+// Loading from Vec<u8>
+let pdf_buffer: Vec<u8> = get_pdf_data();
+let file = FileOptions::cached().load(pdf_buffer)?;
+
+// Custom logging (works with both open() and load())
 struct MyLog;
 impl Log for MyLog {
     fn load_object(&self, r: pdf::object::PlainRef) {
@@ -210,11 +306,40 @@ let file = FileOptions::cached()
     .log(MyLog)
     .open("document.pdf")?;
 
-// Memory-mapped access for large files
+// Or with buffer loading
+let file = FileOptions::cached()
+    .log(MyLog)
+    .load(&pdf_data)?;
+
+// Memory-mapped access for large files (disk only)
 #[cfg(feature = "mmap")]
 let file = FileOptions::cached()
     .mmap()
     .open("large_document.pdf")?;
+```
+
+##### Opening PDF Files from in-memory buffer
+
+The `load()` method works with any type implementing `Deref<Target=[u8]>`:
+
+```rust
+// Different buffer types supported
+let file1 = FileOptions::cached().load(&pdf_bytes[..])?;     // &[u8]
+let file2 = FileOptions::cached().load(pdf_vec)?;           // Vec<u8>
+let file3 = FileOptions::cached().load(Box::from(pdf_vec))?; // Box<[u8]>
+let file4 = FileOptions::cached().load(Arc::from(pdf_vec))?; // Arc<[u8]>
+
+// Example: Reading PDF from network and loading directly
+async fn load_remote_pdf() -> Result<(), Box<dyn std::error::Error>> {
+    let response = reqwest::get("https://example.com/document.pdf").await?;
+    let pdf_bytes = response.bytes().await?;
+    
+    // Load directly from downloaded bytes
+    let file = FileOptions::cached().load(&pdf_bytes[..])?;
+    println!("Loaded remote PDF with {} pages", file.num_pages());
+    
+    Ok(())
+}
 ```
 
 #### File Structure Access
