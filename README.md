@@ -2,6 +2,30 @@
 
 A comprehensive Rust library for reading, altering, and writing PDF files with extensive API support for PDF manipulation, content extraction, and document creation.
 
+Modifying and writing PDFs is still experimental.
+
+One easy way you can contribute is to add different PDF files to [`tests/files`](files/) and see if they pass the tests (`cargo test`).
+
+We welcome contributions in the form of ideas, issues, or code! Please join [us on Zulip](https://type.zulipchat.com/#narrow/stream/209232-pdf) if you have any questions or problems.
+
+## Workspace
+This repository uses a Cargo Workspace with default members. By default, only the `pdf` library is built.
+To build additional parts, such as the `read` example, pass the `--package` flag with the subcrate name (e.g., `cargo build --package=read`).
+
+## Examples
+Examples are located in the [`pdf/examples/`](pdf/examples/) directory and can be executed using:
+
+```bash
+cargo run --example {content|metadata|names|read|text} -- <path/to/your.pdf>
+```
+
+## Renderer and Viewer
+A library for rendering PDFs using [Pathfinder](https://github.com/servo/pathfinder), along with a minimal viewer, can be found at [pdf-rs/pdf_render](https://github.com/pdf-rs/pdf_render).
+
+## Inspect
+An interactive tool for visualizing PDF file structure as a hierarchy of primitives is available at [pdf-rs/inspect-prim](https://github.com/pdf-rs/inspect-prim). To use it, clone the repository and run `cargo run`.
+
+
 ## Table of Contents
 
 - [Introduction](#introduction)
