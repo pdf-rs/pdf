@@ -4,3 +4,4 @@ members = [
     "pdf_derive",
     "examples",
 ]
+resolver = "2"

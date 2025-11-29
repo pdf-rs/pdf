@@ -14,17 +14,17 @@ use crate::enc::StreamFilter;
 use crate as pdf;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DeepClone, DataSize)]
 pub struct Content {
     /// The raw content stream parts. usually one, but could be any number.
-    pub parts: Vec<Stream<()>>,
+    pub parts: Vec<RcRef<Stream<()>>>,
 }
 
 impl Content {
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
         let mut data = vec![];
         for part in self.parts.iter() {
-            data.extend_from_slice(&t!(part.data(resolve)));
+            data.extend_from_slice(&t!(part.data().data(resolve)));
         }
         parse_ops(&data, resolve)
     }
@@ -159,12 +159,12 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
     // find the end before try parsing.
     if lexer.seek_substr("\nEI").is_none() {
         bail!("inline image exceeds expected data range");
-    }    
+    }
     let data_end = lexer.get_pos() - 3;
 
     // ugh
     let bits_per_component = dict.get("BitsPerComponent").map(|p| p.as_integer()).transpose()?;
-    let color_space = dict.get("ColorSpace").map(|p| ColorSpace::from_primitive(expand_abbr(p.clone(), 
+    let color_space = dict.get("ColorSpace").map(|p| ColorSpace::from_primitive(expand_abbr(p.clone(),
         &[
             ("G", "DeviceGray"),
             ("RGB", "DeviceRGB"),
@@ -193,7 +193,7 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
         None => vec![],
         _ => bail!("invalid filter")
     };
-    
+
     let height = dict.require("InlineImage", "Height")?.as_u32()?;
     let image_mask = dict.get("ImageMask").map(|p| p.as_bool()).transpose()?.unwrap_or(false);
     let intent = dict.remove("Intent").map(|p| RenderingIntent::from_primitive(p, &NoResolve)).transpose()?;
@@ -438,7 +438,7 @@ impl OpBuilder {
                 push(Op::TextDrawAdjusted { array: result })
             }
             "TL"  => push(Op::Leading { leading: number(&mut args)? }),
-            "Tm"  => push(Op::SetTextMatrix { matrix: matrix(&mut args)? }), 
+            "Tm"  => push(Op::SetTextMatrix { matrix: matrix(&mut args)? }),
             "Tr"  => {
                 use TextMode::*;
 
@@ -495,19 +495,20 @@ impl Object for Content {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
-        let mut parts: Vec<ContentStream> = vec![];
+        let mut parts: Vec<RcRef<ContentStream>> = vec![];
 
         match p {
             Primitive::Array(arr) => {
                 for p in arr {
-                    let part = t!(ContentStream::from_primitive(p, resolve));
+                    let part = t!(RcRef::from_primitive(p, resolve));
                     parts.push(part);
                 }
             }
-            Primitive::Reference(r) => return Self::from_primitive(t!(resolve.resolve(r)), resolve),
+            Primitive::Reference(r) => {
+                parts.push(RcRef::from_primitive(p, resolve)?);
+            }
             p => {
-                let part = t!(ContentStream::from_primitive(p, resolve));
-                parts.push(part);
+                return Err(PdfError::UnexpectedPrimitive { expected: "list of references or reference", found: p.get_debug_name() });
             }
         }
 
@@ -742,19 +743,18 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
 }
 
 impl Content {
-    pub fn from_ops(operations: Vec<Op>) -> Self {
+    pub fn from_ops(operations: Vec<Op>, update: &mut impl Updater) -> Result<Self> {
         let data = serialize_ops(&operations).unwrap();
-        Content {
-            parts: vec![Stream::new((), data)]
-        }
+        Ok(Content {
+            parts: vec![update.create(Stream::new((), data))?]
+        })
     }
 }
 
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.parts.len() == 1 {
-            let obj = self.parts[0].to_primitive(update)?;
-            update.create(obj)?.to_primitive(update)
+            self.parts[0].to_primitive(update)
         } else {
             self.parts.to_primitive(update)
         }
@@ -939,6 +939,22 @@ pub enum Color {
     Cmyk(Cmyk),
     Other(Vec<Primitive>),
 }
+impl From<Rgb> for Color {
+    fn from(value: Rgb) -> Self {
+        Color::Rgb(value)
+    }
+}
+impl Rgb {
+    pub fn red() -> Self {
+        Rgb { red: 1.0, green: 0.0, blue: 0.0 }
+    }
+    pub fn green() -> Self {
+        Rgb { red: 0.0, green: 1.0, blue: 0.0 }
+    }
+    pub fn blue() -> Self {
+        Rgb { red: 0.0, green: 0.0, blue: 1.0 }
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum TextMode {
@@ -959,6 +975,29 @@ pub struct Rgb {
 impl Display for Rgb {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {}", self.red, self.green, self.blue)
+    }
+}
+
+impl Object for Color {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let arr = p.as_array()?;
+        match arr {
+            [g] => Ok(Color::Gray(g.as_number()?)),
+            [r, g, b] => Ok(Color::Rgb(Rgb { red: r.as_number()?, green: g.as_number()?, blue: b.as_number()?})),
+            [c, m, y, k] => Ok(Color::Cmyk(Cmyk { cyan: c.as_number()?, magenta: m.as_number()?, yellow: y.as_number()?, key: k.as_number()? })),
+            list => Ok(Color::Other(list.into()))
+        }
+    }
+}
+impl ObjectWrite for Color {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let parts = match *self {
+            Color::Gray(g) => vec![Primitive::Number(g)],
+            Color::Rgb(Rgb { red, green, blue }) => vec![Primitive::Number(red), Primitive::Number(green), Primitive::Number(blue)],
+            Color::Cmyk(Cmyk { cyan, magenta, yellow, key }) => vec![Primitive::Number(cyan), Primitive::Number(magenta), Primitive::Number(yellow), Primitive::Number(key)],
+            Color::Other(ref list) => list.clone(),
+        };
+        Ok(Primitive::Array(parts))
     }
 }
 
@@ -991,26 +1030,26 @@ impl Display for TextDrawAdjusted {
 }
 
 /// Graphics Operator
-/// 
+///
 /// See PDF32000 A.2
 #[derive(Debug, Clone, DataSize)]
 pub enum Op {
     /// Begin a marked comtent sequence
-    /// 
+    ///
     /// Pairs with the following EndMarkedContent.
-    /// 
+    ///
     /// generated by operators `BMC` and `BDC`
     BeginMarkedContent { tag: Name, properties: Option<Primitive> },
 
     /// End a marked content sequence.
-    /// 
+    ///
     /// Pairs with the previous BeginMarkedContent.
-    /// 
+    ///
     /// generated by operator `EMC`
     EndMarkedContent,
 
     /// A marked content point.
-    /// 
+    ///
     /// generated by operators `MP` and `DP`.
     MarkedContentPoint { tag: Name, properties: Option<Primitive> },
 
@@ -1025,7 +1064,7 @@ pub enum Op {
     Stroke,
 
     /// Fill and Stroke operation
-    /// 
+    ///
     /// generated by operators `b`, `B`, `b*`, `B*`
     /// `close` indicates whether the path should be closed first
     FillAndStroke { winding: Winding },
@@ -1034,7 +1073,7 @@ pub enum Op {
     Fill { winding: Winding },
 
     /// Fill using the named shading pattern
-    /// 
+    ///
     /// operator: `sh`
     Shade { name: Name },
 
@@ -1149,6 +1188,6 @@ Gb"0F_%"1&#XD6"#B1qiGGG^V6GZ#ZkijB5'RjB4S^5I61&$Ni:Xh=4S_9KYN;c9MUZPn/h,c]oCLUmg
 EI
 "###;
         let mut lexer = Lexer::new(data);
-        assert!(inline_image(&mut lexer, &NoResolve).is_ok()); 
+        assert!(inline_image(&mut lexer, &NoResolve).is_ok());
     }
 }

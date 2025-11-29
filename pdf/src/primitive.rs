@@ -89,6 +89,12 @@ impl Primitive {
     pub fn name(name: impl Into<SmallString>) -> Primitive {
         Primitive::Name(name.into())
     }
+    pub fn is_null(&self) -> bool {
+        match self {
+            Primitive::Null => true,
+            _ => false
+        }
+    }
 }
 
 fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
@@ -216,6 +222,11 @@ impl Dictionary {
     fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         writeln!(out, "<<")?;
         for (key, val) in self.iter() {
+            match val {
+                Primitive::Null => continue,
+                Primitive::Dictionary(dict) if dict.len() == 0 => continue,
+                _ => {}
+            }
             write!(out, "{} ", key)?;
             val.serialize(out)?;
             writeln!(out)?;
@@ -304,14 +315,15 @@ impl ObjectWrite for PdfStream {
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         self.info.serialize(out)?;
+        dbg!(&self.info);
 
-        writeln!(out, "stream")?;
         match self.inner {
             StreamInner::InFile { id, .. } => {
-                Primitive::Reference(id).serialize(out)?;
+                bail!("attempted to write already written stream");
             }
             StreamInner::Pending { ref data } => {
-                self.info.serialize(out)?;
+                let info_len = self.info.get("Length").unwrap().as_usize().unwrap();
+                assert_eq!(info_len, data.len());
                 writeln!(out, "stream")?;
                 out.write_all(data)?;
                 writeln!(out, "\nendstream")?;
@@ -522,6 +534,21 @@ impl<'a> From<&'a str> for PdfString {
         PdfString { data: value.into() }
     }
 }
+impl From<String> for PdfString {
+    fn from(value: String) -> Self {
+        PdfString { data: value.into() }
+    }
+}
+impl<'a> From<&'a [u8]> for PdfString {
+    fn from(value: &'a [u8]) -> Self {
+        PdfString { data: value.into() }
+    }
+}
+impl From<Vec<u8>> for PdfString {
+    fn from(value: Vec<u8>) -> Self {
+        PdfString { data: value.into() }
+    }
+}
 
 // TODO:
 // Noticed some inconsistency here.. I think to_* and as_* should not take Resolve, and not accept
@@ -605,6 +632,12 @@ impl Primitive {
         match self {
             Primitive::Array(ref v) => Ok(v),
             p => unexpected_primitive!(Array, p.get_debug_name()),
+        }
+    }
+    pub fn as_dict(&self) -> Result<&Dictionary> {
+        match self {
+            Primitive::Dictionary(ref v) => Ok(v),
+            p => unexpected_primitive!(Dictionary, p.get_debug_name()),
         }
     }
     pub fn into_reference(self) -> Result<PlainRef> {

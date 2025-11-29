@@ -20,6 +20,15 @@ impl ObjectWrite for XObject {
         Ok(stream.into())
     }
 }
+impl XObject {
+    pub fn as_form_ref(selv: &RcRef<Self>) -> Option<Ref<FormXObject>> {
+        match *selv.data {
+            Self::Form(_) => Some(Ref::new(selv.inner)),
+            _ => None
+        }
+    }
+}
+
 
 /// A variant of XObject
 pub type PostScriptXObject = Stream<PostScriptDict>;

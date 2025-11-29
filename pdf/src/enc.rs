@@ -110,7 +110,7 @@ impl StreamFilter {
            "Crypt" => StreamFilter::Crypt,
            "RunLengthDecode" => StreamFilter::RunLengthDecode,
            ty => bail!("Unrecognized filter type {:?}", ty),
-       } 
+       }
        )
     }
 }
@@ -178,7 +178,7 @@ fn word_85([a, b, c, d, e]: [u8; 5]) -> Option<[u8; 4]> {
 
 pub fn decode_85(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity((data.len() + 4) / 5 * 4);
-    
+
     let mut stream = data.iter().cloned()
         .filter(|&b| !matches!(b, b' ' | b'\n' | b'\r' | b'\t'));
 
@@ -230,7 +230,7 @@ fn base85_chunk(c: [u8; 4]) -> [u8; 5] {
     let (n, d) = divmod(n, 85);
     let (n, c) = divmod(n, 85);
     let (a, b) = divmod(n, 85);
-    
+
     [a85(a), a85(b), a85(c), a85(d), a85(e)]
 }
 
@@ -298,22 +298,22 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     if predictor > 10 {
         let inp = decoded; // input buffer
         let rows = inp.len() / (stride+1);
-        
+
         // output buffer
         let mut out = vec![0; rows * stride];
-    
+
         // Apply inverse predictor
         let null_vec = vec![0; stride];
-        
+
         let mut in_off = 0; // offset into input buffer
-        
+
         let mut out_off = 0; // offset into output buffer
         let mut last_out_off = 0; // last offset to output buffer
-        
+
         while in_off + stride < inp.len() {
             let predictor = PredictorType::from_u8(inp[in_off])?;
             in_off += 1; // +1 because the first byte on each row is predictor
-            
+
             let row_in = &inp[in_off .. in_off + stride];
             let (prev_row, row_out) = if out_off == 0 {
                 (&null_vec[..], &mut out[out_off .. out_off+stride])
@@ -322,9 +322,9 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
                 (&prev[last_out_off ..], &mut curr[.. stride])
             };
             unfilter(predictor, n_components, prev_row, row_in, row_out);
-            
+
             last_out_off = out_off;
-            
+
             in_off += stride;
             out_off += stride;
         }
@@ -333,12 +333,18 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         Ok(decoded)
     }
 }
-fn flate_encode(data: &[u8]) -> Vec<u8> {
-    use libflate::deflate::Encoder;
-    let mut encoded = Vec::new();
-    let mut encoder = Encoder::new(&mut encoded);
-    encoder.write_all(data).unwrap();
-    encoded
+fn flate_encode(data: &[u8], params: &LZWFlateParams) -> Vec<u8> {
+    if params.predictor == 1 {
+        use libflate::zlib::Encoder;
+        let mut encoder = Encoder::new(vec![]).unwrap();
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap().0
+    } else {
+        use libflate::deflate::Encoder;
+        let mut encoder = Encoder::new(Vec::new());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap().0
+    }
 }
 
 pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
@@ -365,13 +371,14 @@ pub fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
 }
 fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     use weezl::{BitOrder, encode::Encoder};
-    if params.early_change != 0 {
-        bail!("encoding early_change != 0 is not supported");
+    let mut encoder;
+
+    if params.early_change == 0 {
+        encoder = Encoder::new(BitOrder::Msb, 9);
+    } else {
+        encoder = Encoder::with_tiff_size_switch(BitOrder::Msb, 9);
     }
-    let mut compressed = vec![];
-    Encoder::new(BitOrder::Msb, 9)
-        .into_stream(&mut compressed)
-        .encode_all(data).status?;
+    let compressed = encoder.encode(data).unwrap();
     Ok(compressed)
 }
 
@@ -479,7 +486,7 @@ pub fn encode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCIIHexDecode => Ok(encode_hex(data)),
         StreamFilter::ASCII85Decode => Ok(encode_85(data)),
         StreamFilter::LZWDecode(ref params) => lzw_encode(data, params),
-        StreamFilter::FlateDecode (ref _params) => Ok(flate_encode(data)),
+        StreamFilter::FlateDecode (ref params) => Ok(flate_encode(data, params)),
         _ => unimplemented!(),
     }
 }
@@ -499,7 +506,7 @@ pub enum PredictorType {
     Paeth = 4
 }
 
-impl PredictorType {  
+impl PredictorType {
     /// u8 -> Self. Temporary solution until Rust provides a canonical one.
     pub fn from_u8(n: u8) -> Result<PredictorType> {
         match n {

@@ -1,18 +1,20 @@
 use super::prelude::*;
 
-#[derive(DataSize, Debug)]
+#[derive(Clone, DataSize, Debug)]
 pub struct NumberTree<T> {
     pub limits: Option<(i32, i32)>,
     pub node: NumberTreeNode<T>,
 }
 
-#[derive(DataSize, Debug)]
+#[derive(Clone, DataSize, Debug)]
 pub enum NumberTreeNode<T> {
     Leaf(Vec<(i32, T)>),
     Intermediate(Vec<Ref<NumberTree<T>>>),
 }
 impl<T: Object> Object for NumberTree<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        use itertools::Itertools;
+
         let mut dict = p.resolve(resolve)?.into_dictionary()?;
 
         let limits = match dict.remove("Limits") {
@@ -85,7 +87,7 @@ impl<T: ObjectWrite> ObjectWrite for NumberTree<T> {
             NumberTreeNode::Intermediate(ref kids) => {
                 dict.insert(
                     "Kids",
-                    kids.iter().map(|r| r.get_inner().into()).collect_vec(),
+                    kids.iter().map(|r| r.get_inner().into()).collect::<Vec<_>>(),
                 );
             }
         }

@@ -161,6 +161,7 @@ impl ObjectWrite for ColorSpace {
         match *self {
             ColorSpace::DeviceCMYK => Ok(Primitive::name("DeviceCMYK")),
             ColorSpace::DeviceRGB => Ok(Primitive::name("DeviceRGB")),
+            ColorSpace::DeviceGray => Ok(Primitive::name("DeviceGray")),
             ColorSpace::Indexed(ref  base, hival, ref lookup) => {
                 let base = base.to_primitive(update)?;
                 let hival = Primitive::Integer(hival.into());

@@ -17,20 +17,7 @@ fn run() -> Result<(), PdfError> {
     let mut file = FileOptions::cached().open(&path)?;
     let mut to_update_field: Option<_> = None;
 
-    let font = Font {
-        data: FontData::TrueType(TFont {
-            base_font: Some(Name::from("Helvetica")),
-            first_char: None,
-            font_descriptor: None,
-            last_char: None,
-            widths: None,
-        }),
-        encoding: Some(pdf::encoding::Encoding::standard()),
-        name: None,
-        subtype: pdf::font::FontType::TrueType,
-        to_unicode: None,
-        _other: Default::default(),
-    };
+    let font = Font::standard("Helvetica");
     let font_name = Name::from("Helvetica");
     let font = file.create(font)?;
     let mut fonts = HashMap::new();

@@ -1,12 +1,12 @@
 use super::prelude::*;
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Clone, Debug, DataSize)]
 #[pdf(Type = "StructTreeRoot")]
 pub struct StructTreeRoot {
     #[pdf(key = "K")]
     pub children: Vec<StructElem>,
 }
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Clone, Debug, DataSize)]
 pub struct StructElem {
     #[pdf(key = "S")]
     pub struct_type: StructType,
@@ -22,7 +22,7 @@ pub struct StructElem {
     pub page: Option<Ref<Page>>,
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Clone, Debug, DataSize)]
 pub enum StructType {
     Document,
     Part,

@@ -26,9 +26,9 @@ pub enum XRef {
         stream_id: ObjNr,
         index: usize,
     },
-    
+
     Promised,
-    
+
     Invalid
 }
 
@@ -51,7 +51,6 @@ pub struct XRefTable {
     // Thought: None could also mean Free?
     entries: Vec<XRef>
 }
-
 
 impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
@@ -148,7 +147,7 @@ impl XRefTable {
             prev: None,
             w: vec![1, a_w, b_w],
         };
-        
+
         Ok(Stream::new(info, data))
     }
 }
@@ -208,6 +207,9 @@ impl XRefSection {
     }
 }
 
+fn zero_index(index: &[u32]) -> bool {
+    index.iter().all(|&n| n == 0)
+}
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "XRef")]
@@ -216,8 +218,7 @@ pub struct XRefInfo {
     #[pdf(key = "Size")]
     pub size: u32,
 
-    //
-    #[pdf(key = "Index", default = "vec![0, size]")]
+    #[pdf(key = "Index", default = "vec![0, size]", is_default=zero_index)]
     /// Array of pairs of integers for each subsection, (first object number, number of entries).
     /// Default value (assumed when None): `(0, self.size)`.
     pub index: Vec<u32>,

@@ -14,6 +14,7 @@ use crate::file::FileOptions;
 use crate::file::Log;
 use crate::file::Storage;
 use crate::file::Trailer;
+use crate::file::UpdateOptions;
 use crate::object::*;
 use crate::parser::ParseFlags;
 use crate::primitive::Dictionary;
@@ -31,6 +32,7 @@ pub struct PageBuilder {
     pub metadata: Option<Primitive>,
     pub lgi: Option<Primitive>,
     pub vp: Option<Primitive>,
+    pub aa: Option<AdditionalPageActions>,
     pub other: Dictionary,
 }
 impl PageBuilder {
@@ -56,10 +58,11 @@ impl PageBuilder {
             metadata: page.metadata.clone(),
             lgi: page.lgi.clone(),
             vp: page.vp.clone(),
+            aa: page.aa.clone(),
             other: page.other.clone(),
         })
     }
-    pub fn clone_page(page: &Page, cloner: &mut impl Cloner) -> Result<PageBuilder> {
+    pub fn clone_page<'p, 'c>(page: &'p Page, cloner: &'c mut impl Cloner) -> Result<PageBuilder> {
         let old_resources = &**page.resources()?.data();
 
         let mut resources = Resources::default();
@@ -88,6 +91,7 @@ impl PageBuilder {
             metadata: page.metadata.deep_clone(cloner)?,
             lgi: page.lgi.deep_clone(cloner)?,
             vp: page.vp.deep_clone(cloner)?,
+            aa: page.aa.deep_clone(cloner)?,
             other: page.other.deep_clone(cloner)?,
         })
     }
@@ -132,7 +136,7 @@ impl CatalogBuilder {
         )?;
 
         for (page, promise) in self.pages.into_iter().zip(kids_promise) {
-            let content = Content::from_ops(page.ops);
+            let content = Content::from_ops(page.ops, update)?;
             let resources = update.create(page.resources)?.into();
             let page = Page {
                 parent: tree.clone(),
@@ -146,6 +150,7 @@ impl CatalogBuilder {
                 lgi: page.lgi,
                 vp: page.vp,
                 other: page.other,
+                aa: page.aa,
                 annotations: Default::default(),
             };
             update.fulfill(promise, PagesNode::Leaf(page))?;
@@ -161,6 +166,7 @@ impl CatalogBuilder {
             struct_tree_root: None,
             forms: None,
             page_labels: None,
+            open_action: None
         })
     }
 }
@@ -377,8 +383,8 @@ impl<'a, R, U: Updater> Updater for Importer<'a, R, U> {
     fn promise<T: Object>(&mut self) -> PromisedRef<T> {
         self.updater.promise()
     }
-    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
-        self.updater.update(old, obj)
+    fn update_with<T: ObjectWrite>(&mut self, old: PlainRef, obj: T, options: UpdateOptions) -> Result<RcRef<T>> {
+        self.updater.update_with(old, obj, options)
     }
 }
 impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
