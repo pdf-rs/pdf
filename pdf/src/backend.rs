@@ -62,14 +62,14 @@ pub trait Backend: Sized {
 
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
 
-        let highest_id = t!(trailer.get("Size")
+        let size = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
             .as_u32());
 
-        if highest_id > MAX_ID {
+        if size > MAX_ID {
             bail!("too many objects");
         }
-        let mut refs = XRefTable::new(highest_id as ObjNr);
+        let mut refs = XRefTable::new(size as ObjNr);
         for section in xref_sections {
             refs.add_entries_from(section)?;
         }
@@ -106,6 +106,8 @@ pub trait Backend: Sized {
                 }
             };
         }
+        refs.sanitize();
+
         Ok((refs, trailer))
     }
 

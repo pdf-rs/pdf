@@ -1,4 +1,5 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
+use std::any::type_name;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -73,6 +74,7 @@ pub struct Storage<B, OC, SC, L> {
 
     // objects that differ from the backend
     changes:    HashMap<ObjNr, (&'static str, Primitive, GenNr)>,
+    promises:   HashMap<ObjNr, &'static str>,
 
     refs:       XRefTable,
 
@@ -98,6 +100,7 @@ where
             cache: object_cache,
             stream_cache,
             changes: HashMap::new(),
+            promises: HashMap::new(),
             refs: XRefTable::new(0),
             decoder: None,
             options: ParseOptions::strict(),
@@ -134,6 +137,7 @@ where
             cache: object_cache,
             stream_cache,
             changes: HashMap::new(),
+            promises: HashMap::new(),
             decoder: None,
             options,
             log
@@ -418,6 +422,7 @@ where
         let id = self.refs.len() as u64;
 
         self.refs.push(XRef::Promised);
+        self.promises.insert(id, type_name::<T>());
 
         PromisedRef {
             inner: PlainRef {
@@ -429,7 +434,9 @@ where
     }
 
     fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
-        self.update(promise.inner, obj)
+        let r = self.update(promise.inner, obj)?;
+        self.promises.remove(&promise.inner.id);
+        Ok(r)
     }
 }
 
@@ -446,6 +453,13 @@ where
     L: Log
 {
     pub fn save(&mut self, trailer: &mut Trailer) -> Result<()> {
+        if self.promises.len() > 0 {
+            for (id, name) in self.promises.iter() {
+                eprintln!("Promise unfulfilled: id={id} type={name}");
+                return Err(PdfError::Invalid);
+            }
+        }
+
         // writing the trailer generates another id for the info dictionary
         trailer.size = (self.refs.len() + 2) as _;
         let trailer_dict = trailer.to_dict(self)?;
@@ -461,7 +475,7 @@ where
             writeln!(self.backend, "{id} {gen} obj")?;
             primitive.serialize(&mut self.backend)?;
             if !self.backend.last_byte().map(|b| b.is_ascii_whitespace()).unwrap_or(false) {
-                self.backend.write_all(b"\n");
+                self.backend.write_all(b"\n")?;
             }
             writeln!(self.backend, "endobj")?;
         }

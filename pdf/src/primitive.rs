@@ -315,7 +315,6 @@ impl ObjectWrite for PdfStream {
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         self.info.serialize(out)?;
-        dbg!(&self.info);
 
         match self.inner {
             StreamInner::InFile { id, .. } => {

@@ -89,7 +89,6 @@ impl<I: Object> Stream<I> {
     pub fn new_compressed(info: I, data: &[u8], encoding: StreamFilter) -> Result<Self> {
         let raw_len = data.len();
         let data = encode(data, &encoding)?;
-        dbg!(data.len(), raw_len);
         Ok(Self::new_with_filters(info, data, vec![encoding]))
     }
 

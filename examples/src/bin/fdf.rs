@@ -8,7 +8,6 @@ fn main() {
     let mut lexer = Lexer::new(&data);
 
     while let Ok((re, prim)) = parse_indirect_object(&mut lexer, &NoResolve, None, ParseFlags::ANY) {
-        dbg!(&re, &prim);
         let root = Root::from_primitive(prim, &NoResolve).unwrap();
         for f in root.fdf.fields {
             if let Some(val) = f.value {

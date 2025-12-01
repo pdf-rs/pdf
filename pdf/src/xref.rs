@@ -54,9 +54,9 @@ pub struct XRefTable {
 
 impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
-        let mut entries = Vec::new();
-        entries.resize(num_objects as usize, XRef::Invalid);
+        let mut entries = Vec::with_capacity(num_objects as usize);
         entries.push(XRef::Free { next_obj_nr: 0, gen_nr: 0xffff });
+        entries.resize(num_objects as usize, XRef::Invalid);
         XRefTable {
             entries,
         }
@@ -122,6 +122,23 @@ impl XRefTable {
             }
         }
         Ok(())
+    }
+
+    pub fn sanitize(&mut self) {
+        let mut last_free = 0;
+        for (i, entry) in self.entries.iter_mut().enumerate().rev() {
+            match *entry {
+                XRef::Free { next_obj_nr, gen_nr } => {
+                    *entry = XRef::Free { next_obj_nr: last_free, gen_nr: 0xffff };
+                    last_free = i as _;
+                }
+                XRef::Invalid => {
+                    *entry = XRef::Free { next_obj_nr: last_free, gen_nr: 0xffff };
+                    last_free = i as _;
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn write_stream(&self, size: usize) -> Result<Stream<XRefInfo>> {
