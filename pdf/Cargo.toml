@@ -1,6 +1,6 @@
 [package]
 name = "pdf"
-version = "0.9.0"
+version = "0.9.1"
 authors = [
     "Erlend Langseth <3rlendhl@gmail.com>",
     "Sebastian Köln <s3bk@protonmail.com>",
