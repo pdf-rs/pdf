@@ -113,7 +113,7 @@ pub struct Page {
     pub trim_box: Option<Rectangle>,
 
     #[pdf(key = "Contents")]
-    pub contents: Option<Content>,
+    pub contents: Option<RcRef<Content>>,
 
     #[pdf(key = "Rotate", default = "0")]
     pub rotate: i32,

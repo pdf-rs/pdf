@@ -515,6 +515,12 @@ impl PdfString {
         }
     }
 }
+
+impl<'a> From<&'a [u8]> for PdfString {
+    fn from(value: &'a [u8]) -> Self {
+        PdfString { data: value.into() }
+    }
+}
 impl<'a> From<&'a str> for PdfString {
     fn from(value: &'a str) -> Self {
         PdfString { data: value.into() }
