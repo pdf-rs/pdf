@@ -14,17 +14,17 @@ use crate::enc::StreamFilter;
 use crate as pdf;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DeepClone, DataSize)]
 pub struct Content {
     /// The raw content stream parts. usually one, but could be any number.
-    pub parts: Vec<Stream<()>>,
+    pub parts: Vec<RcRef<Stream<()>>>,
 }
 
 impl Content {
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
         let mut data = vec![];
         for part in self.parts.iter() {
-            data.extend_from_slice(&t!(part.data(resolve)));
+            data.extend_from_slice(&t!(part.data().data(resolve)));
         }
         parse_ops(&data, resolve)
     }
@@ -495,19 +495,20 @@ impl Object for Content {
     /// Convert primitive to Self
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         type ContentStream = Stream<()>;
-        let mut parts: Vec<ContentStream> = vec![];
+        let mut parts: Vec<RcRef<ContentStream>> = vec![];
 
         match p {
             Primitive::Array(arr) => {
                 for p in arr {
-                    let part = t!(ContentStream::from_primitive(p, resolve));
+                    let part = t!(RcRef::from_primitive(p, resolve));
                     parts.push(part);
                 }
             }
-            Primitive::Reference(r) => return Self::from_primitive(t!(resolve.resolve(r)), resolve),
+            Primitive::Reference(r) => {
+                parts.push(RcRef::from_primitive(p, resolve)?);
+            }
             p => {
-                let part = t!(ContentStream::from_primitive(p, resolve));
-                parts.push(part);
+                return Err(PdfError::UnexpectedPrimitive { expected: "list of references or reference", found: p.get_debug_name() });
             }
         }
 
@@ -742,10 +743,10 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
 }
 
 impl Content {
-    pub fn from_ops(operations: Vec<Op>) -> Result<Self> {
+    pub fn from_ops(operations: Vec<Op>, update: &mut impl Updater) -> Result<Self> {
         let data = serialize_ops(&operations).unwrap();
         Ok(Content {
-            parts: vec![Stream::new((), &data)?]
+            parts: vec![update.create(Stream::new((), data))?]
         })
     }
 }
@@ -753,11 +754,7 @@ impl Content {
 impl ObjectWrite for Content {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         if self.parts.len() == 1 {
-            let obj = self.parts[0].to_primitive(update)?;
-            match obj {
-                Primitive::Reference(_) => Ok(obj),
-                _ => update.create(obj)?.to_primitive(update)
-            }
+            self.parts[0].to_primitive(update)
         } else {
             self.parts.to_primitive(update)
         }
@@ -942,6 +939,22 @@ pub enum Color {
     Cmyk(Cmyk),
     Other(Vec<Primitive>),
 }
+impl From<Rgb> for Color {
+    fn from(value: Rgb) -> Self {
+        Color::Rgb(value)
+    }
+}
+impl Rgb {
+    pub fn red() -> Self {
+        Rgb { red: 1.0, green: 0.0, blue: 0.0 }
+    }
+    pub fn green() -> Self {
+        Rgb { red: 0.0, green: 1.0, blue: 0.0 }
+    }
+    pub fn blue() -> Self {
+        Rgb { red: 0.0, green: 0.0, blue: 1.0 }
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, DataSize)]
 pub enum TextMode {
@@ -962,6 +975,29 @@ pub struct Rgb {
 impl Display for Rgb {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {}", self.red, self.green, self.blue)
+    }
+}
+
+impl Object for Color {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let arr = p.as_array()?;
+        match arr {
+            [g] => Ok(Color::Gray(g.as_number()?)),
+            [r, g, b] => Ok(Color::Rgb(Rgb { red: r.as_number()?, green: g.as_number()?, blue: b.as_number()?})),
+            [c, m, y, k] => Ok(Color::Cmyk(Cmyk { cyan: c.as_number()?, magenta: m.as_number()?, yellow: y.as_number()?, key: k.as_number()? })),
+            list => Ok(Color::Other(list.into()))
+        }
+    }
+}
+impl ObjectWrite for Color {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let parts = match *self {
+            Color::Gray(g) => vec![Primitive::Number(g)],
+            Color::Rgb(Rgb { red, green, blue }) => vec![Primitive::Number(red), Primitive::Number(green), Primitive::Number(blue)],
+            Color::Cmyk(Cmyk { cyan, magenta, yellow, key }) => vec![Primitive::Number(cyan), Primitive::Number(magenta), Primitive::Number(yellow), Primitive::Number(key)],
+            Color::Other(ref list) => list.clone(),
+        };
+        Ok(Primitive::Array(parts))
     }
 }
 

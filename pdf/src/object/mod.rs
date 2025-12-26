@@ -12,6 +12,7 @@ pub use self::function::*;
 pub use self::stream::*;
 pub use self::types::*;
 pub use crate::file::PromisedRef;
+use crate::file::UpdateOptions;
 use crate::parser::ParseFlags;
 
 use crate::enc::*;
@@ -19,8 +20,8 @@ use crate::error::*;
 use crate::primitive::*;
 
 use datasize::DataSize;
-use itertools::Itertools;
 use once_cell::sync::OnceCell;
+use std::any::type_name;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
@@ -123,7 +124,12 @@ pub trait DeepClone: Sized + Sync + Send + 'static {
 
 pub trait Updater {
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>>;
-    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>>;
+    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
+        self.update_with(old, obj, UpdateOptions::default())
+    }
+    fn update_with<T: ObjectWrite>(&mut self, old: PlainRef, obj: T, options: UpdateOptions) -> Result<RcRef<T>>;
+    fn promise<T: Object>(&mut self) -> PromisedRef<T>;
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>>;
     fn update_ref<T: ObjectWrite>(&mut self, old: &RcRef<T>, obj: T) -> Result<RcRef<T>> {
         self.update(old.get_ref().inner, obj)
     }
@@ -136,7 +142,7 @@ impl Updater for NoUpdate {
     fn create<T: ObjectWrite>(&mut self, _obj: T) -> Result<RcRef<T>> {
         panic!()
     }
-    fn update<T: ObjectWrite>(&mut self, _old: PlainRef, _obj: T) -> Result<RcRef<T>> {
+    fn update_with<T: ObjectWrite>(&mut self, _old: PlainRef, _obj: T, _options: UpdateOptions) -> Result<RcRef<T>> {
         panic!()
     }
     fn promise<T: Object>(&mut self) -> PromisedRef<T> {
@@ -370,6 +376,11 @@ impl<T> MaybeRef<T> {
         }
     }
 }
+impl<T: Clone> MaybeRef<T> {
+    pub fn owned(&self) -> T {
+        (**self.data()).clone()
+    }
+}
 impl<T: Object + DataSize> Object for MaybeRef<T> {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         Ok(match p {
@@ -516,6 +527,12 @@ impl<T: Object + DataSize> Lazy<T> {
         Ok(Lazy { primitive, _marker: PhantomData, cache: OnceCell::new() })
     }
 }
+impl<T: ObjectWrite> Lazy<T> {
+    pub fn new(data: T, update: &mut impl Updater) -> Result<Self> {
+        let primitive = data.to_primitive(update)?;
+        Ok(Lazy { primitive, cache: OnceCell::new(), _marker: PhantomData })
+    }
+}
 impl<T: Object> Object for Lazy<T> {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
         Ok(Self {
@@ -584,8 +601,8 @@ impl ObjectWrite for u32 {
 impl Object for usize {
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
-            Primitive::Reference(id) => Ok(r.resolve(id)?.as_u32()? as usize),
-            p => Ok(p.as_u32()? as usize),
+            Primitive::Reference(id) => Ok(r.resolve(id)?.as_usize()?),
+            p => Ok(p.as_usize()?),
         }
     }
 }
@@ -721,7 +738,7 @@ impl DeepClone for Primitive {
                 parts
                     .into_iter()
                     .map(|p| p.deep_clone(cloner))
-                    .try_collect()?,
+                    .collect::<Result<Vec<_>, _>>()?,
             )),
             Primitive::Boolean(b) => Ok(Primitive::Boolean(b)),
             Primitive::Dictionary(ref dict) => Ok(Primitive::Dictionary(dict.deep_clone(cloner)?)),
@@ -846,6 +863,35 @@ impl<T: Trace> Trace for Box<T> {
     }
 }
 
+#[derive(Debug, Clone, DataSize)]
+pub enum Either<T, U> {
+    Left(T),
+    Right(U)
+}
+impl<T, U> Object for Either<T, U>
+where
+    T: Object,
+    U: Object
+{
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        match T::from_primitive(p.clone(), resolve) {
+            Ok(left) => Ok(Either::Left(left)),
+            Err(left_e) => match U::from_primitive(p, resolve) {
+                Ok(right) => Ok(Either::Right(right)),
+                Err(right_e) => Err(PdfError::Either { left_t: type_name::<T>(), left_e: left_e.into(), right_t: type_name::<U>(), right_e: right_e.into() })
+            }
+        }
+    }
+}
+impl<T, U> ObjectWrite for Either<T, U> where T: ObjectWrite, U: ObjectWrite {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            Either::Left(left) => left.to_primitive(update),
+            Either::Right(right) => right.to_primitive(update)
+        }
+    }
+}
+
 impl Object for () {
     fn from_primitive(_p: Primitive, _resolve: &impl Resolve) -> Result<Self> {
         Ok(())
@@ -938,6 +984,43 @@ pub struct Merged<A, B> {
     pub a: Option<A>,
     pub b: Option<B>,
 }
+impl<A, B> Merged<A, B> {
+    pub fn a(a: A) -> Self {
+        Merged { a: Some(a), b: None }
+    }
+    pub fn b(b: B) -> Self {
+        Merged { a: None, b: Some(b) }
+    }
+    pub fn a_and_b(a: A, b: B) -> Self {
+        Merged { a: Some(a), b: Some(b) }
+    }
+    pub fn none() -> Self {
+        Merged { a: None, b: None }
+    }
+    pub fn merged_ref_a(a: &RcRef<A>) -> Ref<Self> {
+        Ref { inner: a.inner, _marker: PhantomData }
+    }
+    pub fn merged_ref_b(b: &RcRef<B>) -> Ref<Self> {
+        Ref { inner: b.inner, _marker: PhantomData }
+    }
+}
+impl<A, B> RcRef<Merged<A, B>> {
+    pub fn ref_a(&self) -> Option<Ref<A>> {
+        if self.a.is_some() {
+            Some(Ref { inner: self.inner, _marker: PhantomData })
+        } else {
+            None
+        }
+    }
+    pub fn ref_b(&self) -> Option<Ref<B>> {
+        if self.b.is_some() {
+            Some(Ref { inner: self.inner, _marker: PhantomData })
+        } else {
+            None
+        }
+    }
+}
+
 impl<A: FromDict, B: FromDict> FromDict for Merged<A, B> {
     fn from_dict(dict: Dictionary, resolve: &impl Resolve) -> Result<Self> {
         let a = A::from_dict(dict.clone(), resolve).ok();

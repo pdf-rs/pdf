@@ -12,6 +12,7 @@ use std::ops::{
     RangeTo,
     Range,
 };
+use std::sync::Arc;
 
 pub const MAX_ID: u32 = 1_000_000;
 
@@ -58,21 +59,21 @@ pub trait Backend: Sized {
         }
 
         let mut lexer = Lexer::with_offset(t!(self.read(pos ..)), pos);
-        
+
         let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
-        
-        let highest_id = t!(trailer.get("Size")
+
+        let size = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
             .as_u32());
 
-        if highest_id > MAX_ID {
+        if size > MAX_ID {
             bail!("too many objects");
         }
-        let mut refs = XRefTable::new(highest_id as ObjNr);
+        let mut refs = XRefTable::new(size as ObjNr);
         for section in xref_sections {
             refs.add_entries_from(section)?;
         }
-        
+
         let mut prev_trailer = {
             match trailer.get("Prev") {
                 Some(p) => Some(t!(p.as_usize())),
@@ -90,11 +91,11 @@ pub trait Backend: Sized {
             let pos = t!(start_offset.checked_add(prev_xref_offset).ok_or(PdfError::Invalid));
             let mut lexer = Lexer::with_offset(t!(self.read(pos..)), pos);
             let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
-            
+
             for section in xref_sections {
                 refs.add_entries_from(section)?;
             }
-            
+
             prev_trailer = {
                 match trailer.get("Prev") {
                     Some(p) => {
@@ -105,7 +106,18 @@ pub trait Backend: Sized {
                 }
             };
         }
+        refs.sanitize();
+
         Ok((refs, trailer))
+    }
+
+    fn last_byte(&self) -> Option<u8> {
+        let n = self.len();
+        if n > 0 {
+            self.read(n-1 .. n).ok().and_then(|s| s.get(0).cloned())
+        } else {
+            None
+        }
     }
 }
 
@@ -123,6 +135,40 @@ impl<T> Backend for T where T: Deref<Target=[u8]> { //+ DerefMut<Target=[u8]> {
     */
     fn len(&self) -> usize {
         (**self).len()
+    }
+}
+
+pub trait BackendAppend: Backend + std::io::Write {}
+impl<W: Backend + std::io::Write> BackendAppend for W {}
+
+pub struct SplitData<B, W>(pub B, pub W);
+impl<B: Backend, W: BackendAppend> Backend for SplitData<B, W> {
+    fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
+        let len_a = self.0.len();
+        let len_b = self.1.len();
+        let len = len_a + len_b;
+        let Range { start, end } = t!(range.to_range(len));
+
+        if start < len_a {
+            self.0.read(start .. end.min(len_a))
+        } else {
+            self.1.read(start - len_a .. end - len_a)
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.0.len() + self.1.len()
+    }
+}
+impl<B, W: std::io::Write> std::io::Write for SplitData<B, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.1.write(buf)
+    }
+    fn write_all(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+        self.1.write_all(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.1.flush()
     }
 }
 

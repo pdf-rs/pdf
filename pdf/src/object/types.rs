@@ -98,7 +98,7 @@ impl ObjectWrite for PageRc {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
 #[pdf(Type = "Catalog?")]
 pub struct Catalog {
     #[pdf(key = "Version")]
@@ -122,6 +122,8 @@ pub struct Catalog {
     #[pdf(key = "Outlines")]
     pub outlines: Option<Outlines>,
     // Threads: array
+    #[pdf(key = "OpenAction")]
+    pub open_action: Option<Either<Action, Dest>>,
     // OpenAction: array or dict
     // AA: dict
     // URI: dict
@@ -170,6 +172,70 @@ pub struct Resources {
 
     #[pdf(key = "Properties")]
     pub properties: HashMap<Name, MaybeRef<Dictionary>>,
+}
+
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
+pub enum ActionType {
+    GoTo,
+    Launch,
+    Thread,
+    URI,
+    Sound,
+    Movie,
+    Named,
+    JavaScript,
+    Other
+}
+
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
+#[pdf(Type="Action?")]
+pub struct Action {
+    #[pdf(key="S")]
+    pub s: ActionType,
+
+    #[pdf(key="D")]
+    pub d: Option<MaybeNamedDest>,
+
+    #[pdf(key="URI")]
+    pub uri: Option<PdfString>,
+
+    /// Adobe Acrobat requires this to be a String or a reference to a Stream
+    #[pdf(key="JS")]
+    pub js: Option<StringOrStream>,
+}
+
+impl Action {
+    pub fn new(s: ActionType) -> Self {
+        Action {
+            s,
+            d: None,
+            uri: None,
+            js: None
+        }
+    }
+}
+
+#[derive(Debug, Clone, DataSize, DeepClone)]
+pub enum StringOrStream {
+    String(PdfString),
+    Stream(MaybeRef<Stream<()>>)
+}
+impl Object for StringOrStream {
+    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+        let p = p.resolve(resolve)?;
+        match p {
+            Primitive::String(s) => Ok(StringOrStream::String(s)),
+            _ => Ok(StringOrStream::Stream(MaybeRef::from_primitive(p, resolve)?))
+        }
+    }
+}
+impl ObjectWrite for StringOrStream {
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        match self {
+            StringOrStream::String(s) => s.to_primitive(update),
+            StringOrStream::Stream(s) => s.to_primitive(update)
+        }
+    }
 }
 
 #[derive(Object, Debug, Copy, Clone, DataSize, DeepClone, ObjectWrite)]
@@ -727,7 +793,7 @@ pub struct LageLabel {
     start: Option<i32>,
 }
 
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DeepClone, DataSize)]
 pub enum DestView {
     // left, top, zoom
     XYZ {
@@ -750,7 +816,7 @@ pub enum DestView {
 }
 
 /// There is one `NameDictionary` associated with each PDF file.
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
 pub struct NameDictionary {
     #[pdf(key = "Pages")]
     pub pages: Option<NameTree<Primitive>>,
@@ -762,7 +828,7 @@ pub struct NameDictionary {
     pub ap: Option<NameTree<Primitive>>,
 
     #[pdf(key = "JavaScript")]
-    pub javascript: Option<NameTree<Primitive>>,
+    pub javascript: Option<MaybeRef<NameTree<MaybeRef<Action>>>>,
 
     #[pdf(key = "Templates")]
     pub templates: Option<NameTree<Primitive>>,

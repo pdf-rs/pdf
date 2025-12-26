@@ -1,3 +1,7 @@
+use std::collections::{BTreeMap, VecDeque};
+
+use istring::{IString, SmallString};
+
 use super::prelude::*;
 
 #[derive(Debug, DataSize, Clone, Object, ObjectWrite, DeepClone)]
@@ -106,7 +110,53 @@ impl<T: Object> Object for NameTree<T> {
 }
 
 impl<T: ObjectWrite> ObjectWrite for NameTree<T> {
-    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
-        todo!("impl ObjectWrite for NameTree")
+    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+        let mut dict = Dictionary::new();
+        if let Some(ref limits) = self.limits {
+            dict.insert("Limits", limits.to_primitive(update)?);
+        }
+        match self.node {
+            NameTreeNode::Intermediate(ref kids) => {
+                dict.insert("Kids", kids.to_primitive(update)?);
+            }
+            NameTreeNode::Leaf(ref children) => {
+                let mut list = Vec::with_capacity(children.len() * 2);
+                for (key, val) in children {
+                    list.push(Primitive::String(key.clone()));
+                    let val = val.to_primitive(update)?;
+                    match val {
+                        Primitive::Null | Primitive::Name(_) | Primitive::Number(_) | Primitive::Boolean(_) => {
+                            list.push(val);
+                        }
+                        _ => {
+                            list.push(Primitive::Reference(update.create(val)?.inner));
+                        }
+                    }
+                }
+                dict.insert("Names", list);
+            }
+        }
+        Ok(dict.into())
+    }
+}
+impl<T> NameTree<T> {
+    pub fn build_flat(mut entries: Vec<(PdfString, T)>) -> Self {
+        entries.sort_unstable_by(|a, b| a.0.data.as_slice().cmp(b.0.data.as_slice()));
+        let node = NameTreeNode::Leaf(entries);
+        NameTree { limits: None, node }
+    }
+    pub fn build_tree(mut entries: Vec<(PdfString, T)>) -> Result<Self> {
+        const IDEAL_LEVEL_SIZE: f32 = 17.;
+        let len = entries.len();
+        if len < 20 {
+            return Ok(Self::build_flat(entries));
+        }
+        let levels = (len as f32).log2() / IDEAL_LEVEL_SIZE.log2();
+        let root_levels_ln2 = levels.fract();
+        let root_levels = IDEAL_LEVEL_SIZE.powf(root_levels_ln2).ceil() as usize;
+        entries.sort_unstable_by(|a, b| a.0.data.as_slice().cmp(b.0.data.as_slice()));
+        let mut entries = VecDeque::from(entries);
+
+        unimplemented!()
     }
 }

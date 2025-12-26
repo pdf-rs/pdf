@@ -338,12 +338,18 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         Ok(decoded)
     }
 }
-fn flate_encode(data: &[u8]) -> Vec<u8> {
-    use libflate::deflate::Encoder;
-    let mut encoded = Vec::new();
-    let mut encoder = Encoder::new(&mut encoded);
-    encoder.write_all(data).unwrap();
-    encoded
+fn flate_encode(data: &[u8], params: &LZWFlateParams) -> Vec<u8> {
+    if params.predictor == 1 {
+        use libflate::zlib::Encoder;
+        let mut encoder = Encoder::new(vec![]).unwrap();
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap().0
+    } else {
+        use libflate::deflate::Encoder;
+        let mut encoder = Encoder::new(Vec::new());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap().0
+    }
 }
 
 pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
@@ -370,13 +376,14 @@ pub fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
 }
 fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     use weezl::{BitOrder, encode::Encoder};
-    if params.early_change != 0 {
-        bail!("encoding early_change != 0 is not supported");
+    let mut encoder;
+
+    if params.early_change == 0 {
+        encoder = Encoder::new(BitOrder::Msb, 9);
+    } else {
+        encoder = Encoder::with_tiff_size_switch(BitOrder::Msb, 9);
     }
-    let mut compressed = vec![];
-    Encoder::new(BitOrder::Msb, 9)
-        .into_stream(&mut compressed)
-        .encode_all(data).status?;
+    let compressed = encoder.encode(data).unwrap();
     Ok(compressed)
 }
 
@@ -484,7 +491,7 @@ pub fn encode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCIIHexDecode => Ok(encode_hex(data)),
         StreamFilter::ASCII85Decode => Ok(encode_85(data)),
         StreamFilter::LZWDecode(ref params) => lzw_encode(data, params),
-        StreamFilter::FlateDecode (ref _params) => Ok(flate_encode(data)),
+        StreamFilter::FlateDecode (ref params) => Ok(flate_encode(data, params)),
         _ => unimplemented!(),
     }
 }

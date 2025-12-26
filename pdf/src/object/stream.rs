@@ -10,6 +10,8 @@ use crate::enc::{StreamFilter, decode};
 use std::borrow::Cow;
 use std::ops::{Deref, Range};
 use std::fmt;
+use std::os::unix::raw;
+use std::str::EncodeUtf16;
 
 #[derive(Clone)]
 pub (crate) enum StreamData {
@@ -17,6 +19,20 @@ pub (crate) enum StreamData {
     Original(Range<usize>, PlainRef),
 }
 datasize::non_dynamic_const_heap_size!(StreamData, std::mem::size_of::<StreamData>());
+
+/// encode text as PDFDocEncoding or UTF16BE
+pub fn encode_text(s: &str) -> Vec<u8> {
+    if s.chars().all(|c| (32..127).contains(&(c as u32))) {
+        s.as_bytes().into()
+    } else {
+        let mut buf = Vec::with_capacity(2 * s.len() + 2);
+        buf.extend_from_slice(&(0xFE_FFu16.to_be_bytes()));
+        for cp in s.encode_utf16() {
+            buf.extend_from_slice(&cp.to_be_bytes());
+        }
+        buf
+    }
+}
 
 /// Simple Stream object with only some additional entries from the stream dict (I).
 #[derive(Clone, DataSize)]
@@ -65,6 +81,12 @@ impl<I: Object> Stream<I> {
             },
             inner_data: StreamData::Generated(data.into()),
         }
+    }
+
+    pub fn new_compressed(info: I, data: &[u8], encoding: StreamFilter) -> Result<Self> {
+        let raw_len = data.len();
+        let data = encode(data, &encoding)?;
+        Ok(Self::new_with_filters(info, data, vec![encoding]))
     }
 
     pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {

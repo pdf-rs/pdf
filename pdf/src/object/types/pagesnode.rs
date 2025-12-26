@@ -2,7 +2,7 @@ use super::page::Page;
 use super::prelude::*;
 
 /// Node in a page tree - type is either `Page` or `PageTree`
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DeepClone, DataSize)]
 pub enum PagesNode {
     Tree(PageTree),
     Leaf(Page),
@@ -30,7 +30,7 @@ impl ObjectWrite for PagesNode {
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Default, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Default, Clone, DeepClone, DataSize)]
 #[pdf(Type = "Pages?")]
 pub struct PageTree {
     #[pdf(key = "Parent")]

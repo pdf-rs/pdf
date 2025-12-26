@@ -14,7 +14,7 @@ use pdf::primitive::PdfString;
 fn main() -> Result<(), PdfError> {
     let path = PathBuf::from(env::args_os().nth(1).expect("no file given"));
 
-    let builder = PdfBuilder::new(FileOptions::cached());
+    let mut builder = PdfBuilder::new(FileOptions::cached());
 
     let mut pages = Vec::new();
 
@@ -33,7 +33,7 @@ fn main() -> Result<(), PdfError> {
         },
         Op::Close,
         Op::Stroke,
-    ])?;
+    ], &mut builder)?;
     let mut new_page = PageBuilder::from_content(content, &NoResolve)?;
     new_page.media_box = Some(pdf::object::Rectangle {
         left: 0.0,

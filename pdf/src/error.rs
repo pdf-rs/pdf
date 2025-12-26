@@ -223,6 +223,9 @@ pub enum PdfError {
 
     #[snafu(display("Invalid"))]
     Invalid,
+
+    #[snafu(display("Could not parse as {} because of {}, or as {} because of {}", left_t, left_e, right_t, right_e))]
+    Either { left_t: &'static str, left_e: Box<PdfError>, right_t: &'static str, right_e: Box<PdfError> }
 }
 impl PdfError {
     pub fn is_eof(&self) -> bool {
@@ -305,7 +308,7 @@ macro_rules! t {
             Ok(v) => v,
             Err(e) => {
                 let context = $crate::error::Context(vec![ $( (stringify!($c), format!("{:?}", $c) ) ),* ]);
-                return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), context, source: e.into() })
+                return Err($crate::PdfError::Try { file: file!(), line: line!(), column: column!(), context, source: Box::new(PdfError::from(e)) })
             }
         }
     };

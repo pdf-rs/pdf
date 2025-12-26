@@ -50,6 +50,24 @@ pub struct Font {
     /// other keys not mapped in other places. May change over time without notice, and adding things probably will break things. So don't expect this to be part of the stable API
     pub _other: Dictionary,
 }
+impl Font {
+    pub fn standard(name: &str) -> Self {
+        Font {
+            data: FontData::TrueType(TFont {
+                base_font: Some(Name::from(name)),
+                first_char: None,
+                font_descriptor: None,
+                last_char: None,
+                widths: None,
+            }),
+            encoding: Some(pdf::encoding::Encoding::standard()),
+            name: None,
+            subtype: pdf::font::FontType::TrueType,
+            to_unicode: None,
+            _other: Default::default(),
+        }
+    }
+}
 
 #[derive(Debug, DataSize, DeepClone)]
 pub enum FontData {

@@ -52,12 +52,11 @@ pub struct XRefTable {
     entries: Vec<XRef>
 }
 
-
 impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
-        let mut entries = Vec::new();
-        entries.resize(num_objects as usize, XRef::Invalid);
+        let mut entries = Vec::with_capacity(num_objects as usize);
         entries.push(XRef::Free { next_obj_nr: 0, gen_nr: 0xffff });
+        entries.resize(num_objects as usize, XRef::Invalid);
         XRefTable {
             entries,
         }
@@ -123,6 +122,23 @@ impl XRefTable {
             }
         }
         Ok(())
+    }
+
+    pub fn sanitize(&mut self) {
+        let mut last_free = 0;
+        for (i, entry) in self.entries.iter_mut().enumerate().rev() {
+            match *entry {
+                XRef::Free { next_obj_nr, gen_nr } => {
+                    *entry = XRef::Free { next_obj_nr: last_free, gen_nr: 0xffff };
+                    last_free = i as _;
+                }
+                XRef::Invalid => {
+                    *entry = XRef::Free { next_obj_nr: last_free, gen_nr: 0xffff };
+                    last_free = i as _;
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn write_stream(&self, size: usize) -> Result<Stream<XRefInfo>> {
@@ -208,6 +224,9 @@ impl XRefSection {
     }
 }
 
+fn zero_index(index: &[u32]) -> bool {
+    index.iter().all(|&n| n == 0)
+}
 
 #[derive(Object, ObjectWrite, Debug, DataSize)]
 #[pdf(Type = "XRef")]
@@ -216,8 +235,7 @@ pub struct XRefInfo {
     #[pdf(key = "Size")]
     pub size: u32,
 
-    //
-    #[pdf(key = "Index", default = "vec![0, size]")]
+    #[pdf(key = "Index", default = "vec![0, size]", is_default=zero_index)]
     /// Array of pairs of integers for each subsection, (first object number, number of entries).
     /// Default value (assumed when None): `(0, self.size)`.
     pub index: Vec<u32>,

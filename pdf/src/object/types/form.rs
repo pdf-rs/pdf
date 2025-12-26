@@ -1,3 +1,7 @@
+use bitflags::bitflags;
+
+use crate::content::Color;
+
 use super::prelude::*;
 
 #[derive(Object, Debug, DataSize, DeepClone, ObjectWrite, Clone, Default)]
@@ -16,7 +20,7 @@ pub struct FormDict {
     pub bbox: Rectangle,
 
     #[pdf(key = "Matrix")]
-    pub matrix: Option<Primitive>,
+    pub matrix: Option<Matrix>,
 
     #[pdf(key = "Resources")]
     pub resources: Option<MaybeRef<Resources>>,
@@ -46,7 +50,7 @@ pub struct FormDict {
     pub other: Dictionary,
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, Default, DataSize)]
 pub struct InteractiveFormDictionary {
     #[pdf(key = "Fields")]
     pub fields: Vec<RcRef<FieldDictionary>>,
@@ -182,8 +186,14 @@ pub struct Annot {
     #[pdf(key = "F", default = "0")]
     pub annot_flags: u32,
 
+    #[pdf(key = "A")]
+    pub action: Option<MaybeRef<Action>>,
+
     #[pdf(key = "AP")]
     pub appearance_streams: Option<MaybeRef<AppearanceStreams>>,
+
+    #[pdf(key = "MK")]
+    pub appearance_characteristics: Option<MaybeRef<AppearanceCharacteristic>>,
 
     #[pdf(key = "AS")]
     pub appearance_state: Option<Name>,
@@ -200,8 +210,52 @@ pub struct Annot {
     #[pdf(key = "L")]
     pub line: Option<Vec<f32>>,
 
+    #[pdf(key = "Parent")]
+    pub parent: Option<PlainRef>,
+
+    #[pdf(key = "H")]
+    pub highlighting_mode: Option<HighlightingMode>,
+
     #[pdf(other)]
     pub other: Dictionary,
+}
+
+#[derive(Object, ObjectWrite, Debug, DataSize, Clone, DeepClone)]
+pub enum HighlightingMode {
+    #[pdf(key = "N")]
+    None,
+    #[pdf(key = "I")]
+    Invert,
+    #[pdf(key = "O")]
+    Outline,
+    #[pdf(key = "P")]
+    Push,
+    #[pdf(key = "T")]
+    Toggle,
+}
+impl Annot {
+    pub fn new(subtype: Name) -> Self {
+        Annot {
+            subtype,
+            rect: None,
+            contents: None,
+            page: None,
+            annotation_name: None,
+            date: None,
+            action: None,
+            annot_flags: 0,
+            appearance_streams: None,
+            appearance_state: None,
+            appearance_characteristics: None,
+            border: None,
+            color: None,
+            ink_list: None,
+            line: None,
+            highlighting_mode: None,
+            parent: None,
+            other: Default::default(),
+        }
+    }
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone)]
@@ -233,6 +287,9 @@ pub struct FieldDictionary {
     #[pdf(key = "V")]
     pub value: Primitive,
 
+    #[pdf(key = "DA")]
+    pub default_appearance: Option<PdfString>,
+
     #[pdf(key = "DV")]
     pub default_value: Primitive,
 
@@ -255,21 +312,66 @@ pub struct FieldDictionary {
     pub other: Dictionary,
 }
 
+bitflags! {
+    // bit positions in the PDF reference are 1-indexed
+    pub struct TextFieldFlags: u32 {
+        const READ_ONLY = 1<<0;
+        const REQUIRED = 1<<1;
+        const NO_EXPORT = 1<<2;
+        const MULTILINE = 1<<12;
+        const FILE_SELECT = 1<<20;
+        const DO_NOT_SPELL_CHECK = 1<<22;
+        const DO_NOT_SCROLL = 1<<23;
+        const COMB = 1<<24;
+        const RICHTEXT = 1<<25;
+    }
+    pub struct ButtonFieldFlags: u32 {
+        const NO_TOGGLE_TO_OFF = 1<<14;
+        const RADIO = 1<<15;
+        const PUSHBUTTON = 1<<16;
+        const RADIOS_IN_UNISON = 1<<25;
+    }
+}
+
+impl FieldDictionary {
+    pub fn new(typ: FieldType) -> Self {
+        FieldDictionary {
+            typ: Some(typ),
+            parent: None,
+            kids: vec![],
+            name: None,
+            alt_name: None,
+            mapping_name: None,
+            flags: 0,
+            sig_flags: 0,
+            value: Primitive::Null,
+            default_appearance: None,
+            default_value: Primitive::Null,
+            default_resources: None,
+            actions: None,
+            rect: None,
+            max_len: None,
+            subtype: None,
+            other: Default::default(),
+        }
+    }
+}
+
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone, DeepClone)]
 pub struct AppearanceStreams {
     #[pdf(key = "N")]
-    pub normal: Ref<AppearanceStreamEntry>,
+    pub normal: MaybeRef<AppearanceStreamEntry>,
 
     #[pdf(key = "R")]
-    pub rollover: Option<Ref<AppearanceStreamEntry>>,
+    pub rollover: Option<MaybeRef<AppearanceStreamEntry>>,
 
     #[pdf(key = "D")]
-    pub down: Option<Ref<AppearanceStreamEntry>>,
+    pub down: Option<MaybeRef<AppearanceStreamEntry>>,
 }
 
 #[derive(Clone, Debug, DeepClone)]
 pub enum AppearanceStreamEntry {
-    Single(FormXObject),
+    Single(MaybeRef<FormXObject>),
     Dict(HashMap<Name, AppearanceStreamEntry>),
 }
 impl Object for AppearanceStreamEntry {
@@ -305,4 +407,31 @@ impl DataSize for AppearanceStreamEntry {
             AppearanceStreamEntry::Single(s) => s.estimate_heap_size(),
         }
     }
+}
+#[derive(Object, ObjectWrite, Debug, DataSize, Clone, Default)]
+
+pub struct AppearanceCharacteristic {
+    #[pdf(key = "R", default = "0")]
+    pub rotation: u32,
+
+    #[pdf(key = "BC")]
+    pub border_color: Option<Color>,
+
+    #[pdf(key = "BG")]
+    pub background_color: Option<Color>,
+
+    #[pdf(key = "CA")]
+    pub caption: Option<PdfString>,
+
+    #[pdf(key = "RC")]
+    pub rollover_caption: Option<PdfString>,
+
+    #[pdf(key = "AC")]
+    pub alternate_caption: Option<PdfString>,
+
+    #[pdf(key = "TP")]
+    pub text_position: Option<i32>,
+
+    #[pdf(key = "I")]
+    pub icon: Option<Ref<FormXObject>>,
 }

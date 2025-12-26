@@ -2,6 +2,7 @@
 name = "pdf-examples"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,6 +11,9 @@ pdf = { path = "../pdf" }
 datasize = "0.2.13"
 clap = { version = "*", features = ["derive"] }
 image = "*"
+uuid = { version = "*", features = ["v4"] }
+qrcodegen = "*"
+pdf_derive = { path = "../pdf_derive" }
 
 [[bin]]
 name = "extract_page"

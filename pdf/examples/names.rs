@@ -46,10 +46,13 @@ fn walk_outline(
                 _ => unimplemented!("invalid dest"),
             }
         }
-        if let Some(Action::Goto(MaybeNamedDest::Direct(Dest {
-            page: Some(page), ..
-        }))) = node.action
-        {
+        if let Some(Action {
+            s: ActionType::GoTo,
+            d: Some(MaybeNamedDest::Direct(Dest {
+                page: Some(page), ..
+            })),
+            ..
+        }) = node.action {
             let page_nr = page_map(page.get_inner());
             println!("{}action -> page nr. {:?}", indent, page_nr);
         }

@@ -1,12 +1,12 @@
 use super::prelude::*;
 
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DeepClone, DataSize)]
 pub enum MaybeNamedDest {
     Named(PdfString),
     Direct(Dest),
 }
 
-#[derive(Debug, Clone, DataSize)]
+#[derive(Debug, Clone, DeepClone, DataSize)]
 pub struct Dest {
     pub page: Option<Ref<Page>>,
     pub view: DestView,

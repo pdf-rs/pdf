@@ -133,6 +133,7 @@ pub fn deepclone(input: TokenStream) -> TokenStream {
 struct FieldAttrs {
     key: Option<LitStr>,
     default: Option<LitStr>,
+    is_default: Option<Ident>,
     name: Option<LitStr>,
     skip: bool,
     other: bool,
@@ -143,6 +144,7 @@ impl FieldAttrs {
         FieldAttrs {
             key: None,
             default: None,
+            is_default: None,
             name: None,
             skip: false,
             other: false,
@@ -170,6 +172,12 @@ impl FieldAttrs {
                 if meta.path.is_ident("default") {
                     let value = meta.value()?;
                     attrs.default = Some(value.parse()?);
+                    return Ok(());
+                }
+
+                if meta.path.is_ident("is_default") {
+                    let value = meta.value()?;
+                    attrs.is_default = Some(value.parse()?);
                     return Ok(());
                 }
 
@@ -736,22 +744,28 @@ fn impl_objectwrite_for_struct(ast: &DeriveInput, fields: &Fields) -> SynStream 
             quote!()
         } else {
             let key = attrs.key();
-            let tr = if attrs.indirect {
+
+            if let Some(ref is_default) = attrs.is_default {
                 quote! {
-                    match val {
-                       pdf::primitive::Primitive::Reference(r) => val,
-                       p => updater.create(p)?.into(),
+                    if !#is_default(&self.#field) {
+                        let p = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
+                        dict.insert(#key, p);
+                    }
+                }
+            }
+            else if let Some(ref default) = attrs.default() {
+                quote! {
+                    if self.#field != #default {
+                        let p = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
+                        dict.insert(#key, p);
                     }
                 }
             } else {
-                quote! { val }
-            };
-
-            quote! {
-                let val = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
-                if !matches!(val, pdf::primitive::Primitive::Null) {
-                    let val2 = #tr;
-                    dict.insert(#key, val2);
+                quote! {
+                    let p = pdf::object::ObjectWrite::to_primitive(&self.#field, updater)?;
+                    if !p.is_null() {
+                        dict.insert(#key, p);
+                    }
                 }
             }
         }

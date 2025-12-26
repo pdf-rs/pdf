@@ -1,4 +1,5 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
+use std::any::type_name;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -9,7 +10,7 @@ use crate as pdf;
 use crate::error::*;
 use crate::object::*;
 use crate::primitive::{Primitive, Dictionary, PdfString};
-use crate::backend::Backend;
+use crate::backend::{Backend, BackendAppend};
 use crate::any::*;
 use crate::parser::{Lexer, parse_with_lexer};
 use crate::parser::{parse_indirect_object, parse, ParseFlags};
@@ -72,7 +73,8 @@ pub struct Storage<B, OC, SC, L> {
     stream_cache: SC,
 
     // objects that differ from the backend
-    changes:    HashMap<ObjNr, (Primitive, GenNr)>,
+    changes:    HashMap<ObjNr, (&'static str, Primitive, GenNr)>,
+    promises:   HashMap<ObjNr, &'static str>,
 
     refs:       XRefTable,
 
@@ -98,6 +100,7 @@ where
             cache: object_cache,
             stream_cache,
             changes: HashMap::new(),
+            promises: HashMap::new(),
             refs: XRefTable::new(0),
             decoder: None,
             options: ParseOptions::strict(),
@@ -134,6 +137,7 @@ where
             cache: object_cache,
             stream_cache,
             changes: HashMap::new(),
+            promises: HashMap::new(),
             decoder: None,
             options,
             log
@@ -199,7 +203,7 @@ where
         let xref_offset = self.backend.locate_xref_offset().unwrap();
         let slice = self.backend.read(self.start_offset .. xref_offset).unwrap();
         let mut lexer = Lexer::with_offset(slice, 0);
-        
+
         fn skip_xref(lexer: &mut Lexer) -> Result<()> {
             while lexer.next()? != "trailer" {
 
@@ -241,10 +245,10 @@ where
     }
     fn resolve_ref(&self, r: PlainRef, flags: ParseFlags, resolve: &impl Resolve) -> Result<Primitive> {
         match self.changes.get(&r.id) {
-            Some((p, _)) => Ok((*p).clone()),
+            Some((_, p, _)) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..)), self.start_offset + pos);
+                    let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..), r), self.start_offset + pos);
                     let p = t!(parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)).1;
                     Ok(p)
                 }
@@ -309,7 +313,7 @@ where
     fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
         let key = r.get_inner();
         self.storage.log.log_get(key);
-        
+
         {
             debug!("get {key:?} as {}", std::any::type_name::<T>());
             let mut chain = self.chain.lock().unwrap();
@@ -322,7 +326,7 @@ where
             let mut chain = self.chain.lock().unwrap();
             assert_eq!(chain.pop(), Some(key));
         });
-        
+
         let res = self.storage.cache.get_or_compute(key, || {
             match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
                 Ok(obj) => Ok(AnySync::new(Shared::new(obj))),
@@ -370,13 +374,13 @@ where
         let id = self.refs.len() as u64;
         self.refs.push(XRef::Promised);
         let primitive = obj.to_primitive(self)?;
-        self.changes.insert(id, (primitive, 0));
+        self.changes.insert(id, (std::any::type_name::<T>(), primitive, 0));
         let rc = Shared::new(obj);
         let r = PlainRef { id, gen: 0 };
-        
+
         Ok(RcRef::new(r, rc))
     }
-    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
+    fn update_with<T: ObjectWrite>(&mut self, old: PlainRef, obj: T, options: UpdateOptions) -> Result<RcRef<T>> {
         use std::collections::hash_map::Entry;
 
         let r = match self.refs.get(old.id)? {
@@ -389,27 +393,37 @@ where
         let primitive = obj.to_primitive(self)?;
         match self.changes.entry(old.id) {
             Entry::Vacant(e) => {
-                e.insert((primitive, r.gen));
+                e.insert((std::any::type_name::<T>(), primitive, r.gen));
             }
-            Entry::Occupied(mut e) => match (e.get_mut(), primitive) {
-                ((Primitive::Dictionary(ref mut dict), _), Primitive::Dictionary(new)) => {
-                    dict.append(new);
-                }
-                (old, new) => {
-                    *old = (new, r.gen);
+            Entry::Occupied(mut e) => {
+                if options.merge {
+                    match (e.get_mut(), primitive) {
+                        ((_, Primitive::Dictionary(ref mut dict), _), Primitive::Dictionary(new)) => {
+                            dict.append(new);
+                        }
+                        ((old_name, old_prim, _), new_prim) => {
+                            bail!(
+                                "can't update previous type {} which is {} with data from new type {} which is {}",
+                                old_name, old_prim.get_debug_name(), std::any::type_name::<T>(), new_prim.get_debug_name()
+                            );
+                        }
+                    }
+                } else {
+                    e.insert((std::any::type_name::<T>(), primitive, r.gen));
                 }
             }
         }
         let rc = Shared::new(obj);
-        
+
         Ok(RcRef::new(r, rc))
     }
 
     fn promise<T: Object>(&mut self) -> PromisedRef<T> {
         let id = self.refs.len() as u64;
-        
+
         self.refs.push(XRef::Promised);
-        
+        self.promises.insert(id, type_name::<T>());
+
         PromisedRef {
             inner: PlainRef {
                 id,
@@ -418,34 +432,52 @@ where
             _marker:    PhantomData
         }
     }
-    
+
     fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
-        self.update(promise.inner, obj)
+        let r = self.update(promise.inner, obj)?;
+        self.promises.remove(&promise.inner.id);
+        Ok(r)
     }
 }
 
-impl<OC, SC, L> Storage<Vec<u8>, OC, SC, L>
+#[derive(Default)]
+pub struct UpdateOptions {
+    pub merge: bool
+}
+
+impl<OC, SC, L, B> Storage<B, OC, SC, L>
 where
+    B: BackendAppend,
     OC: Cache<Result<AnySync, Arc<PdfError>>>,
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log
 {
-    pub fn save(&mut self, trailer: &mut Trailer) -> Result<&[u8]> {
+    pub fn save(&mut self, trailer: &mut Trailer) -> Result<()> {
+        if self.promises.len() > 0 {
+            for (id, name) in self.promises.iter() {
+                eprintln!("Promise unfulfilled: id={id} type={name}");
+                return Err(PdfError::Invalid);
+            }
+        }
+
         // writing the trailer generates another id for the info dictionary
         trailer.size = (self.refs.len() + 2) as _;
         let trailer_dict = trailer.to_dict(self)?;
-        
+
         let xref_promise = self.promise::<Stream<XRefInfo>>();
 
         let mut changes: Vec<_> = self.changes.iter().collect();
         changes.sort_unstable_by_key(|&(id, _)| id);
 
-        for &(&id, &(ref primitive, gen)) in changes.iter() {
+        for &(&id, &(name, ref primitive, gen)) in changes.iter() {
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: gen });
-            writeln!(self.backend, "{} {} obj", id, gen)?;
+            writeln!(self.backend, "{id} {gen} obj")?;
             primitive.serialize(&mut self.backend)?;
-            writeln!(self.backend, "\nendobj")?;
+            if !self.backend.last_byte().map(|b| b.is_ascii_whitespace()).unwrap_or(false) {
+                self.backend.write_all(b"\n")?;
+            }
+            writeln!(self.backend, "endobj")?;
         }
 
         let xref_pos = self.backend.len();
@@ -470,7 +502,7 @@ where
         self.cache.clear();
         *trailer = Trailer::from_dict(trailer_dict, &self.resolver())?;
 
-        Ok(&self.backend)
+        Ok(())
     }
 }
 
@@ -482,7 +514,7 @@ pub type StreamCache = Arc<SyncCache<PlainRef, Result<Arc<[u8]>, Arc<PdfError>>>
 pub type CachedFile<B> = File<B, ObjectCache, StreamCache, NoLog>;
 
 pub struct File<B, OC, SC, L> {
-    storage:        Storage<B, OC, SC, L>,
+    pub storage:    Storage<B, OC, SC, L>,
     pub trailer:    Trailer,
 }
 impl<B, OC, SC, L> Updater for File<B, OC, SC, L>
@@ -495,8 +527,8 @@ where
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
         self.storage.create(obj)
     }
-    fn update<T: ObjectWrite>(&mut self, old: PlainRef, obj: T) -> Result<RcRef<T>> {
-        self.storage.update(old, obj)
+    fn update_with<T: ObjectWrite>(&mut self, old: PlainRef, obj: T, options: UpdateOptions) -> Result<RcRef<T>> {
+        self.storage.update_with(old, obj, options)
     }
     fn promise<T: Object>(&mut self) -> PromisedRef<T> {
         self.storage.promise()
@@ -513,7 +545,8 @@ where
     L: Log,
 {
     pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        std::fs::write(path, self.storage.save(&mut self.trailer)?)?;
+        self.storage.save(&mut self.trailer)?;
+        std::fs::write(path, &self.storage.backend)?;
         Ok(())
     }
 }
@@ -611,7 +644,7 @@ where
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log,
 {
-    fn load_data(backend: B, password: &[u8], options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
+    pub fn load_data(backend: B, password: &[u8], options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
         let mut storage = Storage::with_cache(backend, options, object_cache, stream_cache, log)?;
         let trailer = storage.load_storage_and_trailer_password(password)?;
 

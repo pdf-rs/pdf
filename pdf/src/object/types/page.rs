@@ -60,12 +60,14 @@ impl ObjectWrite for PageRc {
 
 /// A `PagesNode::Tree` wrapped in a `RcRef`
 ///
-#[derive(Debug, Clone, DataSize)]
-pub struct PagesRc(RcRef<PagesNode>);
+#[derive(Debug, Clone, DeepClone, DataSize)]
+pub struct PagesRc {
+    inner: RcRef<PagesNode>
+}
 impl Deref for PagesRc {
     type Target = PageTree;
     fn deref(&self) -> &PageTree {
-        match *self.0 {
+        match *self.inner {
             PagesNode::Tree(ref tree) => tree,
             _ => unreachable!(),
         }
@@ -73,7 +75,7 @@ impl Deref for PagesRc {
 }
 impl PagesRc {
     pub fn create(tree: PageTree, update: &mut impl Updater) -> Result<PagesRc> {
-        Ok(PagesRc(update.create(PagesNode::Tree(tree))?))
+        Ok(PagesRc { inner: update.create(PagesNode::Tree(tree))? })
     }
 }
 impl Object for PagesRc {
@@ -84,23 +86,23 @@ impl Object for PagesRc {
                 expected: "Pages".into(),
                 found: "Page".into(),
             }),
-            PagesNode::Tree(_) => Ok(PagesRc(node)),
+            PagesNode::Tree(_) => Ok(PagesRc { inner: node }),
         }
     }
 }
 impl ObjectWrite for PagesRc {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        self.0.to_primitive(update)
+        self.inner.to_primitive(update)
     }
 }
 
-#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+#[derive(Object, ObjectWrite, Debug, Clone, DeepClone, DataSize)]
 #[pdf(Type = "Page?")]
 pub struct Page {
     #[pdf(key = "Parent")]
     pub parent: PagesRc,
 
-    #[pdf(key = "Resources", indirect)]
+    #[pdf(key = "Resources")]
     pub resources: Option<MaybeRef<Resources>>,
 
     #[pdf(key = "MediaBox")]
@@ -130,9 +132,55 @@ pub struct Page {
     #[pdf(key = "Annots")]
     pub annotations: Lazy<Vec<MaybeRef<Annot>>>,
 
+    #[pdf(key = "AA")]
+    pub aa: Option<AdditionalPageActions>,
+
     #[pdf(other)]
     pub other: Dictionary,
 }
+
+#[derive(Object, ObjectWrite, Debug, Clone, DeepClone, DataSize, Default)]
+pub struct AdditionalPageActions {
+    #[pdf(key = "O")]
+    pub open: Option<Action>,
+
+    #[pdf(key = "C")]
+    pub close: Option<Action>,
+}
+
+#[derive(Object, ObjectWrite, Debug, Clone, DeepClone, DataSize, Default)]
+pub struct AdditionalFormActions {
+    #[pdf(key = "E")]
+    pub mouse_enter: Option<Action>,
+
+    #[pdf(key = "X")]
+    pub mouse_exit: Option<Action>,
+
+    #[pdf(key = "D")]
+    pub mouse_down: Option<Action>,
+
+    #[pdf(key = "U")]
+    pub mouse_up: Option<Action>,
+
+    #[pdf(key = "Fo")]
+    pub input_focus: Option<Action>,
+
+    #[pdf(key = "Bl")]
+    pub input_blur: Option<Action>,
+
+    #[pdf(key = "PO")]
+    pub page_open: Option<Action>,
+
+    #[pdf(key = "PC")]
+    pub page_close: Option<Action>,
+
+    #[pdf(key = "PV")]
+    pub page_visible: Option<Action>,
+
+    #[pdf(key = "PI")]
+    pub page_invisible: Option<Action>,
+}
+
 fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
 where
     F: Fn(&'a PageTree) -> Option<T>,
@@ -159,6 +207,7 @@ impl Page {
             metadata: None,
             lgi: None,
             vp: None,
+            aa: None,
             other: Dictionary::new(),
             annotations: Default::default(),
         }
@@ -197,7 +246,7 @@ impl Page {
 }
 impl SubType<PagesNode> for Page {}
 
-#[derive(Object, DataSize, Debug, ObjectWrite)]
+#[derive(Object, DataSize, Clone, Debug, ObjectWrite)]
 pub struct PageLabel {
     #[pdf(key = "S")]
     pub style: Option<Counter>,
