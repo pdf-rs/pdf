@@ -64,7 +64,7 @@ impl ObjectWrite for Pattern {
             Pattern::Dict(ref d) => d.to_primitive(update),
             Pattern::Stream(ref d, ref ops) => {
                 let data = serialize_ops(ops)?;
-                let stream = Stream::new_with_filters(d.clone(), data, vec![]);
+                let stream = Stream::new_with_filters(d.clone(), &data, vec![])?;
                 stream.to_primitive(update)
             }
         }

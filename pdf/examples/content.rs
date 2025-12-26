@@ -33,7 +33,7 @@ fn main() -> Result<(), PdfError> {
         },
         Op::Close,
         Op::Stroke,
-    ]);
+    ])?;
     let mut new_page = PageBuilder::from_content(content, &NoResolve)?;
     new_page.media_box = Some(pdf::object::Rectangle {
         left: 0.0,

@@ -97,7 +97,7 @@ impl ObjectWrite for CidToGidMap {
                         .iter()
                         .flat_map(|&v| <[u8; 2]>::into_iter(v.to_be_bytes())),
                 );
-                Stream::new((), data).to_primitive(update)
+                Stream::new((), &data)?.to_primitive(update)
             }
         }
     }

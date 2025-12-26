@@ -26,9 +26,9 @@ pub enum XRef {
         stream_id: ObjNr,
         index: usize,
     },
-    
+
     Promised,
-    
+
     Invalid
 }
 
@@ -148,8 +148,8 @@ impl XRefTable {
             prev: None,
             w: vec![1, a_w, b_w],
         };
-        
-        Ok(Stream::new(info, data))
+
+        Ok(Stream::new_with_filters(info, &data, vec![])?)
     }
 }
 

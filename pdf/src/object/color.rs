@@ -91,7 +91,7 @@ impl ColorSpace {
         let arr = t!(p.into_array());
         let typ_p = t!(get_index(&arr, 0)).clone().resolve(resolve)?;
         let typ = t!(typ_p.as_name());
-        
+
         if depth == 0 {
             bail!("ColorSpace base recursion");
         }
@@ -167,7 +167,7 @@ impl ObjectWrite for ColorSpace {
                 let lookup = if lookup.len() < 100 {
                     PdfString::new((**lookup).into()).into()
                 } else {
-                    Stream::new((), lookup.clone()).to_primitive(update)?
+                    Stream::new((), &lookup)?.to_primitive(update)?
                 };
                 Ok(Primitive::Array(vec![Primitive::name("Indexed"), base, hival, lookup]))
             }

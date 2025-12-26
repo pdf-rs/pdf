@@ -7,6 +7,7 @@ use crate::error::*;
 use crate::parser::Lexer;
 use crate::enc::{StreamFilter, decode};
 
+use std::borrow::Cow;
 use std::ops::{Deref, Range};
 use std::fmt;
 
@@ -35,8 +36,12 @@ impl<I: Object> Stream<I> {
     }
 
     /// the data is not compressed. the specified filters are to be applied when compressing the data
-    pub fn new_with_filters(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
-        Stream {
+    pub fn new_with_filters(i: I, data: &[u8], filters: Vec<StreamFilter>) -> Result<Stream<I>> {
+        let mut data = Cow::Borrowed(data);
+        for f in &filters {
+            data = encode(&data, f)?.into();
+        }
+        Ok(Stream {
             info: StreamInfo {
                 filters,
                 file: None,
@@ -44,18 +49,10 @@ impl<I: Object> Stream<I> {
                 info: i
             },
             inner_data: StreamData::Generated(data.into()),
-        }
+        })
     }
-    pub fn new(i: I, data: impl Into<Arc<[u8]>>) -> Stream<I> {
-        Stream {
-            info: StreamInfo {
-                filters: Vec::new(),
-                file: None,
-                file_filters: Vec::new(),
-                info: i
-            },
-            inner_data: StreamData::Generated(data.into()),
-        }
+    pub fn new(i: I, data: &[u8]) -> Result<Stream<I>> {
+        Stream::new_with_filters(i, data, vec![StreamFilter::FlateDecode(Default::default())])
     }
     /// the data is already compressed with the specified filters
     pub fn from_compressed(i: I, data: impl Into<Arc<[u8]>>, filters: Vec<StreamFilter>) -> Stream<I> {
@@ -341,7 +338,7 @@ pub struct ObjectStream {
     offsets:    Vec<usize>,
     /// The object number of this object.
     _id:         ObjNr,
-    
+
     inner:      Stream<ObjStmInfo>
 }
 
