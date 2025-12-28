@@ -22,7 +22,7 @@ macro_rules! pdf_names {
 }
 
 use clap::Parser;
-use image::{io::Reader as ImageReader, GenericImageView};
+use image::ImageReader;
 use std::io::Cursor;
 
 #[derive(Parser, Debug)]

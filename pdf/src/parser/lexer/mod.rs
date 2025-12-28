@@ -265,7 +265,7 @@ impl<'a> Lexer<'a> {
 
     /// Moves pos to start of next line. Returns the skipped-over substring.
     #[allow(dead_code)]
-    pub fn seek_newline(&mut self) -> Substr{
+    pub fn seek_newline(&mut self) -> Substr<'_> {
         let start = self.pos;
         while self.buf[self.pos] != b'\n' 
             && self.incr_pos() { }
@@ -337,7 +337,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// for debugging
-    pub fn ctx(&self) -> Cow<str> {
+    pub fn ctx(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.buf[self.pos.saturating_sub(40)..self.buf.len().min(self.pos+40)])
     }
 

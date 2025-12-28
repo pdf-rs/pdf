@@ -66,7 +66,12 @@ fn run() -> Result<(), PdfError> {
             Primitive::Integer(0),
         ])),
         ink_list: None,
-        line: Some(vec![10., 100., 20., 200.]),
+        line: Some(Primitive::Array(vec![
+            Primitive::Number(10.),
+            Primitive::Number(100.),
+            Primitive::Number(20.),
+            Primitive::Number(200.),
+        ])),
         // creation_date: None,
         // uuid: None,
         // border_style: Some(bs),
@@ -85,10 +90,7 @@ fn run() -> Result<(), PdfError> {
             // need to update the whole page
             let mut new_page: Page = (*old_page).clone();
 
-            let lazy_annots: Lazy<Vec<MaybeRef<Annot>>> = Lazy::safe(
-                MaybeRef::Indirect(old_file.create(annots).unwrap()),
-                &mut old_file
-            ).unwrap();
+            let lazy_annots: Lazy<Vec<MaybeRef<Annot>>> = old_file.create(annots).unwrap().into();
             new_page.annotations = lazy_annots;
             PageRc::update(new_page, &old_page, &mut old_file).unwrap();
         }

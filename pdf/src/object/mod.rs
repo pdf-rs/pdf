@@ -479,13 +479,6 @@ impl<T: DataSize> DataSize for Lazy<T> {
             + size_of::<Self>()
     }
 }
-impl<T: DataSize> DataSize for Lazy<T> {
-    const IS_DYNAMIC: bool = true;
-    const STATIC_HEAP_SIZE: usize = size_of::<Self>();
-    fn estimate_heap_size(&self) -> usize {
-        self.cache.get().map(|value| value.estimate_heap_size()).unwrap_or(0) + size_of::<Self>()
-    }
-}
 impl<T> Clone for Lazy<T> {
     fn clone(&self) -> Self {
         Lazy {
@@ -521,12 +514,6 @@ impl<T: Object + DataSize> Lazy<T> {
         let primitive = value.to_primitive(update)?;
         Ok(Lazy { primitive, _marker: PhantomData, cache: OnceCell::new() })
     }
-    pub fn safe(value: T, update: &mut impl Updater) -> Result<Self>
-    where T: ObjectWrite
-    {
-        let primitive = value.to_primitive(update)?;
-        Ok(Lazy { primitive, _marker: PhantomData })
-    }
 }
 impl<T: Object> Object for Lazy<T> {
     fn from_primitive(p: Primitive, _: &impl Resolve) -> Result<Self> {
@@ -551,15 +538,6 @@ impl<T> Default for Lazy<T> {
         }
     }
 }
-impl<T> From<RcRef<T>> for Lazy<T> {
-    fn from(value: RcRef<T>) -> Self {
-        Lazy {
-            primitive: Primitive::Reference(value.inner),
-            cache: OnceCell::from(MaybeRef::Direct(value.data)),
-            _marker: PhantomData,
-        }
-    }
-}
 impl<T: Object> From<RcRef<T>> for Lazy<T> {
     fn from(value: RcRef<T>) -> Self {
         Lazy {
@@ -567,12 +545,6 @@ impl<T: Object> From<RcRef<T>> for Lazy<T> {
             cache: OnceCell::with_value(MaybeRef::Direct(value.data)),
             _marker: PhantomData
         }
-    }
-}
-
-impl<T> From<RcRef<T>> for Lazy<T> {
-    fn from(value: RcRef<T>) -> Self {
-        Lazy { primitive: Primitive::Reference(value.inner), _marker: PhantomData }
     }
 }
 
