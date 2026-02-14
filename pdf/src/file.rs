@@ -1,5 +1,6 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
 use std::any::type_name;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -9,7 +10,7 @@ use std::io::Write;
 use crate as pdf;
 use crate::error::*;
 use crate::object::*;
-use crate::primitive::{Primitive, Dictionary, PdfString};
+use crate::primitive::{Dictionary, PdfStream, PdfString, Primitive, StreamInner};
 use crate::backend::{Backend, BackendAppend};
 use crate::any::*;
 use crate::parser::{Lexer, parse_with_lexer};
@@ -19,6 +20,7 @@ use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
+use backtrace::Backtrace;
 use datasize::DataSize;
 
 #[cfg(feature="cache")]
@@ -41,6 +43,7 @@ impl<T> PromisedRef<T> {
 pub trait Cache<T: Clone> {
     fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T;
     fn clear(&self);
+    fn remove(&self, key: PlainRef);
 }
 pub struct NoCache;
 impl<T: Clone> Cache<T> for NoCache {
@@ -48,15 +51,19 @@ impl<T: Clone> Cache<T> for NoCache {
         compute()
     }
     fn clear(&self) {}
+    fn remove(&self, key: PlainRef) {}
 }
 
 #[cfg(feature="cache")]
 impl<T: Clone + ValueSize + Send + 'static> Cache<T> for Arc<SyncCache<PlainRef, T>> {
     fn get_or_compute(&self, key: PlainRef, compute: impl FnOnce() -> T) -> T {
-        self.get(key, compute)
+        self.get(key, |_| compute())
     }
     fn clear(&self) {
         (**self).clear()
+    }
+    fn remove(&self, key: PlainRef) {
+        (**self).remove(&key)
     }
 }
 
@@ -89,6 +96,8 @@ pub struct Storage<B, OC, SC, L> {
     log: L
 }
 
+const PDF_HEADER: &[u8] = b"%PDF-1.7\n";
+
 impl<OC, SC, L> Storage<Vec<u8>, OC, SC, L>
 where
     OC: Cache<Result<AnySync, Arc<PdfError>>>,
@@ -104,7 +113,7 @@ where
             refs: XRefTable::new(0),
             decoder: None,
             options: ParseOptions::strict(),
-            backend: Vec::from(&b"%PDF-1.7\n"[..]),
+            backend: Vec::from(PDF_HEADER),
             start_offset: 0,
             log
         }
@@ -249,7 +258,7 @@ where
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
                     let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..), r), self.start_offset + pos);
-                    let p = t!(parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)).1;
+                    let p = t!(parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags), r).1;
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
@@ -296,6 +305,54 @@ impl<F: FnMut()> Drop for Defer<F> {
     }
 }
 
+fn resolve_get<'a, B, OC, SC, L, T>(resolver: &impl Resolve, storage: &'a Storage<B, OC, SC, L>, chain: &Mutex<Vec<PlainRef>>, r: Ref<T>) -> Result<RcRef<T>>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+    L: Log,
+    T: Object+DataSize
+{
+    let key = r.get_inner();
+    storage.log.log_get(key);
+
+    {
+        debug!("get {key:?} as {}", std::any::type_name::<T>());
+        let mut chain = chain.lock().unwrap();
+        if chain.contains(&key) {
+            bail!("Recursive reference");
+        }
+        chain.push(key);
+    }
+    let _defer = Defer(|| {
+        let mut chain = chain.lock().unwrap();
+        assert_eq!(chain.pop(), Some(key));
+    });
+
+    let res = storage.cache.get_or_compute(key, || {
+        match resolver.resolve(key).and_then(|p| T::from_primitive(p, resolver)) {
+            Ok(obj) => Ok(AnySync::new(Shared::new(obj))),
+            Err(e) => {
+                let p = resolver.resolve(key);
+                warn!("failed to decode {p:?} as {}", std::any::type_name::<T>());
+                Err(Arc::new(e))
+            }
+        }
+    });
+    match res {
+        Ok(any) => {
+            match any.downcast() {
+                Ok(val) => Ok(RcRef::new(key, val)),
+                Err(_) => {
+                    let p = resolver.resolve(key)?;
+                    Ok(RcRef::new(key, T::from_primitive(p, resolver)?.into()))
+                }
+            }
+        }
+        Err(e) => Err(PdfError::Shared { source: e.clone()}),
+    }
+}
+
 impl<'a, B, OC, SC, L> Resolve for StorageResolver<'a, B, OC, SC, L>
 where
     B: Backend,
@@ -311,44 +368,7 @@ where
     }
 
     fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
-        let key = r.get_inner();
-        self.storage.log.log_get(key);
-
-        {
-            debug!("get {key:?} as {}", std::any::type_name::<T>());
-            let mut chain = self.chain.lock().unwrap();
-            if chain.contains(&key) {
-                bail!("Recursive reference");
-            }
-            chain.push(key);
-        }
-        let _defer = Defer(|| {
-            let mut chain = self.chain.lock().unwrap();
-            assert_eq!(chain.pop(), Some(key));
-        });
-
-        let res = self.storage.cache.get_or_compute(key, || {
-            match self.resolve(key).and_then(|p| T::from_primitive(p, self)) {
-                Ok(obj) => Ok(AnySync::new(Shared::new(obj))),
-                Err(e) => {
-                    let p = self.resolve(key);
-                    warn!("failed to decode {p:?} as {}", std::any::type_name::<T>());
-                    Err(Arc::new(e))
-                }
-            }
-        });
-        match res {
-            Ok(any) => {
-                match any.downcast() {
-                    Ok(val) => Ok(RcRef::new(key, val)),
-                    Err(_) => {
-                        let p = self.resolve(key)?;
-                        Ok(RcRef::new(key, T::from_primitive(p, self)?.into()))
-                    }
-                }
-            }
-            Err(e) => Err(PdfError::Shared { source: e.clone()}),
-        }
+        resolve_get(self, &self.storage, &self.chain, r)
     }
     fn options(&self) -> &ParseOptions {
         &self.storage.options
@@ -356,7 +376,6 @@ where
     fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>> {
         self.storage.decode(id, range, &[])
     }
-
     fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
         self.storage.stream_cache.get_or_compute(id, || self.storage.decode(id, range, filters).map_err(Arc::new))
         .map_err(|e| e.into())
@@ -373,6 +392,7 @@ where
     fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
         let id = self.refs.len() as u64;
         self.refs.push(XRef::Promised);
+
         let primitive = obj.to_primitive(self)?;
         self.changes.insert(id, (std::any::type_name::<T>(), primitive, 0));
         let rc = Shared::new(obj);
@@ -414,6 +434,7 @@ where
             }
         }
         let rc = Shared::new(obj);
+        self.cache.remove(old);
 
         Ok(RcRef::new(r, rc))
     }
@@ -452,6 +473,92 @@ where
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log
 {
+    pub fn rebuild(&mut self, trailer: &mut Trailer) -> Result<Vec<u8>> {
+        if self.promises.len() > 0 {
+            for (id, name) in self.promises.iter() {
+                eprintln!("Promise unfulfilled: id={id} type={name}");
+                return Err(PdfError::Invalid);
+            }
+        }
+
+        // writing the trailer generates another id for the info dictionary
+        trailer.size = (self.refs.len() + 2) as _;
+        let trailer_dict = trailer.to_dict(self)?;
+        let xref_promise = self.promise::<Stream<XRefInfo>>();
+
+        let mut out = Vec::new();
+        out.extend_from_slice(PDF_HEADER);
+        let mut new_refs = HashMap::new();
+        let resolver = StorageResolver::new(self);
+        for (obj_nr, r) in self.refs.entries() {
+            let id = obj_nr as u64;
+            let prim = t!(self.resolve_ref(PlainRef { id, gen: 0 }, ParseFlags::ANY, &resolver), id, r);
+
+            let byte_pos = out.len();
+            writeln!(out, "{id} 0 obj")?;
+            match prim {
+                Primitive::Stream(PdfStream { inner: StreamInner::InFile { id, file_range }, info }) => {
+                    let data = self.backend.read(file_range)?;
+
+                    let info_len = info.get("Length").unwrap().as_usize().unwrap();
+                    assert_eq!(info_len, data.len());
+                    t!(info.serialize(&mut out));
+                    writeln!(out, "stream")?;
+                    out.write_all(&data)?;
+                    writeln!(out, "\nendstream")?;
+                }
+                prim => {
+                    t!(prim.serialize(&mut out));
+                }
+            }
+
+            writeln!(out, "endobj")?;
+            new_refs.insert(id, XRef::Raw { pos: byte_pos, gen_nr: 0 });
+        }
+        for (&id, (_, prim, _)) in self.changes.iter() {
+            match self.refs.get(id) {
+                Ok(XRef::Raw { .. }) | Ok(XRef::Stream { .. }) => continue,
+                _ => {}
+            }
+            let byte_pos = out.len();
+            writeln!(out, "{id} 0 obj")?;
+            prim.serialize(&mut out)?;
+            if !out.last_byte().map(|b| b.is_ascii_whitespace()).unwrap_or(false) {
+                out.write_all(b"\n")?;
+            }
+            writeln!(out, "endobj")?;
+            new_refs.insert(id, XRef::Raw { pos: byte_pos, gen_nr: 0 });
+        }
+
+        for (id, xref) in new_refs {
+            self.refs.set(id, xref);
+        }
+
+        let xref_pos = out.len();
+        self.refs.set(xref_promise.get_inner().id, XRef::Raw { pos: xref_pos, gen_nr: 0 });
+        // only write up to the xref stream obj id
+
+        let stream = t!(self.refs.write_stream(xref_promise.get_inner().id as usize + 1));
+
+        writeln!(out, "{} {} obj", xref_promise.get_inner().id, 0)?;
+        let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
+        for (k, v) in trailer_dict.iter() {
+            xref_and_trailer.info.insert(k.clone(), v.clone());
+        }
+
+        xref_and_trailer.serialize(&mut out)?;
+        writeln!(out, "endobj")?;
+
+        let _ = self.fulfill(xref_promise, stream)?;
+
+        write!(out, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
+
+        // update trailer which may have change now.
+        *trailer = t!(Trailer::from_dict(trailer_dict, &self.resolver()));
+        self.cache.clear();
+
+        Ok(out)
+    }
     pub fn save(&mut self, trailer: &mut Trailer) -> Result<()> {
         if self.promises.len() > 0 {
             for (id, name) in self.promises.iter() {
@@ -516,6 +623,7 @@ pub type CachedFile<B> = File<B, ObjectCache, StreamCache, NoLog>;
 pub struct File<B, OC, SC, L> {
     pub storage:    Storage<B, OC, SC, L>,
     pub trailer:    Trailer,
+    resolve_chain:  Mutex<Vec<PlainRef>>,
 }
 impl<B, OC, SC, L> Updater for File<B, OC, SC, L>
 where
@@ -537,7 +645,34 @@ where
         self.storage.fulfill(promise, obj)
     }
 }
+impl<B, OC, SC, L> Resolve for File<B, OC, SC, L>
+where
+    B: Backend,
+    OC: Cache<Result<AnySync, Arc<PdfError>>>,
+    SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+    L: Log,
+{
+    fn resolve_flags(&self, r: PlainRef, flags: ParseFlags, _depth: usize) -> Result<Primitive> {
+        let ref storage = self.storage;
+        storage.log.load_object(r);
 
+        storage.resolve_ref(r, flags, self)
+    }
+
+    fn get<T: Object+DataSize>(&self, r: Ref<T>) -> Result<RcRef<T>> {
+        resolve_get(self, &self.storage, &self.resolve_chain, r)
+    }
+    fn options(&self) -> &ParseOptions {
+        &self.storage.options
+    }
+    fn stream_data(&self, id: PlainRef, range: Range<usize>) -> Result<Arc<[u8]>> {
+        self.storage.decode(id, range, &[])
+    }
+    fn get_data_or_decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
+        self.storage.stream_cache.get_or_compute(id, || self.storage.decode(id, range, filters).map_err(Arc::new))
+        .map_err(|e| e.into())
+    }
+}
 impl<OC, SC, L> File<Vec<u8>, OC, SC, L>
 where
     OC: Cache<Result<AnySync, Arc<PdfError>>>,
@@ -548,6 +683,10 @@ where
         self.storage.save(&mut self.trailer)?;
         std::fs::write(path, &self.storage.backend)?;
         Ok(())
+    }
+    pub fn rebuild(&mut self) -> Result<Vec<u8>> {
+        let data = self.storage.rebuild(&mut self.trailer)?;
+        Ok(data)
     }
 }
 
@@ -653,10 +792,10 @@ where
             Primitive::Dictionary(trailer),
             &resolver,
         ));
-        Ok(File { storage, trailer })
+        Ok(File { storage, trailer, resolve_chain: Default::default() })
     }
     pub fn new(storage: Storage<B, OC, SC, L>, trailer: Trailer) -> Self {
-        File { storage, trailer }
+        File { storage, trailer, resolve_chain: Default::default() }
     }
     pub fn resolver(&self) -> impl Resolve + '_ {
         StorageResolver::new(&self.storage)

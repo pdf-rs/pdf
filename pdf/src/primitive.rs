@@ -219,7 +219,7 @@ impl Deref for Dictionary {
     }
 }
 impl Dictionary {
-    fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
+    pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         writeln!(out, "<<")?;
         for (key, val) in self.iter() {
             match val {
@@ -322,6 +322,7 @@ impl PdfStream {
             StreamInner::Pending { ref data } => {
                 let info_len = self.info.get("Length").unwrap().as_usize().unwrap();
                 assert_eq!(info_len, data.len());
+                self.info.serialize(out)?;
                 writeln!(out, "stream")?;
                 out.write_all(data)?;
                 writeln!(out, "\nendstream")?;
@@ -540,11 +541,6 @@ impl<'a> From<&'a str> for PdfString {
 }
 impl From<String> for PdfString {
     fn from(value: String) -> Self {
-        PdfString { data: value.into() }
-    }
-}
-impl<'a> From<&'a [u8]> for PdfString {
-    fn from(value: &'a [u8]) -> Self {
         PdfString { data: value.into() }
     }
 }

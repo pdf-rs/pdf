@@ -62,10 +62,14 @@ impl XRefTable {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=u32> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item=u32> + '_ {
         self.entries.iter().enumerate()
             .filter(|(_, xref)| matches!(xref, XRef::Raw { .. } | XRef::Stream { .. } ))
             .map(|(i, _)| i as u32)
+    }
+    pub fn entries(&self) -> impl Iterator<Item=(usize, &XRef)> {
+        self.entries.iter().enumerate()
+            .filter(|(_, xref)| matches!(xref, XRef::Raw { .. } | XRef::Stream { .. } ))
     }
 
     pub fn get(&self, id: ObjNr) -> Result<XRef> {
@@ -147,12 +151,12 @@ impl XRefTable {
         let b_w = byte_len(max_b);
 
         let mut data = Vec::with_capacity((1 + a_w + b_w) * size);
-        for &x in self.entries.iter().take(size) {
+        for (nr, &x) in self.entries.iter().enumerate().take(size) {
             let (t, a, b) = match x {
                 XRef::Free { next_obj_nr, gen_nr } => (0, next_obj_nr, gen_nr),
                 XRef::Raw { pos, gen_nr } => (1, pos as u64, gen_nr),
                 XRef::Stream { stream_id, index } => (2, stream_id, index as u64),
-                x => bail!("invalid xref entry: {:?}", x)
+                x => bail!("invalid xref entry {nr}: {:?}", x)
             };
             data.push(t);
             data.extend_from_slice(&a.to_be_bytes()[8 - a_w ..]);

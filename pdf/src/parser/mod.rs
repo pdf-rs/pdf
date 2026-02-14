@@ -151,7 +151,7 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
         let dict = t!(parse_dictionary_object(lexer, r, ctx, max_depth-1));
         // It might just be the dictionary in front of a stream.
         if t!(lexer.peek()).equals(b"stream") {
-            let ctx = ctx.ok_or(PdfError::PrimitiveNotAllowed { allowed: ParseFlags::STREAM, found: flags })?;
+            let ctx = ctx.ok_or(PdfError::PrimitiveNotAllowed { allowed: flags, found: ParseFlags::STREAM })?;
             Primitive::Stream(t!(parse_stream_object(dict, lexer, r, ctx)))
         } else {
             Primitive::Dictionary(dict)
@@ -213,7 +213,7 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
         } else {
             SmallBytes::from(rest)
         };
-        
+
         Primitive::Name(SmallString::from_utf8(s)?)
     } else if first_lexeme.equals(b"[") {
         check(flags, ParseFlags::ARRAY)?;

@@ -86,7 +86,7 @@ impl<I: Object> Stream<I> {
     pub fn new_compressed(info: I, data: &[u8], encoding: StreamFilter) -> Result<Self> {
         let raw_len = data.len();
         let data = encode(data, &encoding)?;
-        Ok(Self::new_with_filters(info, data, vec![encoding]))
+        Ok(Self::from_compressed(info, data, vec![encoding]))
     }
 
     pub fn data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {

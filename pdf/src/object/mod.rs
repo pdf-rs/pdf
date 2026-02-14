@@ -133,8 +133,6 @@ pub trait Updater {
     fn update_ref<T: ObjectWrite>(&mut self, old: &RcRef<T>, obj: T) -> Result<RcRef<T>> {
         self.update(old.get_ref().inner, obj)
     }
-    fn promise<T: Object>(&mut self) -> PromisedRef<T>;
-    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>>;
 }
 
 pub struct NoUpdate;
@@ -198,7 +196,6 @@ impl DeepClone for PlainRef {
 
 // NOTE: Copy & Clone implemented manually ( https://github.com/rust-lang/rust/issues/26925 )
 
-#[derive(DataSize)]
 pub struct Ref<T> {
     inner: PlainRef,
     _marker: PhantomData<T>,
@@ -209,6 +206,13 @@ impl<T> Clone for Ref<T> {
     }
 }
 impl<T> Copy for Ref<T> {}
+impl<T> DataSize for Ref<T> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = size_of::<Self>();
+    fn estimate_heap_size(&self) -> usize {
+        size_of::<Self>()
+    }
+}
 
 impl<T> Ref<T> {
     pub fn new(inner: PlainRef) -> Ref<T> {
@@ -287,16 +291,17 @@ impl<T> From<RcRef<T>> for Ref<T> {
         value.get_ref()
     }
 }
-
+impl<T> AsRef<Shared<T>> for RcRef<T> {
+    fn as_ref(&self) -> &Shared<T> {
+        &self.data
+    }
+}
 impl<T> RcRef<T> {
     pub fn new(inner: PlainRef, data: Shared<T>) -> RcRef<T> {
         RcRef { inner, data }
     }
     pub fn get_ref(&self) -> Ref<T> {
         Ref::new(self.inner)
-    }
-    pub fn data(&self) -> &Shared<T> {
-        &self.data
     }
 }
 impl<T: Object + std::fmt::Debug + DataSize> Object for RcRef<T> {
@@ -475,7 +480,7 @@ impl<T> Eq for MaybeRef<T> {}
 
 #[derive(Debug)]
 pub struct Lazy<T> {
-    primitive: Primitive,
+    pub primitive: Primitive,
     cache: OnceCell<MaybeRef<T>>,
     _marker: PhantomData<T>,
 }
@@ -520,7 +525,7 @@ impl<T: Object + DataSize> Lazy<T> {
             })
             .cloned()
     }
-    pub fn safe(value: T, update: &mut impl Updater) -> Result<Self>
+    pub fn safe(value: MaybeRef<T>, update: &mut impl Updater) -> Result<Self>
     where T: ObjectWrite
     {
         let primitive = value.to_primitive(update)?;
@@ -565,6 +570,7 @@ impl<T: Object> From<RcRef<T>> for Lazy<T> {
         }
     }
 }
+
 
 //////////////////////////////////////
 // Object for Primitives & other types

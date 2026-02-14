@@ -38,44 +38,21 @@ fn run() -> Result<(), PdfError> {
     let mut bs = Dictionary::new();
     bs.insert(Name::from("S"), PdfString::from("/S"));
     bs.insert(Name::from("W"), PdfString::from("3"));
-    let new_annot = Annot {
-        subtype: Name::from("Line"),
-        // rect: Some(Rectangle {
-        //     left: 89.774,
-        //     bottom: 726.55,
-        //     right: 300.961,
-        //     top: 742.55,
-        // }),
-        rect: Some(Rectangle {
-            left: 10.,
-            bottom: 10.,
-            right: 200.,
-            top: 200.,
-        }),
-        contents: None,
-        page: Some(old_page.clone()),
-        border: None,
-        annotation_name: None,
-        date: None,
-        annot_flags: 4,
-        appearance_streams: None,
-        appearance_state: None,
-        color: Some(Primitive::Array(vec![
-            Primitive::Integer(1),
-            Primitive::Integer(0),
-            Primitive::Integer(0),
-        ])),
-        ink_list: None,
-        line: Some(vec![10., 100., 20., 200.]),
-        // creation_date: None,
-        // uuid: None,
-        // border_style: Some(bs),
-        // border_style: None,
-        // popup: None,
-        other: Dictionary::new(),
-        // transparency: Some(1.0),
-        // transparency: None,
-    };
+    let mut new_annot = Annot::new(Name::from("Line"));
+    new_annot.rect = Some(Rectangle {
+        left: 10.,
+        bottom: 10.,
+        right: 200.,
+        top: 200.,
+    });
+    new_annot.page = Some(old_page.clone());
+    new_annot.annot_flags = 4;
+    new_annot.color = Some(Primitive::Array(vec![
+        Primitive::Integer(1),
+        Primitive::Integer(0),
+        Primitive::Integer(0),
+    ]));
+    new_annot.line = Some(vec![10., 100., 20., 200.]);
 
     let annot_ref = old_file.create(new_annot)?;
     annots.push(MaybeRef::Indirect(annot_ref));

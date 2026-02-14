@@ -144,9 +144,9 @@ fn main() -> Result<(), PdfError> {
 
             .. Default::default()
         };
-        let xo = FormXObject {
-            stream: Stream::new(xof, serialize_ops(&button_ops).unwrap())
-        };
+        let xo = file.create(FormXObject {
+            stream: Stream::new(xof, &serialize_ops(&button_ops).unwrap()).unwrap()
+        })?;
 
         let button_as = AppearanceStreams {
             normal: file.create(AppearanceStreamEntry::Single(xo.into()))?.into(),

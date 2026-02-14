@@ -24,7 +24,7 @@ impl Content {
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
         let mut data = vec![];
         for part in self.parts.iter() {
-            data.extend_from_slice(&t!(part.data().data(resolve)));
+            data.extend_from_slice(&t!(part.data(resolve)));
         }
         parse_ops(&data, resolve)
     }
@@ -746,7 +746,7 @@ impl Content {
     pub fn from_ops(operations: Vec<Op>, update: &mut impl Updater) -> Result<Self> {
         let data = serialize_ops(&operations).unwrap();
         Ok(Content {
-            parts: vec![update.create(Stream::new((), data))?]
+            parts: vec![update.create(Stream::new((), &data)?)?]
         })
     }
 }

@@ -22,7 +22,7 @@ macro_rules! pdf_names {
 }
 
 use clap::Parser;
-use image::{io::Reader as ImageReader, GenericImageView};
+use image::{ImageReader, GenericImageView};
 use std::io::Cursor;
 
 #[derive(Parser, Debug)]
@@ -70,11 +70,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let image = Stream::new_with_filters(
         image_dict,
-        img_data,
+        &img_data,
         vec![StreamFilter::DCTDecode(DCTDecodeParams {
             color_transform: None,
         })],
-    );
+    ).unwrap();
 
     let mut file = FileOptions::cached().open(&args.input).unwrap();
     let page = file.get_page(args.page).expect("no such page");
@@ -156,7 +156,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ]);
 
     let mut page2: Page = (*page).clone();
-    page2.contents = Some(Content::from_ops(ops));
+    page2.contents = Some(Content::from_ops(ops, &mut file).unwrap());
     page2.resources = Some(file.create(resources2)?.into());
 
     PageRc::update(page2, &page, &mut file)?;

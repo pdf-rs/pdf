@@ -77,7 +77,7 @@ impl<'a> Lexer<'a> {
         if !self.buf[pos ..].starts_with(b"stream") {
             // bail!("next token isn't 'stream'");
         }
-        
+
         let &b0 = self.buf.get(pos + 6).ok_or(PdfError::EOF)?;
         if b0 == b'\n' {
             self.pos = pos + 7;
@@ -96,12 +96,12 @@ impl<'a> Lexer<'a> {
     /// Gives previous lexeme. Lexer moves to the first byte of this lexeme. (needs to be tested)
     pub fn back(&mut self) -> Result<Substr<'a>> {
         //println!("back: {:?}", String::from_utf8_lossy(&self.buf[self.pos.saturating_sub(20) .. self.pos]));
-        
+
         // first reverse until we find non-whitespace
         let end_pos = boundary_rev(self.buf, self.pos, is_whitespace);
         let start_pos = boundary_rev(self.buf, end_pos, not(is_whitespace));
         self.pos = start_pos;
-        
+
         Ok(self.new_substr(start_pos .. end_pos))
     }
 
@@ -155,11 +155,11 @@ impl<'a> Lexer<'a> {
             if let Some(off) = self.buf[pos..].iter().position(|&b| b == b'\n') {
                 pos += off+1;
             }
-            
+
             // Move away from eventual whitespace
             pos = self.skip_whitespace(pos)?;
         }
-        
+
         let start_pos = pos;
 
         // If first character is delimiter, this lexeme only contains that character.
@@ -267,7 +267,7 @@ impl<'a> Lexer<'a> {
     #[allow(dead_code)]
     pub fn seek_newline(&mut self) -> Substr{
         let start = self.pos;
-        while self.buf[self.pos] != b'\n' 
+        while self.buf[self.pos] != b'\n'
             && self.incr_pos() { }
         self.incr_pos();
 

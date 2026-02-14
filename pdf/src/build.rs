@@ -14,6 +14,8 @@ use crate::file::FileOptions;
 use crate::file::Log;
 use crate::file::Storage;
 use crate::file::Trailer;
+use crate::file::UpdateOptions;
+use crate::object::AdditionalPageActions;
 use crate::object::Catalog;
 use crate::object::Cloner;
 use crate::object::DeepClone;
@@ -231,6 +233,30 @@ where
         Ok(self.storage.into_inner())
     }
 }
+
+impl<SC, OC, L> Updater for PdfBuilder<SC, OC, L>
+where
+    SC: Cache<Result<AnySync, Arc<PdfError>>>,
+    OC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
+    L: Log,
+{
+    fn create<T: ObjectWrite>(&mut self, obj: T) -> Result<RcRef<T>> {
+        self.storage.create(obj)
+    }
+
+    fn update_with<T: ObjectWrite>(&mut self, old: PlainRef, obj: T, options: UpdateOptions) -> Result<RcRef<T>> {
+        self.storage.update_with(old, obj, options)
+    }
+
+    fn promise<T: Object>(&mut self) -> PromisedRef<T> {
+        self.storage.promise()
+    }
+
+    fn fulfill<T: ObjectWrite>(&mut self, promise: PromisedRef<T>, obj: T) -> Result<RcRef<T>> {
+        self.storage.fulfill(promise, obj)
+    }
+}
+
 pub struct Importer<'a, R, U> {
     resolver: R,
     map: HashMap<PlainRef, PlainRef>,
@@ -444,10 +470,10 @@ impl<'a, R: Resolve, U: Updater> Cloner for Importer<'a, R, U> {
             return Ok(RcRef::new(new_ref, arc));
         }
 
-        let new = old.data().deep_clone(self)?;
+        let new = old.deep_clone(self)?;
         let new = self.updater.create::<T>(new)?;
         self.rcrefs
-            .insert(new.get_ref().get_inner(), AnySync::new(new.data().clone()));
+            .insert(new.get_ref().get_inner(), AnySync::new((new.as_ref()).clone()));
         self.map.insert(old_ref, new.get_ref().get_inner());
 
         Ok(new)

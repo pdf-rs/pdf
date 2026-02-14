@@ -369,47 +369,7 @@ pub struct AppearanceStreams {
     pub down: Option<MaybeRef<AppearanceStreamEntry>>,
 }
 
-#[derive(Clone, Debug, DeepClone)]
-pub enum AppearanceStreamEntry {
-    Single(MaybeRef<FormXObject>),
-    Dict(HashMap<Name, AppearanceStreamEntry>),
-}
-impl Object for AppearanceStreamEntry {
-    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        match p.resolve(resolve)? {
-            p @ Primitive::Dictionary(_) => {
-                Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Dict)
-            }
-            p @ Primitive::Stream(_) => {
-                Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Single)
-            }
-            p => Err(PdfError::UnexpectedPrimitive {
-                expected: "Dict or Stream",
-                found: p.get_debug_name(),
-            }),
-        }
-    }
-}
-impl ObjectWrite for AppearanceStreamEntry {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
-        match self {
-            AppearanceStreamEntry::Dict(d) => d.to_primitive(update),
-            AppearanceStreamEntry::Single(s) => s.to_primitive(update),
-        }
-    }
-}
-impl DataSize for AppearanceStreamEntry {
-    const IS_DYNAMIC: bool = true;
-    const STATIC_HEAP_SIZE: usize = std::mem::size_of::<Self>();
-    fn estimate_heap_size(&self) -> usize {
-        match self {
-            AppearanceStreamEntry::Dict(d) => d.estimate_heap_size(),
-            AppearanceStreamEntry::Single(s) => s.estimate_heap_size(),
-        }
-    }
-}
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone, Default)]
-
 pub struct AppearanceCharacteristic {
     #[pdf(key = "R", default = "0")]
     pub rotation: u32,

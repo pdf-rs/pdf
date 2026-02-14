@@ -36,6 +36,8 @@ fn print_field(field: &FieldDictionary, resolve: &impl Resolve) {
     }
     for kid in field.kids.iter() {
         let child = resolve.get(*kid).unwrap();
-        print_field(&*child, resolve);
+        if let Some(ref inner) = child.a {
+            print_field(inner, resolve);
+        }
     }
 }
