@@ -45,7 +45,6 @@ istring = { version = "0.3.3", features = ["std", "size"] }
 datasize = "0.2.13"
 globalcache = { version = "0.3.2", features = ["sync"], optional = true }
 indexmap = "2.1.0"
-backtrace = "*"
 
 [dev-dependencies]
 glob = "0.3.0"

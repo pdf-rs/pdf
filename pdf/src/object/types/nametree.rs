@@ -1,6 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
-
-use istring::{IString, SmallString};
+use std::collections::VecDeque;
 
 use super::prelude::*;
 

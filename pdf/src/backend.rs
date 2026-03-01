@@ -12,7 +12,6 @@ use std::ops::{
     RangeTo,
     Range,
 };
-use std::sync::Arc;
 
 pub const MAX_ID: u32 = 1_000_000;
 
@@ -164,7 +163,7 @@ impl<B, W: std::io::Write> std::io::Write for SplitData<B, W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.1.write(buf)
     }
-    fn write_all(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         self.1.write_all(buf)
     }
     fn flush(&mut self) -> std::io::Result<()> {

@@ -10,8 +10,6 @@ use crate::enc::{StreamFilter, decode};
 use std::borrow::Cow;
 use std::ops::{Deref, Range};
 use std::fmt;
-use std::os::unix::raw;
-use std::str::EncodeUtf16;
 
 #[derive(Clone)]
 pub (crate) enum StreamData {
@@ -84,7 +82,6 @@ impl<I: Object> Stream<I> {
     }
 
     pub fn new_compressed(info: I, data: &[u8], encoding: StreamFilter) -> Result<Self> {
-        let raw_len = data.len();
         let data = encode(data, &encoding)?;
         Ok(Self::from_compressed(info, data, vec![encoding]))
     }

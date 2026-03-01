@@ -504,7 +504,7 @@ impl Object for Content {
                     parts.push(part);
                 }
             }
-            Primitive::Reference(r) => {
+            Primitive::Reference(_) => {
                 parts.push(RcRef::from_primitive(p, resolve)?);
             }
             p => {
@@ -979,7 +979,7 @@ impl Display for Rgb {
 }
 
 impl Object for Color {
-    fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
+    fn from_primitive(p: Primitive, _resolve: &impl Resolve) -> Result<Self> {
         let arr = p.as_array()?;
         match arr {
             [g] => Ok(Color::Gray(g.as_number()?)),
@@ -990,7 +990,7 @@ impl Object for Color {
     }
 }
 impl ObjectWrite for Color {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         let parts = match *self {
             Color::Gray(g) => vec![Primitive::Number(g)],
             Color::Rgb(Rgb { red, green, blue }) => vec![Primitive::Number(red), Primitive::Number(green), Primitive::Number(blue)],

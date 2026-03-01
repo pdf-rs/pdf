@@ -20,7 +20,6 @@ use crate::crypt::Decoder;
 use crate::crypt::CryptDict;
 use crate::enc::{StreamFilter, decode};
 use std::ops::Range;
-use backtrace::Backtrace;
 use datasize::DataSize;
 
 #[cfg(feature="cache")]
