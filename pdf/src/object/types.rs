@@ -475,14 +475,14 @@ pub struct MarkInformation {
     pub suspects: bool,
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[derive(Clone, Object, ObjectWrite, Debug, DataSize)]
 pub enum Trapped {
     True,
     False,
     Unknown,
 }
 
-#[derive(Object, ObjectWrite, Debug, DataSize, Default)]
+#[derive(Clone, Object, ObjectWrite, Debug, DataSize, Default)]
 pub struct InfoDict {
     #[pdf(key = "Title")]
     pub title: Option<PdfString>,

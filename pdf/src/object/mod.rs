@@ -33,6 +33,7 @@ use std::sync::Arc;
 pub type ObjNr = u64;
 pub type GenNr = u64;
 
+#[derive(Clone)]
 pub struct ParseOptions {
     pub allow_error_in_option: bool,
     pub allow_xref_error: bool,

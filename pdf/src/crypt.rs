@@ -130,6 +130,7 @@ pub struct CryptFilter {
     _other: Dictionary
 }
 
+#[derive(Clone)]
 pub struct Decoder {
     key_size: usize,
     key: Vec<u8>, // maximum length

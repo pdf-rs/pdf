@@ -73,6 +73,7 @@ pub trait Log {
 pub struct NoLog;
 impl Log for NoLog {}
 
+#[derive(Clone)]
 pub struct Storage<B, OC, SC, L> {
     // objects identical to those in the backend
     cache: OC,
@@ -624,6 +625,16 @@ pub struct File<B, OC, SC, L> {
     pub trailer:    Trailer,
     resolve_chain:  Mutex<Vec<PlainRef>>,
 }
+impl<B: Clone, OC: Clone, SC: Clone, L: Clone> Clone for File<B, OC, SC, L> {
+    fn clone(&self) -> Self {
+        File {
+            storage: self.storage.clone(),
+            trailer: self.trailer.clone(),
+            resolve_chain: Default::default()
+        }
+    }
+}
+
 impl<B, OC, SC, L> Updater for File<B, OC, SC, L>
 where
     B: Backend,
@@ -840,7 +851,7 @@ where
     }
 }
 
-#[derive(Object, ObjectWrite, DataSize)]
+#[derive(Clone, Object, ObjectWrite, DataSize)]
 pub struct Trailer {
     #[pdf(key = "Size")]
     pub size:               i32,
