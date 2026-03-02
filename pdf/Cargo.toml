@@ -22,7 +22,7 @@ cache = ["globalcache"]
 default = ["sync", "cache"]
 
 [dependencies]
-pdf_derive = { version = "0.2.0", path = "../pdf_derive" }
+pdf_derive = { version = "0.3.0", path = "../pdf_derive" }
 snafu = "0.8.3"
 libflate = "2.0.0"
 deflate = "1.0.0"

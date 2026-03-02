@@ -1,6 +1,6 @@
 [package]
 name = "pdf_derive"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Erlend Langseth <3rlendhl@gmail.com>", "Sebastian Köln <s3bk@protonmail.com>"]
 homepage = "https://github.com/pdf-rs"
 repository = "https://github.com/pdf-rs/pdf_derive"
