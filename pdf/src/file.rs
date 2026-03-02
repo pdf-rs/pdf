@@ -70,6 +70,7 @@ pub trait Log {
     fn load_object(&self, _r: PlainRef) {}
     fn log_get(&self, _r: PlainRef) {}
 }
+#[derive(Clone)]
 pub struct NoLog;
 impl Log for NoLog {}
 
