@@ -273,7 +273,7 @@ impl From<String> for PdfError {
     }
 }
 impl From<TryFromIntError> for PdfError {
-    fn from(e: TryFromIntError) -> PdfError {
+    fn from(_e: TryFromIntError) -> PdfError {
         PdfError::Invalid
     }
 }

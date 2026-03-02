@@ -1,6 +1,5 @@
 //! This is kind of the entry-point of the type-safe PDF functionality.
 use std::any::type_name;
-use std::hash::Hash;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -50,7 +49,7 @@ impl<T: Clone> Cache<T> for NoCache {
         compute()
     }
     fn clear(&self) {}
-    fn remove(&self, key: PlainRef) {}
+    fn remove(&self, _key: PlainRef) {}
 }
 
 #[cfg(feature="cache")]
@@ -498,7 +497,7 @@ where
             let byte_pos = out.len();
             writeln!(out, "{id} 0 obj")?;
             match prim {
-                Primitive::Stream(PdfStream { inner: StreamInner::InFile { id, file_range }, info }) => {
+                Primitive::Stream(PdfStream { inner: StreamInner::InFile { file_range, .. }, info }) => {
                     let data = self.backend.read(file_range)?;
 
                     let info_len = info.get("Length").unwrap().as_usize().unwrap();
@@ -577,7 +576,7 @@ where
         let mut changes: Vec<_> = self.changes.iter().collect();
         changes.sort_unstable_by_key(|&(id, _)| id);
 
-        for &(&id, &(name, ref primitive, gen)) in changes.iter() {
+        for &(&id, &(_name, ref primitive, gen)) in changes.iter() {
             let pos = self.backend.len();
             self.refs.set(id, XRef::Raw { pos: pos as _, gen_nr: gen });
             writeln!(self.backend, "{id} {gen} obj")?;

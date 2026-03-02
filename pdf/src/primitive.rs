@@ -305,7 +305,7 @@ impl Object for PdfStream {
     }
 }
 impl ObjectWrite for PdfStream {
-    fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
         match self.inner {
             StreamInner::InFile { id, .. } => Ok(Primitive::Reference(id)),
             StreamInner::Pending { .. } => Ok(self.clone().into()),
@@ -314,9 +314,8 @@ impl ObjectWrite for PdfStream {
 }
 impl PdfStream {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-
         match self.inner {
-            StreamInner::InFile { id, .. } => {
+            StreamInner::InFile { .. } => {
                 bail!("attempted to write already written stream");
             }
             StreamInner::Pending { ref data } => {
@@ -465,7 +464,7 @@ impl ObjectWrite for PdfString {
 
 impl PdfString {
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
-        if self.data.iter().any(|&b| b >= 0x80) {
+        if self.data.iter().any(|&b| b < 0x20 || b >= 0x80) {
             write!(out, "<")?;
             for &b in self.data.as_slice() {
                 write!(out, "{:02x}", b)?;

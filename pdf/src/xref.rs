@@ -132,7 +132,7 @@ impl XRefTable {
         let mut last_free = 0;
         for (i, entry) in self.entries.iter_mut().enumerate().rev() {
             match *entry {
-                XRef::Free { next_obj_nr, gen_nr } => {
+                XRef::Free { .. } => {
                     *entry = XRef::Free { next_obj_nr: last_free, gen_nr: 0xffff };
                     last_free = i as _;
                 }
