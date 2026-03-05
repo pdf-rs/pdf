@@ -77,7 +77,9 @@ pub struct Catalog {
     #[pdf(key = "ViewerPreferences")]
     pub viewer_preferences: Option<ViewerPreferences>,
 
-    // PageLayout: name
+    #[pdf(key = "PageLayout")]
+    pub page_layout: Option<Name>,
+  
     // PageMode: name
     #[pdf(key = "Outlines")]
     pub outlines: Option<Outlines>,
