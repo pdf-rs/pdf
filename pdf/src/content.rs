@@ -450,6 +450,8 @@ impl OpBuilder {
                     3 => Invisible,
                     4 => FillAndClip,
                     5 => StrokeAndClip,
+                    6 => FillThenStrokeAndClip,
+                    7 => TextAndClip,
                     _ => {
                         bail!("Invalid text render mode: {}", n);
                     }
@@ -963,7 +965,9 @@ pub enum TextMode {
     FillThenStroke,
     Invisible,
     FillAndClip,
-    StrokeAndClip
+    StrokeAndClip,
+    FillThenStrokeAndClip,
+    TextAndClip,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, DataSize)]
