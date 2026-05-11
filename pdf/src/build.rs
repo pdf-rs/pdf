@@ -179,6 +179,7 @@ impl CatalogBuilder {
         Ok(Catalog {
             version: Some("1.7".into()),
             pages: tree,
+            viewer_preferences: None,
             names: None,
             dests: None,
             metadata: None,

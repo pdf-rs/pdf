@@ -74,9 +74,12 @@ pub struct Catalog {
     #[pdf(key = "Dests")]
     pub dests: Option<MaybeRef<Dictionary>>,
 
-    // ViewerPreferences: dict
+    #[pdf(key = "ViewerPreferences")]
+    pub viewer_preferences: Option<ViewerPreferences>,
+
     #[pdf(key = "PageLayout")]
     pub page_layout: Option<Name>,
+  
     // PageMode: name
     #[pdf(key = "Outlines")]
     pub outlines: Option<Outlines>,
@@ -110,6 +113,59 @@ pub struct Catalog {
 // NeedsRendering: bool
 }
 
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize)]
+pub struct ViewerPreferences {
+    #[pdf(key = "HideToolbar")]
+    pub hide_toolbar: Option<bool>,
+
+    #[pdf(key = "HideMenubar")]
+    pub hide_menubar: Option<bool>,
+
+    #[pdf(key = "HideWindowUI")]
+    pub hide_window_ui: Option<bool>,
+
+    #[pdf(key = "FitWindow")]
+    pub fit_window: Option<bool>,
+
+    #[pdf(key = "CenterWindow")]
+    pub center_window: Option<bool>,
+
+    #[pdf(key = "DisplayDocTitle")]
+    pub display_doc_title: Option<bool>,
+
+    #[pdf(key = "NonFullScreenPageMode")]
+    pub non_full_screen_page_mode: Option<Name>,
+
+    #[pdf(key = "Direction")]
+    pub direction: Option<Name>,
+
+    #[pdf(key = "ViewArea")]
+    pub view_area: Option<Name>,
+
+    #[pdf(key = "ViewClip")]
+    pub view_clip: Option<Name>,
+
+    #[pdf(key = "PrintArea")]
+    pub print_area: Option<Name>,
+
+    #[pdf(key = "PrintClip")]
+    pub print_clip: Option<Name>,
+
+    #[pdf(key = "PrintScaling")]
+    pub print_scaling: Option<Name>,
+
+    #[pdf(key = "Duplex")]
+    pub duplex: Option<Name>,
+
+    #[pdf(key = "PickTrayByPDFSize")]
+    pub pick_tray_by_pdf_size: Option<bool>,
+
+    #[pdf(key = "PrintPageRange")]
+    pub print_page_range: Vec<u32>,
+
+    #[pdf(key = "NumCopies")]
+    pub num_copies: Option<u32>,
+}
 
 #[derive(Object, ObjectWrite, Debug, DataSize, Default, DeepClone, Clone)]
 pub struct Resources {
