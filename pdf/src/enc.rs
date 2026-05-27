@@ -393,6 +393,9 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
     if params.k < 0 {
         let columns: u16 = params.columns.try_into()?;
         let rows: u16 = params.rows.try_into()?;
+        if columns == 0 {
+            bail!("CCITTFaxDecode: Columns needs to be greater than zero");
+        }
 
         let height = if params.rows == 0 { None } else { Some(rows)};
         let mut buf = Vec::with_capacity(columns as usize * rows as usize);
