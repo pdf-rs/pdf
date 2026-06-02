@@ -149,7 +149,7 @@ fn main() -> Result<(), PdfError> {
         })?;
 
         let button_as = AppearanceStreams {
-            normal: file.create(AppearanceStreamEntry::Single(xo.into()))?.into(),
+            normal: AppearanceStreamEntry::Single(xo.into()),
             down: None,
             rollover: None
         };
@@ -211,7 +211,7 @@ fn main() -> Result<(), PdfError> {
 
         // AP
         annot.appearance_streams = Some(file.create(AppearanceStreams {
-            normal: AppearanceStreamEntry::Single(fxo.clone().into()).into(),
+            normal: AppearanceStreamEntry::Single(fxo.clone().into()),
             down: None,
             rollover: None
         })?.into());

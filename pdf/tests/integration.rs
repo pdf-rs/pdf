@@ -116,6 +116,58 @@ fn decrypt_streams() {
     assert!(decoded_any, "no content stream was decoded — test exercised nothing");
 }
 
+// The typed annotation API must accept the ubiquitous appearance form
+//   /AP << /N 5 0 R >>
+// where `/N` references a form-XObject stream. Because a stream is always an
+// indirect object, this is how essentially every annotation appearance is
+// written; it previously failed with "expected Reference, found Stream".
+#[cfg(feature = "cache")]
+#[test]
+fn appearance_stream_n_reference_parses() {
+    let form = "q Q"; // a minimal (no-op) form XObject content stream
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>".to_string(),
+        "<< /Type /Annot /Subtype /Widget /Rect [0 0 100 50] /AP << /N 5 0 R >> >>".to_string(),
+        format!(
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 100 50] /Length {} >>\nstream\n{}\nendstream",
+            form.len(),
+            form
+        ),
+    ];
+    let mut pdf = String::from("%PDF-1.5\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj {} endobj\n", i + 1, body));
+    }
+    let startxref = pdf.len();
+    pdf.push_str(&format!("xref\n0 {}\n", objects.len() + 1));
+    pdf.push_str("0000000000 65535 f \n");
+    for off in &offsets {
+        pdf.push_str(&format!("{off:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer << /Root 1 0 R /Size {} >>\nstartxref\n{}\n%%EOF",
+        objects.len() + 1,
+        startxref
+    ));
+
+    let file = run!(FileOptions::cached().load(pdf.into_bytes()));
+    let resolver = file.resolver();
+    let page = run!(file.get_page(0));
+    let annots = run!(page.annotations.load(&resolver));
+    let annots: &Vec<MaybeRef<Annot>> = &annots;
+    assert_eq!(annots.len(), 1, "the page should have one annotation");
+    let annot: &Annot = &annots[0];
+    let ap = annot.appearance_streams.as_ref().expect("annotation has an /AP");
+    assert!(
+        matches!(ap.normal, AppearanceStreamEntry::Single(_)),
+        "the /N reference-to-stream should parse as a single form XObject"
+    );
+}
+
 // Test for invalid PDFs found by fuzzing.
 // We don't care if they give an Err or Ok, as long as they don't panic.
 #[cfg(feature = "cache")]

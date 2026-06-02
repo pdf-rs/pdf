@@ -287,10 +287,35 @@ pub enum AppearanceStreamEntry {
 }
 impl Object for AppearanceStreamEntry {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
-        match p.resolve(resolve)? {
-            p @ Primitive::Dictionary(_) => Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Dict),
-            p @ Primitive::Stream(_) => Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Single),
-            p => Err(PdfError::UnexpectedPrimitive {expected: "Dict or Stream", found: p.get_debug_name()})
+        // An appearance entry (`/N`, `/R`, `/D`) is either a single form
+        // XObject — the overwhelmingly common case — or a sub-dictionary mapping
+        // appearance-state names (e.g. `/On`, `/Off`) to such forms, used by
+        // check boxes and radio buttons.
+        //
+        // A stream is always an indirect object and `Single` holds an
+        // `RcRef<FormXObject>`, so the reference must be carried through: peek at
+        // what it resolves to, but build the `RcRef` from the original reference.
+        // Resolving the reference to a `Stream` *before* dispatching (as this
+        // used to) made the `Single` arm fail with "expected Reference, found
+        // Stream", which broke the typed API for nearly every annotation.
+        match p {
+            Primitive::Reference(r) => match resolve.resolve(r)? {
+                Primitive::Stream(_) => resolve.get(Ref::new(r)).map(AppearanceStreamEntry::Single),
+                dict @ Primitive::Dictionary(_) => {
+                    Object::from_primitive(dict, resolve).map(AppearanceStreamEntry::Dict)
+                }
+                other => Err(PdfError::UnexpectedPrimitive {
+                    expected: "Stream or Dictionary",
+                    found: other.get_debug_name(),
+                }),
+            },
+            p @ Primitive::Dictionary(_) => {
+                Object::from_primitive(p, resolve).map(AppearanceStreamEntry::Dict)
+            }
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Reference or Dictionary",
+                found: p.get_debug_name(),
+            }),
         }
     }
 }

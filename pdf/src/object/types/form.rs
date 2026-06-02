@@ -360,13 +360,13 @@ impl FieldDictionary {
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone, DeepClone)]
 pub struct AppearanceStreams {
     #[pdf(key = "N")]
-    pub normal: MaybeRef<AppearanceStreamEntry>,
+    pub normal: AppearanceStreamEntry,
 
     #[pdf(key = "R")]
-    pub rollover: Option<MaybeRef<AppearanceStreamEntry>>,
+    pub rollover: Option<AppearanceStreamEntry>,
 
     #[pdf(key = "D")]
-    pub down: Option<MaybeRef<AppearanceStreamEntry>>,
+    pub down: Option<AppearanceStreamEntry>,
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize, Clone, Default)]
