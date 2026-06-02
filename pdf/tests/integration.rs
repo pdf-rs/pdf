@@ -89,6 +89,33 @@ fn owner_password() {
     }
 }
 
+// Decrypting a *stream* exercises the file key end-to-end. Opening and walking
+// page dictionaries isn't enough — PDF encrypts only strings and streams, not
+// dictionary structure, so a wrong/truncated key still parses dicts fine. This
+// regresses the AES-256 (AESV3) key-truncation bug, which only showed when a
+// stream was actually decrypted (object stream or content stream).
+#[cfg(feature = "cache")]
+#[test]
+fn decrypt_streams() {
+    let mut decoded_any = false;
+    for path in dir_pdfs(file_path("password_protected")) {
+        let path = path.to_str().unwrap();
+        println!("\n == decrypting streams in `{}` ==", path);
+        let file = run!(FileOptions::cached().password(b"userpassword").open(path));
+        let resolver = file.resolver();
+        for i in 0..file.num_pages() {
+            let page = run!(file.get_page(i));
+            if let Some(content) = &page.contents {
+                // Forces decrypt + filter-decode of the content stream; a bad
+                // key yields garbage that fails to inflate/parse here.
+                let ops = run!(content.operations(&resolver));
+                decoded_any |= !ops.is_empty();
+            }
+        }
+    }
+    assert!(decoded_any, "no content stream was decoded — test exercised nothing");
+}
+
 // Test for invalid PDFs found by fuzzing.
 // We don't care if they give an Err or Ok, as long as they don't panic.
 #[cfg(feature = "cache")]
