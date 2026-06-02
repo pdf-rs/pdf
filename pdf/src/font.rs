@@ -1,4 +1,5 @@
 use crate as pdf;
+use crate::content::Matrix;
 use crate::encoding::Encoding;
 use crate::error::*;
 use crate::object::*;
@@ -76,6 +77,7 @@ pub enum FontData {
     TrueType(TFont),
     CIDFontType0(CIDFont),
     CIDFontType2(CIDFont),
+    Type3(Type3Font),
     Other(Dictionary),
 }
 
@@ -160,6 +162,7 @@ impl Object for Font {
             FontType::TrueType => FontData::TrueType(TFont::from_dict(dict, resolve)?),
             FontType::CIDFontType0 => FontData::CIDFontType0(CIDFont::from_dict(dict, resolve)?),
             FontType::CIDFontType2 => FontData::CIDFontType2(CIDFont::from_dict(dict, resolve)?),
+            FontType::Type3 => FontData::Type3(Type3Font::from_dict(dict, resolve)?),
             _ => FontData::Other(dict),
         };
 
@@ -179,6 +182,7 @@ impl ObjectWrite for Font {
             FontData::CIDFontType0(ref d) | FontData::CIDFontType2(ref d) => d.to_dict(update)?,
             FontData::TrueType(ref d) | FontData::Type1(ref d) => d.to_dict(update)?,
             FontData::Type0(ref d) => d.to_dict(update)?,
+            FontData::Type3(ref d) => d.to_dict(update)?,
             FontData::Other(ref dict) => dict.clone(),
         };
 
@@ -198,6 +202,7 @@ impl ObjectWrite for Font {
             FontData::TrueType(_) => FontType::TrueType,
             FontData::CIDFontType0(_) => FontType::CIDFontType0,
             FontData::CIDFontType2(_) => FontType::CIDFontType2,
+            FontData::Type3(_) => FontType::Type3,
             FontData::Other(_) => bail!("unimplemented"),
         };
         dict.insert("Subtype", subtype.to_primitive(update)?);
@@ -322,6 +327,13 @@ impl Font {
             _ => None,
         }
     }
+    /// The typed Type 3 font data, if this is a Type 3 font.
+    pub fn type3(&self) -> Option<&Type3Font> {
+        match self.data {
+            FontData::Type3(ref t3) => Some(t3),
+            _ => None,
+        }
+    }
     pub fn widths(&self, resolve: &impl Resolve) -> Result<Option<Widths>> {
         match self.data {
             FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(resolve),
@@ -434,6 +446,43 @@ pub struct CIDFont {
 
     #[pdf(other)]
     pub _other: Dictionary,
+}
+
+/// A Type 3 font (PDF 32000-1 §9.6.5), whose glyphs are defined by content
+/// streams rather than a font program. The glyph procedures in `char_procs`
+/// run in the font's own `font_matrix` glyph space, using `resources`.
+#[derive(Object, ObjectWrite, Debug, DataSize, DeepClone)]
+pub struct Type3Font {
+    /// Maps glyph space to text space (required).
+    #[pdf(key = "FontMatrix")]
+    pub font_matrix: Matrix,
+
+    /// Glyph name → the content stream that paints that glyph (required).
+    #[pdf(key = "CharProcs")]
+    pub char_procs: HashMap<Name, RcRef<Stream<()>>>,
+
+    /// Resources used by the glyph procedures.
+    #[pdf(key = "Resources")]
+    pub resources: Option<MaybeRef<Resources>>,
+
+    #[pdf(key = "FontBBox")]
+    pub font_bbox: Option<Rectangle>,
+
+    /// per spec required, but some files lack it.
+    #[pdf(key = "FirstChar")]
+    pub first_char: Option<i32>,
+
+    /// same
+    #[pdf(key = "LastChar")]
+    pub last_char: Option<i32>,
+
+    /// Glyph widths in glyph space (scaled by `font_matrix`), indexed from
+    /// `first_char`.
+    #[pdf(key = "Widths")]
+    pub widths: Option<Vec<f32>>,
+
+    #[pdf(key = "FontDescriptor")]
+    pub font_descriptor: Option<FontDescriptor>,
 }
 
 #[derive(Object, ObjectWrite, Debug, DataSize, DeepClone)]
