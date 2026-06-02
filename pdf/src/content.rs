@@ -408,9 +408,7 @@ impl OpBuilder {
             "sc" | "scn" => {
                 push(Op::FillColor { color: Color::Other(args.collect()) });
             }
-            "sh"  => {
-
-            }
+            "sh"  => push(Op::Shade { name: name(&mut args)? }),
             "T*"  => push(Op::TextNewline),
             "Tc"  => push(Op::CharSpacing { char_space: number(&mut args)? }),
             "Td"  => push(Op::MoveTextPosition { translation: point(&mut args)? }),
@@ -1193,5 +1191,15 @@ EI
 "###;
         let mut lexer = Lexer::new(data);
         assert!(inline_image(&mut lexer, &NoResolve).is_ok());
+    }
+
+    #[test]
+    fn test_sh_operator() {
+        // `sh` must emit Op::Shade carrying the shading resource name.
+        let ops = parse_ops(b"/Sh1 sh", &NoResolve).expect("parse sh");
+        assert!(
+            matches!(ops.as_slice(), [Op::Shade { name }] if name.as_str() == "Sh1"),
+            "expected [Op::Shade {{ name: Sh1 }}], got {ops:?}"
+        );
     }
 }
