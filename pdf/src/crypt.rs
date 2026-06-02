@@ -154,7 +154,11 @@ impl Decoder {
     }
 
     fn key(&self) -> &[u8] {
-        &self.key[.. std::cmp::min(self.key_size, 16)]
+        // RC4 (V2) and AES-128 (AESV2) use at most a 16-byte key, but AES-256
+        // (AESV3) needs the full 32 bytes — capping at 16 there truncates the
+        // file key and corrupts every stream/string it decrypts.
+        let max = if matches!(self.method, CryptMethod::AESV3) { 32 } else { 16 };
+        &self.key[.. std::cmp::min(self.key_size, max)]
     }
 
     pub fn new(key: Vec<u8>, key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
