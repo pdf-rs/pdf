@@ -18,6 +18,23 @@ pub struct IccInfo {
     pub metadata: Option<Stream<()>>,
 }
 
+/// Parameters of a CIE 1976 L*a*b* colour space (PDF 32000-1 §8.6.5.4).
+#[derive(Object, Debug, Clone, DataSize, DeepClone, ObjectWrite)]
+pub struct LabParams {
+    /// `[Xw Yw Zw]` — the diffuse white point (required).
+    #[pdf(key = "WhitePoint")]
+    pub white_point: Vec<f32>,
+
+    /// `[Xb Yb Zb]` — the diffuse black point. Defaults to `[0 0 0]`.
+    #[pdf(key = "BlackPoint")]
+    pub black_point: Option<Vec<f32>>,
+
+    /// `[amin amax bmin bmax]` — the range of the a* and b* components.
+    /// Defaults to `[-100 100 -100 100]`.
+    #[pdf(key = "Range")]
+    pub range: Option<Vec<f32>>,
+}
+
 #[derive(Debug, Clone, DeepClone)]
 pub enum ColorSpace {
     DeviceGray,
@@ -27,6 +44,7 @@ pub enum ColorSpace {
     CalGray(Dictionary),
     CalRGB(Dictionary),
     CalCMYK(Dictionary),
+    Lab(LabParams),
     Indexed(Box<ColorSpace>, u8, Arc<[u8]>),
     Separation(Name, Box<ColorSpace>, Function),
     Icc(RcRef<Stream<IccInfo>>),
@@ -51,6 +69,7 @@ impl DataSize for ColorSpace {
             ColorSpace::CalGray(ref d) | ColorSpace::CalRGB(ref d) | ColorSpace::CalCMYK(ref d) => {
                 d.estimate_heap_size()
             }
+            ColorSpace::Lab(ref p) => p.estimate_heap_size(),
             ColorSpace::Indexed(ref cs, _, ref data) => {
                 cs.estimate_heap_size() + data.estimate_heap_size()
             }
@@ -149,6 +168,10 @@ impl ColorSpace {
                 let dict = Dictionary::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
                 Ok(ColorSpace::CalCMYK(dict))
             }
+            "Lab" => {
+                let params = LabParams::from_primitive(t!(get_index(&arr, 1)).clone(), resolve)?;
+                Ok(ColorSpace::Lab(params))
+            }
             "Pattern" => {
                 Ok(ColorSpace::Pattern)
             }
@@ -156,6 +179,42 @@ impl ColorSpace {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::object::NoResolve;
+
+    // `[/Lab << /WhitePoint [..] /Range [..] >>]` should parse into the typed
+    // `Lab` variant rather than falling through to `Other`.
+    #[test]
+    fn lab_colorspace_parses() {
+        let mut dict = Dictionary::new();
+        dict.insert(
+            "WhitePoint",
+            Primitive::Array(vec![Primitive::Number(0.9505), Primitive::Number(1.0), Primitive::Number(1.089)]),
+        );
+        dict.insert(
+            "Range",
+            Primitive::Array(vec![
+                Primitive::Number(-128.0),
+                Primitive::Number(127.0),
+                Primitive::Number(-128.0),
+                Primitive::Number(127.0),
+            ]),
+        );
+        let arr = Primitive::Array(vec![Primitive::name("Lab"), Primitive::Dictionary(dict)]);
+
+        match ColorSpace::from_primitive(arr, &NoResolve).unwrap() {
+            ColorSpace::Lab(params) => {
+                assert_eq!(params.white_point, vec![0.9505, 1.0, 1.089]);
+                assert_eq!(params.black_point, None);
+                assert_eq!(params.range.as_deref(), Some([-128.0, 127.0, -128.0, 127.0].as_slice()));
+            }
+            other => panic!("expected ColorSpace::Lab, got {other:?}"),
+        }
+    }
+}
+
 impl ObjectWrite for ColorSpace {
     fn to_primitive(&self, update: &mut impl Updater) -> Result<Primitive> {
         match *self {
@@ -171,6 +230,9 @@ impl ObjectWrite for ColorSpace {
                     Stream::new((), &lookup)?.to_primitive(update)?
                 };
                 Ok(Primitive::Array(vec![Primitive::name("Indexed"), base, hival, lookup]))
+            }
+            ColorSpace::Lab(ref params) => {
+                Ok(Primitive::Array(vec![Primitive::name("Lab"), params.to_primitive(update)?]))
             }
             ref p => {
                 dbg!(p);
