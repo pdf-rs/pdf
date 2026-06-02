@@ -116,6 +116,50 @@ fn decrypt_streams() {
     assert!(decoded_any, "no content stream was decoded — test exercised nothing");
 }
 
+// An embedded CMap stream (a Type0 `/Encoding` given as a stream) must be kept
+// and parsed, not discarded. pdf-rs used to throw the stream *data* away and
+// keep only its dict, leaving non-Identity encodings undecodable.
+#[cfg(feature = "cache")]
+#[test]
+fn embedded_cmap_stream_is_kept() {
+    let cmap_src = "begincmap\n\
+        2 begincodespacerange\n<00> <80>\n<8140> <fefe>\nendcodespacerange\n\
+        1 begincidchar\n<20> 1\nendcidchar\n\
+        endcmap";
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{}\nendstream", cmap_src.len(), cmap_src),
+    ];
+    let mut pdf = String::from("%PDF-1.5\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj {} endobj\n", i + 1, body));
+    }
+    let startxref = pdf.len();
+    pdf.push_str(&format!("xref\n0 {}\n", objects.len() + 1));
+    pdf.push_str("0000000000 65535 f \n");
+    for off in &offsets {
+        pdf.push_str(&format!("{off:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer << /Root 1 0 R /Size {} >>\nstartxref\n{}\n%%EOF",
+        objects.len() + 1,
+        startxref
+    ));
+
+    let file = run!(FileOptions::cached().load(pdf.into_bytes()));
+    let resolver = file.resolver();
+    // Object 4 is the CMap stream; build a CMap from a reference to it.
+    let enc = pdf::primitive::Primitive::Reference(PlainRef { id: 4, gen: 0 });
+    let cmap = pdf::font::CMap::from_encoding(enc, &resolver)
+        .expect("embedded CMap stream should be retained and parsed");
+    assert_eq!(cmap.cid(0x20), 1, "cidchar mapping survives");
+    assert_eq!(cmap.next_code(&[0x81, 0x40]), Some((0x8140, 2)), "two-byte codespace parsed");
+}
+
 // Test for invalid PDFs found by fuzzing.
 // We don't care if they give an Err or Ok, as long as they don't panic.
 #[cfg(feature = "cache")]

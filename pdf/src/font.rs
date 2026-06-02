@@ -44,6 +44,11 @@ pub struct Font {
 
     pub encoding: Option<Encoding>,
 
+    /// For Type0 fonts, the parsed code→CID map from `/Encoding` (Identity, or
+    /// an embedded CMap). `None` for simple fonts and for predefined
+    /// non-Identity CMaps whose data this crate does not bundle.
+    pub cmap: Option<CMap>,
+
     // FIXME: Should use RcRef<Stream>
     pub to_unicode: Option<RcRef<Stream<()>>>,
 
@@ -61,6 +66,7 @@ impl Font {
                 widths: None,
             }),
             encoding: Some(pdf::encoding::Encoding::standard()),
+            cmap: None,
             name: None,
             subtype: pdf::font::FontType::TrueType,
             to_unicode: None,
@@ -144,10 +150,15 @@ impl Object for Font {
             }
         };
 
-        let encoding = dict
-            .remove("Encoding")
+        let encoding_prim = dict.remove("Encoding");
+        let encoding = encoding_prim
+            .clone()
             .map(|p| Object::from_primitive(p, resolve))
             .transpose()?;
+        // For Type0 fonts `/Encoding` selects a CMap (code -> CID). Parse it
+        // additively: Identity is synthesised, an embedded CMap stream is read
+        // from its bytes, predefined non-Identity names yield None. Never fails.
+        let cmap = encoding_prim.and_then(|p| CMap::from_encoding(p, resolve));
 
         let to_unicode = match dict.remove("ToUnicode") {
             Some(p) => Some(Object::from_primitive(p, resolve)?),
@@ -168,6 +179,7 @@ impl Object for Font {
             name: base_font,
             data,
             encoding,
+            cmap,
             to_unicode,
             _other,
         })
@@ -314,6 +326,10 @@ impl Font {
     }
     pub fn encoding(&self) -> Option<&Encoding> {
         self.encoding.as_ref()
+    }
+    /// The Type0 code→CID map (Identity or an embedded CMap), if any.
+    pub fn cmap(&self) -> Option<&CMap> {
+        self.cmap.as_ref()
     }
     pub fn info(&self) -> Option<&TFont> {
         match self.data {
@@ -610,6 +626,187 @@ fn parse_cid(s: &PdfString) -> Result<u16> {
         _ => Err(PdfError::CidDecode),
     }
 }
+/// One range of a CMap's codespace (PDF 32000-1 §9.7.6.2): codes of exactly
+/// `n_bytes` bytes whose big-endian value lies in `low..=high`.
+#[derive(Debug, Clone, DataSize)]
+pub struct CodespaceRange {
+    pub n_bytes: u8,
+    pub low: u32,
+    pub high: u32,
+}
+
+/// A `(low, high, cid)` CID range: code `low` maps to `cid`, `low+1` to
+/// `cid+1`, and so on up to `high`.
+#[derive(Debug, Clone, DataSize)]
+pub struct CidRange {
+    pub low: u32,
+    pub high: u32,
+    pub cid: u16,
+}
+
+/// A CMap mapping character codes to CIDs (PDF 32000-1 §9.7.5).
+///
+/// Built either data-free for `Identity-H`/`Identity-V`, or by parsing an
+/// embedded CMap stream. Predefined non-Identity CMaps (e.g. `GBK-EUC-H`) are
+/// **not** bundled — their large Adobe data tables live outside this crate — so
+/// they parse to `None`; a consumer can still see the name via `Font::encoding`.
+#[derive(Debug, Clone, DataSize)]
+pub struct CMap {
+    code_space: Vec<CodespaceRange>,
+    single: HashMap<u32, u16>,
+    ranges: Vec<CidRange>,
+}
+impl DeepClone for CMap {
+    fn deep_clone(&self, _cloner: &mut impl Cloner) -> Result<Self> {
+        Ok(self.clone())
+    }
+}
+impl CMap {
+    /// The `Identity-H`/`Identity-V` CMap: two-byte big-endian codes mapped
+    /// straight through to the equal-valued CID. Needs no data.
+    pub fn identity() -> CMap {
+        CMap {
+            code_space: vec![CodespaceRange { n_bytes: 2, low: 0x0000, high: 0xFFFF }],
+            single: HashMap::new(),
+            ranges: Vec::new(),
+        }
+    }
+
+    /// Build a CMap from a Type0 `/Encoding` value: an `Identity*` name, or an
+    /// embedded CMap stream. Returns `None` for predefined non-Identity names
+    /// (not bundled) or anything that isn't a CMap. Never fails font loading.
+    pub fn from_encoding(p: Primitive, resolve: &impl Resolve) -> Option<CMap> {
+        match p.resolve(resolve).ok()? {
+            Primitive::Name(name) => match name.as_str() {
+                "Identity" | "Identity-H" | "Identity-V" => Some(CMap::identity()),
+                _ => None,
+            },
+            Primitive::Stream(s) => {
+                let stream = Stream::<()>::from_stream(s, resolve).ok()?;
+                let data = stream.data(resolve).ok()?;
+                Some(CMap::parse(&data))
+            }
+            _ => None,
+        }
+    }
+
+    /// Parse an embedded CMap stream's bytes. Tolerant: unrecognised constructs
+    /// are skipped and a truncated stream yields whatever parsed so far. A
+    /// `usecmap` reference to a predefined base is not resolved (that data is
+    /// not bundled), so such CMaps come back with only their own additions.
+    pub fn parse(data: &[u8]) -> CMap {
+        let mut lexer = Lexer::new(data);
+        let mut code_space = Vec::new();
+        let mut single = HashMap::new();
+        let mut ranges = Vec::new();
+        let str_flag = ParseFlags::STRING;
+        let int_flag = ParseFlags::INTEGER;
+        while let Ok(tok) = lexer.next() {
+            match tok.as_slice() {
+                b"begincodespacerange" => loop {
+                    let (Ok(Primitive::String(lo)), Ok(Primitive::String(hi))) = (
+                        parse_with_lexer(&mut lexer, &NoResolve, str_flag),
+                        parse_with_lexer(&mut lexer, &NoResolve, str_flag),
+                    ) else {
+                        break;
+                    };
+                    code_space.push(CodespaceRange {
+                        n_bytes: lo.as_bytes().len() as u8,
+                        low: be_value(lo.as_bytes()),
+                        high: be_value(hi.as_bytes()),
+                    });
+                },
+                b"begincidrange" => loop {
+                    let (
+                        Ok(Primitive::String(lo)),
+                        Ok(Primitive::String(hi)),
+                        Ok(Primitive::Integer(cid)),
+                    ) = (
+                        parse_with_lexer(&mut lexer, &NoResolve, str_flag),
+                        parse_with_lexer(&mut lexer, &NoResolve, str_flag),
+                        parse_with_lexer(&mut lexer, &NoResolve, int_flag),
+                    ) else {
+                        break;
+                    };
+                    ranges.push(CidRange {
+                        low: be_value(lo.as_bytes()),
+                        high: be_value(hi.as_bytes()),
+                        cid: cid as u16,
+                    });
+                },
+                b"begincidchar" => loop {
+                    let (Ok(Primitive::String(code)), Ok(Primitive::Integer(cid))) = (
+                        parse_with_lexer(&mut lexer, &NoResolve, str_flag),
+                        parse_with_lexer(&mut lexer, &NoResolve, int_flag),
+                    ) else {
+                        break;
+                    };
+                    single.insert(be_value(code.as_bytes()), cid as u16);
+                },
+                b"endcmap" => break,
+                _ => {}
+            }
+        }
+        CMap { code_space, single, ranges }
+    }
+
+    /// Split the next character code off `bytes`, returning `(code, n_bytes)`.
+    /// The codespace selects the byte length (shortest match first); a code
+    /// outside every range still advances by the longest codespace length so a
+    /// stray byte can't stall decoding.
+    pub fn next_code(&self, bytes: &[u8]) -> Option<(u32, usize)> {
+        if bytes.is_empty() {
+            return None;
+        }
+        let mut lengths: Vec<u8> = self.code_space.iter().map(|r| r.n_bytes).collect();
+        lengths.sort_unstable();
+        lengths.dedup();
+        for &n in &lengths {
+            let n = n as usize;
+            if n == 0 || n > bytes.len() {
+                continue;
+            }
+            let code = be_value(&bytes[..n]);
+            if self
+                .code_space
+                .iter()
+                .any(|r| r.n_bytes as usize == n && (r.low..=r.high).contains(&code))
+            {
+                return Some((code, n));
+            }
+        }
+        let n = (lengths.last().copied().unwrap_or(1).max(1) as usize).min(bytes.len());
+        Some((be_value(&bytes[..n]), n))
+    }
+
+    /// Map a character code to its CID (`0` = `.notdef` when unmapped). An
+    /// Identity CMap (no explicit mappings) returns the code itself.
+    pub fn cid(&self, code: u32) -> u16 {
+        if let Some(&cid) = self.single.get(&code) {
+            return cid;
+        }
+        for r in &self.ranges {
+            if (r.low..=r.high).contains(&code) {
+                return r.cid.wrapping_add((code - r.low) as u16);
+            }
+        }
+        if self.single.is_empty() && self.ranges.is_empty() {
+            return code as u16;
+        }
+        0
+    }
+
+    /// The codespace ranges, e.g. to detect one-byte vs two-byte encodings.
+    pub fn code_space(&self) -> &[CodespaceRange] {
+        &self.code_space
+    }
+}
+
+/// Big-endian numeric value of up to four code bytes.
+fn be_value(bytes: &[u8]) -> u32 {
+    bytes.iter().take(4).fold(0u32, |acc, &b| (acc << 8) | u32::from(b))
+}
+
 fn parse_cmap(data: &[u8]) -> Result<ToUnicodeMap> {
     let mut lexer = Lexer::new(data);
     let mut map = ToUnicodeMap::new();
@@ -771,7 +968,45 @@ pub fn write_cmap(map: &ToUnicodeMap) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::font::{utf16be_to_char, utf16be_to_string, utf16be_to_string_lossy};
+    use crate::font::{utf16be_to_char, utf16be_to_string, utf16be_to_string_lossy, CMap};
+
+    #[test]
+    fn identity_cmap_maps_two_byte_codes_through() {
+        let cmap = CMap::identity();
+        assert_eq!(cmap.next_code(&[0x12, 0x34, 0x56]), Some((0x1234, 2)));
+        assert_eq!(cmap.cid(0x1234), 0x1234);
+    }
+
+    #[test]
+    fn embedded_cmap_parses_codespace_and_cids() {
+        // One-byte codes 0x00..=0x80 and two-byte codes 0x8140..=0xFEFE, with a
+        // CID range and a single CID char.
+        let data = b"begincmap\n\
+            2 begincodespacerange\n\
+            <00> <80>\n\
+            <8140> <fefe>\n\
+            endcodespacerange\n\
+            1 begincidrange\n\
+            <8140> <817e> 633\n\
+            endcidrange\n\
+            1 begincidchar\n\
+            <20> 1\n\
+            endcidchar\n\
+            endcmap\n";
+        let cmap = CMap::parse(data);
+
+        // Variable-width decoding: 0x20 is a one-byte code, 0x8140 two bytes.
+        assert_eq!(cmap.next_code(&[0x20, 0x81, 0x40]), Some((0x20, 1)));
+        assert_eq!(cmap.next_code(&[0x81, 0x40]), Some((0x8140, 2)));
+
+        // Mappings: the single char, and the range (offset preserved).
+        assert_eq!(cmap.cid(0x20), 1);
+        assert_eq!(cmap.cid(0x8140), 633);
+        assert_eq!(cmap.cid(0x8141), 634);
+        // Unmapped code in an explicit CMap is .notdef (0).
+        assert_eq!(cmap.cid(0x30), 0);
+    }
+
     #[test]
     fn utf16be_to_string_quick() {
         let v = vec![0x20, 0x09];

@@ -49,6 +49,7 @@ fn main() -> Result<(), PdfError> {
             widths: None,
         }),
         encoding: Some(pdf::encoding::Encoding::standard()),
+        cmap: None,
         name: None,
         subtype: pdf::font::FontType::TrueType,
         to_unicode: None,
