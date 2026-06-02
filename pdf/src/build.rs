@@ -74,7 +74,7 @@ impl PageBuilder {
             crop_box: Some(page.crop_box()?),
             trim_box: page.trim_box,
             resources: (**page.resources()?.data()).clone(),
-            rotate: page.rotate,
+            rotate: page.rotate(),
             metadata: page.metadata.clone(),
             lgi: page.lgi.clone(),
             vp: page.vp.clone(),
@@ -107,7 +107,7 @@ impl PageBuilder {
             crop_box: Some(page.crop_box()?),
             trim_box: page.trim_box,
             resources,
-            rotate: page.rotate,
+            rotate: page.rotate(),
             metadata: page.metadata.deep_clone(cloner)?,
             lgi: page.lgi.deep_clone(cloner)?,
             vp: page.vp.deep_clone(cloner)?,
@@ -151,6 +151,7 @@ impl CatalogBuilder {
                 resources: None,
                 media_box: None,
                 crop_box: None,
+                rotate: None,
             },
             update,
         )?;
@@ -165,7 +166,9 @@ impl CatalogBuilder {
                 crop_box: page.crop_box,
                 trim_box: page.trim_box,
                 resources: Some(resources),
-                rotate: page.rotate,
+                // 0 is the default rotation, so omit `/Rotate` rather than
+                // writing a redundant entry.
+                rotate: (page.rotate != 0).then_some(page.rotate),
                 metadata: page.metadata,
                 lgi: page.lgi,
                 vp: page.vp,
