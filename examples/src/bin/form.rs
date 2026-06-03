@@ -268,8 +268,8 @@ fn run() -> Result<(), PdfError> {
                     let normal2 = AppearanceStreamEntry::Single(form_xo);
 
                     let page = &page0;
-                    update!(file, page.annotations ~ [i] ~ .appearance_streams: [Option::<MaybeRef<AppearanceStreams>>] ~ . normal = normal2);
-                    page.tracer()
+                    //update!(file, page.annotations ~ [i] ~ .appearance_streams: [Option::<MaybeRef<AppearanceStreams>>] ~ . normal = normal2);
+                    //page.tracer()
                 }
                 _ => {}
             }
