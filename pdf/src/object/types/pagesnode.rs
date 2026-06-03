@@ -50,6 +50,9 @@ pub struct PageTree {
 
     #[pdf(key = "CropBox")]
     pub crop_box: Option<Rectangle>,
+
+    #[pdf(key = "Rotate")]
+    pub rotate: Option<i32>,
 }
 impl PageTree {
     pub fn page(&self, resolve: &impl Resolve, page_nr: u32) -> Result<PageRc> {

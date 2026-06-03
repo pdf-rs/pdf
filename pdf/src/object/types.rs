@@ -338,40 +338,10 @@ impl DataSize for AppearanceStreamEntry {
     }
 }
 
-#[derive(Debug, DataSize, Clone, Object, ObjectWrite, DeepClone)]
-pub enum Counter {
-    #[pdf(name="D")]
-    Arabic,
-    #[pdf(name="r")]
-    RomanUpper,
-    #[pdf(name="R")]
-    RomanLower,
-    #[pdf(name="a")]
-    AlphaUpper,
-    #[pdf(name="A")]
-    AlphaLower
-}
-
-#[derive(Debug, DataSize)]
-pub enum NameTreeNode<T> {
-    ///
-    Intermediate (Vec<Ref<NameTree<T>>>),
-    ///
-    Leaf (Vec<(PdfString, T)>)
-
-}
-
-#[derive(Object, ObjectWrite, Clone, DeepClone, Debug)]
-pub struct LageLabel {
-    #[pdf(key = "S")]
-    style: Option<Counter>,
-
-    #[pdf(key = "P")]
-    prefix: Option<PdfString>,
-
-    #[pdf(key = "St")]
-    start: Option<i32>,
-}
+// `Counter` and `NameTreeNode` live in the `nametree` submodule (glob-imported
+// above); `PageLabel` lives in the `page` submodule. Earlier copies here
+// duplicated them — the `Counter` one was even case-swapped — so they were
+// removed to keep a single source of truth.
 
 #[derive(Debug, Clone, DeepClone, DataSize)]
 pub enum DestView {

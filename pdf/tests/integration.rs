@@ -143,6 +143,7 @@ fn appearance_stream_n_reference_parses() {
         pdf.push_str(&format!("{} 0 obj {} endobj\n", i + 1, body));
     }
     let startxref = pdf.len();
+    // Classic cross-reference table; each entry line is exactly 20 bytes.
     pdf.push_str(&format!("xref\n0 {}\n", objects.len() + 1));
     pdf.push_str("0000000000 65535 f \n");
     for off in &offsets {
@@ -166,6 +167,52 @@ fn appearance_stream_n_reference_parses() {
         matches!(ap.normal, AppearanceStreamEntry::Single(_)),
         "the /N reference-to-stream should parse as a single form XObject"
     );
+}
+      
+      
+// `/Rotate` is an inheritable page attribute: a Page with no `/Rotate` of its
+// own takes the value from the nearest ancestor `Pages` node. This builds a
+// minimal one-page document whose rotation lives only on the page tree and
+// asserts the page reports it.
+#[cfg(feature = "cache")]
+#[test]
+fn rotate_is_inherited() {
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] /Rotate 90 >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+    ];
+    let mut pdf = String::from("%PDF-1.5\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj {} endobj\n", i + 1, body));
+    }
+  
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj {} endobj\n", i + 1, body));
+    }
+    let startxref = pdf.len();
+    // Classic cross-reference table; each entry line is exactly 20 bytes.
+    pdf.push_str(&format!("xref\n0 {}\n", objects.len() + 1));
+    pdf.push_str("0000000000 65535 f \n");
+    for off in &offsets {
+        pdf.push_str(&format!("{off:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer << /Root 1 0 R /Size {} >>\nstartxref\n{}\n%%EOF",
+        objects.len() + 1,
+        startxref
+    ));
+
+    let startxref = pdf.len();
+    let file = run!(FileOptions::cached().load(pdf.into_bytes()));
+
+    let page = run!(file.get_page(0));
+    assert!(page.rotate.is_none(), "the page itself must not carry /Rotate");
+    assert_eq!(page.rotate(), 90, "page should inherit /Rotate from its parent Pages node");
 }
 
 // Test for invalid PDFs found by fuzzing.
