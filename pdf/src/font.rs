@@ -499,13 +499,16 @@ pub struct FontDescriptor {
     #[pdf(key = "FontWeight")]
     pub font_weight: Option<f32>,
 
-    #[pdf(key = "Flags")]
+    #[pdf(key = "Flags", default = "0")]
     pub flags: u32,
 
+    // Required per spec, but omitted by many real-world fonts (esp. subset/CID
+    // descendants). It's metadata we don't render from, so treat it as optional
+    // rather than failing the whole font — and with it all the font's text.
     #[pdf(key = "FontBBox")]
-    pub font_bbox: Rectangle,
+    pub font_bbox: Option<Rectangle>,
 
-    #[pdf(key = "ItalicAngle")]
+    #[pdf(key = "ItalicAngle", default = "0.")]
     pub italic_angle: f32,
 
     // required as per spec, but still missing in some cases

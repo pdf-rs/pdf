@@ -116,6 +116,44 @@ fn decrypt_streams() {
     assert!(decoded_any, "no content stream was decoded — test exercised nothing");
 }
 
+// `/Rotate` is an inheritable page attribute: a Page with no `/Rotate` of its
+// own takes the value from the nearest ancestor `Pages` node. This builds a
+// minimal one-page document whose rotation lives only on the page tree and
+// asserts the page reports it.
+#[cfg(feature = "cache")]
+#[test]
+fn rotate_is_inherited() {
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] /Rotate 90 >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+    ];
+    let mut pdf = String::from("%PDF-1.5\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj {} endobj\n", i + 1, body));
+    }
+    let startxref = pdf.len();
+    // Classic cross-reference table; each entry line is exactly 20 bytes.
+    pdf.push_str(&format!("xref\n0 {}\n", objects.len() + 1));
+    pdf.push_str("0000000000 65535 f \n");
+    for off in &offsets {
+        pdf.push_str(&format!("{off:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer << /Root 1 0 R /Size {} >>\nstartxref\n{}\n%%EOF",
+        objects.len() + 1,
+        startxref
+    ));
+
+    let file = run!(FileOptions::cached().load(pdf.into_bytes()));
+    let page = run!(file.get_page(0));
+    assert!(page.rotate.is_none(), "the page itself must not carry /Rotate");
+    assert_eq!(page.rotate(), 90, "page should inherit /Rotate from its parent Pages node");
+}
+
+
 // A Type 3 font should parse into the typed `Type3Font` (font matrix, glyph
 // procedures, widths) rather than being dumped into `FontData::Other`.
 #[cfg(feature = "cache")]
@@ -162,7 +200,7 @@ fn type3_font_parses() {
     assert_eq!(t3.widths.as_deref(), Some([600.0].as_slice()));
     assert!((t3.font_matrix.a - 0.001).abs() < 1e-6, "font matrix preserved");
 }
-
+      
 // Test for invalid PDFs found by fuzzing.
 // We don't care if they give an Err or Ok, as long as they don't panic.
 #[cfg(feature = "cache")]
