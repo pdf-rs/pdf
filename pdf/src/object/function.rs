@@ -46,11 +46,58 @@ struct Function2 {
     exponent: f32,
 }
 
+#[derive(Object, Debug, Clone)]
+struct Function3 {
+    #[pdf(key = "Functions")]
+    functions: Vec<Function>,
+
+    #[pdf(key = "Bounds")]
+    bounds: Vec<f32>,
+}
+
+/// A Type 3 (stitching) function (PDF 32000-1 §7.10.4): it partitions its
+/// one-dimensional `domain` with `bounds` and delegates each subinterval to one
+/// of the `functions`, remapping the input through `encode`.
+#[derive(Debug, Clone, DataSize)]
+pub struct StitchingFunction {
+    domain: Vec<f32>,
+    functions: Vec<Function>,
+    bounds: Vec<f32>,
+    encode: Vec<f32>,
+}
+impl StitchingFunction {
+    fn output_dim(&self) -> usize {
+        self.functions.first().map_or(0, Function::output_dim)
+    }
+    fn apply(&self, x: &[f32], out: &mut [f32]) -> Result<()> {
+        let k = self.functions.len();
+        if k == 0 {
+            bail!("stitching function has no subfunctions");
+        }
+        let d0 = self.domain.first().copied().unwrap_or(0.0);
+        let d1 = self.domain.get(1).copied().unwrap_or(1.0);
+        let t = x.first().copied().unwrap_or(0.0).clamp(d0.min(d1), d0.max(d1));
+        // With k functions there are k-1 bounds; the subinterval index is how
+        // many bounds `t` has reached, landing in 0..k.
+        let i = self.bounds.iter().take_while(|&&b| t >= b).count().min(k - 1);
+        let lo = if i == 0 { d0 } else { self.bounds[i - 1] };
+        let hi = self.bounds.get(i).copied().unwrap_or(d1);
+        let e0 = self.encode.get(2 * i).copied().unwrap_or(0.0);
+        let e1 = self.encode.get(2 * i + 1).copied().unwrap_or(1.0);
+        let mapped = if (hi - lo).abs() > f32::EPSILON {
+            e0 + (t - lo) * (e1 - e0) / (hi - lo)
+        } else {
+            e0
+        };
+        self.functions[i].apply(&[mapped], out)
+    }
+}
+
 #[derive(Debug, Clone, DataSize)]
 pub enum Function {
     Sampled(SampledFunction),
     Interpolated(Vec<InterpolatedFunctionDim>),
-    Stiching,
+    Stitching(StitchingFunction),
     Calculator,
     PostScript {
         func: PsFunc,
@@ -76,6 +123,7 @@ impl Function {
                 Ok(())
             }
             Function::PostScript { ref func, .. } => func.exec(x, out),
+            Function::Stitching(ref func) => func.apply(x, out),
             _ => bail!("unimplemted function {:?}", self),
         }
     }
@@ -83,6 +131,8 @@ impl Function {
         match *self {
             Function::PostScript { ref domain, .. } => domain.len() / 2,
             Function::Sampled(ref f) => f.input.len(),
+            // Stitching and exponential-interpolation functions take one input.
+            Function::Stitching(_) | Function::Interpolated(_) => 1,
             _ => panic!(),
         }
     }
@@ -90,6 +140,8 @@ impl Function {
         match *self {
             Function::PostScript { ref range, .. } => range.len() / 2,
             Function::Sampled(ref f) => f.output.len(),
+            Function::Interpolated(ref parts) => parts.len(),
+            Function::Stitching(ref f) => f.output_dim(),
             _ => panic!(),
         }
     }
@@ -141,6 +193,17 @@ impl FromDict for Function {
                     });
                 }
                 Ok(Function::Interpolated(parts))
+            }
+            3 => {
+                // `Encode`/`Domain` are captured by `RawFunction`; `Functions`
+                // and `Bounds` fall through to the catch-all dictionary.
+                let f3 = Function3::from_dict(raw.other, resolve)?;
+                Ok(Function::Stitching(StitchingFunction {
+                    domain: raw.domain,
+                    functions: f3.functions,
+                    bounds: f3.bounds,
+                    encode: raw.encode.unwrap_or_default(),
+                }))
             }
             i => {
                 dbg!(raw);
@@ -524,5 +587,56 @@ impl PsOp {
                 }
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::object::NoResolve;
+    use crate::primitive::{Dictionary, Primitive};
+
+    fn nums(v: &[f32]) -> Primitive {
+        Primitive::Array(v.iter().map(|&x| Primitive::Number(x)).collect())
+    }
+
+    // A Type 2 exponential function mapping t in [0,1] to c0 + t*(c1-c0).
+    fn exp_fn(c0: f32, c1: f32) -> Primitive {
+        let mut d = Dictionary::new();
+        d.insert("FunctionType", Primitive::Integer(2));
+        d.insert("Domain", nums(&[0.0, 1.0]));
+        d.insert("C0", nums(&[c0]));
+        d.insert("C1", nums(&[c1]));
+        d.insert("N", Primitive::Number(1.0));
+        Primitive::Dictionary(d)
+    }
+
+    #[test]
+    fn stitching_function_evaluates() {
+        // Two sub-functions split at 0.5; each subinterval is encoded to [0,1].
+        let mut d = Dictionary::new();
+        d.insert("FunctionType", Primitive::Integer(3));
+        d.insert("Domain", nums(&[0.0, 1.0]));
+        d.insert("Functions", Primitive::Array(vec![exp_fn(0.0, 1.0), exp_fn(1.0, 2.0)]));
+        d.insert("Bounds", nums(&[0.5]));
+        d.insert("Encode", nums(&[0.0, 1.0, 0.0, 1.0]));
+
+        let f = Function::from_primitive(Primitive::Dictionary(d), &NoResolve).unwrap();
+        assert!(matches!(f, Function::Stitching(_)));
+        assert_eq!(f.input_dim(), 1);
+        assert_eq!(f.output_dim(), 1);
+
+        let mut out = [0.0];
+        // t=0.25 → first interval [0,0.5] → encoded to 0.5 → exp(0,1)@0.5 = 0.5
+        f.apply(&[0.25], &mut out).unwrap();
+        assert!((out[0] - 0.5).abs() < 1e-4, "got {}", out[0]);
+        // t=0.75 → second interval [0.5,1] → encoded to 0.5 → exp(1,2)@0.5 = 1.5
+        f.apply(&[0.75], &mut out).unwrap();
+        assert!((out[0] - 1.5).abs() < 1e-4, "got {}", out[0]);
+        // Endpoints stay within range.
+        f.apply(&[0.0], &mut out).unwrap();
+        assert!((out[0] - 0.0).abs() < 1e-4, "got {}", out[0]);
+        f.apply(&[1.0], &mut out).unwrap();
+        assert!((out[0] - 2.0).abs() < 1e-4, "got {}", out[0]);
     }
 }

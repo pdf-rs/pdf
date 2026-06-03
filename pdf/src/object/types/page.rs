@@ -117,8 +117,11 @@ pub struct Page {
     #[pdf(key = "Contents")]
     pub contents: Option<Content>,
 
-    #[pdf(key = "Rotate", default = "0")]
-    pub rotate: i32,
+    /// Number of degrees (a multiple of 90) the page is rotated clockwise when
+    /// displayed. Inheritable, so prefer the `rotate()` accessor — this is
+    /// `None` when the value must come from an ancestor `Pages` node.
+    #[pdf(key = "Rotate")]
+    pub rotate: Option<i32>,
 
     #[pdf(key = "Metadata")]
     pub metadata: Option<Primitive>,
@@ -203,7 +206,7 @@ impl Page {
             trim_box: None,
             resources: None,
             contents: None,
-            rotate: 0,
+            rotate: None,
             metadata: None,
             lgi: None,
             vp: None,
@@ -242,6 +245,14 @@ impl Page {
                 }
             }),
         }
+    }
+    /// The page rotation in degrees clockwise (a multiple of 90). `/Rotate` is
+    /// inheritable, so this falls back to the nearest ancestor `Pages` node and
+    /// finally to `0` when nothing specifies it.
+    pub fn rotate(&self) -> i32 {
+        self.rotate
+            .or_else(|| inherit(&self.parent, |pt| pt.rotate).ok().flatten())
+            .unwrap_or(0)
     }
 }
 impl SubType<PagesNode> for Page {}
