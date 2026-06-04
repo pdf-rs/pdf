@@ -500,7 +500,8 @@ where
                 Primitive::Stream(PdfStream { inner: StreamInner::InFile { file_range, .. }, info }) => {
                     let data = self.backend.read(file_range)?;
 
-                    let info_len = info.get("Length").unwrap().as_usize().unwrap();
+                    let len_val = try_opt!(info.get("Length")).clone();
+                    let info_len = t!(len_val.resolve(&resolver)).as_usize()?;
                     assert_eq!(info_len, data.len());
                     t!(info.serialize(&mut out));
                     writeln!(out, "stream")?;
