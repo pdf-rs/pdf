@@ -161,15 +161,18 @@ impl Decoder {
         &self.key[.. std::cmp::min(self.key_size, max)]
     }
 
-    pub fn new(key: Vec<u8>, key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Decoder {
-        Decoder {
+    pub fn new(key: Vec<u8>, key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Result<Decoder> {
+        if key.len() < key_size {
+            bail!("Key too short, {key_size} was specified but only {} given", key.len());
+        }
+        Ok(Decoder {
             key_size,
             key,
             method,
             encrypt_indirect_object: None,
             metadata_indirect_object: None,
             encrypt_metadata,
-        }
+        })
     }
 
     pub fn from_password(dict: &CryptDict, id: &[u8], pass: &[u8]) -> Result<Decoder> {
@@ -338,7 +341,7 @@ impl Decoder {
             let key = key_derivation_user_password_rc4(level, key_size, dict, id, pass);
 
             if check_password_rc4(level, dict.u.as_bytes(), id, &key[..std::cmp::min(key_size, 16)]) {
-                let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
+                let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata)?;
                 Ok(decoder)
             } else {
                 let password_wrap_key = key_derivation_owner_password_rc4(level, key_size, pass)?;
@@ -362,7 +365,7 @@ impl Decoder {
                 );
 
                 if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size]) {
-                    let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata);
+                    let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata)?;
                     Ok(decoder)
                 } else {
                     Err(PdfError::InvalidPassword)
@@ -472,7 +475,7 @@ impl Decoder {
                 .decrypt_padded_mut::<NoPadding>(&mut wrapped_key)
                 .map_err(|_| PdfError::InvalidPassword));
 
-            let decoder = Decoder::new(key_slice.into(),  32, method, dict.encrypt_metadata);
+            let decoder = Decoder::new(key_slice.into(),  32, method, dict.encrypt_metadata)?;
             Ok(decoder)
         } else {
             err!(format!("unsupported V value {}", level).into())
