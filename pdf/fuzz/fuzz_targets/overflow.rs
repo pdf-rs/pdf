@@ -1,6 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use pdf::enc::*;
+use pdf::object::ParseOptions;
 use std::convert::TryInto;
 
 fn get_i32(data: &[u8], offset: &mut usize) -> i32 {
@@ -55,6 +56,7 @@ fuzz_target!(|data: &[u8]| {
     if offset > data.len() { return; }
     let payload = &data[offset..];
 
+    let options = ParseOptions::tolerant();
     // Execute decode
-    let _ = decode(payload, &filter);
+    let _ = decode(payload, &filter, &options);
 });
