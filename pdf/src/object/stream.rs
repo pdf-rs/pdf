@@ -390,12 +390,12 @@ impl ObjectStream {
         if index >= self.offsets.len() {
             err!(PdfError::ObjStmOutOfBounds {index, max: self.offsets.len()});
         }
-        let start = self.inner.info.first + self.offsets[index];
+        let start = try_opt!(self.inner.info.first.checked_add(self.offsets[index]), "overflow");
         let data = self.inner.data(resolve)?;
         let end = if index == self.offsets.len() - 1 {
             data.len()
         } else {
-            self.inner.info.first + self.offsets[index + 1]
+            try_opt!(self.inner.info.first.checked_add(self.offsets[index + 1]), "overflow")
         };
 
         Ok((data, start..end))
