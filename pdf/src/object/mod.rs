@@ -42,6 +42,8 @@ pub struct ParseOptions {
 
     /// maximum number of bytes a stream can be decompressed into
     pub object_size_limit: usize,
+    pub max_img_dim: usize,
+    pub safe_jpeg: bool,
 }
 impl ParseOptions {
     pub const fn tolerant() -> Self {
@@ -51,6 +53,8 @@ impl ParseOptions {
             allow_invalid_ops: true,
             allow_missing_endobj: true,
             object_size_limit: 10 * 1024 * 1024,
+            max_img_dim: 4 * 1024,
+            safe_jpeg: false,
         }
     }
     pub const fn strict() -> Self {
@@ -60,6 +64,8 @@ impl ParseOptions {
             allow_invalid_ops: true,
             allow_missing_endobj: false,
             object_size_limit: 1024 * 1024,
+            max_img_dim: 1024,
+            safe_jpeg: true,
         }
     }
 }

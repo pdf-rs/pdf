@@ -2,7 +2,6 @@
 #![allow(dead_code)]  // TODO
 
 use itertools::Itertools;
-
 use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, ParseOptions, Resolve, Stream};
@@ -358,10 +357,29 @@ fn flate_encode(data: &[u8], params: &LZWFlateParams) -> Vec<u8> {
     }
 }
 
-pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams) -> Result<Vec<u8>> {
-    use jpeg_decoder::Decoder;
-    let mut decoder = Decoder::new(data);
-    let pixels = decoder.decode()?;
+pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams, options: &ParseOptions) -> Result<Vec<u8>> {
+    use zune_jpeg::{
+        JpegDecoder, zune_core::{
+            options::DecoderOptions as ZuneOptions,
+            bytestream::ZCursor,
+        }
+    };
+    let zune_options;
+
+    if options.safe_jpeg {
+        zune_options = ZuneOptions::new_safe();
+    } else {
+        zune_options = ZuneOptions::new_fast();
+    }
+    let zune_options = zune_options.set_max_height(options.max_img_dim).set_max_width(options.max_img_dim);
+
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), zune_options);
+    decoder.decode_headers()?;
+    let info = try_opt!(decoder.info(), "no JPEG headers");
+    let requested = info.height as usize * info.width as usize * info.components as usize;
+    check_limits!(requested, options.object_size_limit);
+
+    let mut pixels = decoder.decode()?;
     Ok(pixels)
 }
 
@@ -489,7 +507,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter, options: &ParseOptions) -> Res
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params, options),
         StreamFilter::RunLengthDecode => run_length_decode(data),
-        StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
+        StreamFilter::DCTDecode(ref params) => dct_decode(data, params, options),
 
         _ => bail!("unimplemented {filter:?}"),
     }

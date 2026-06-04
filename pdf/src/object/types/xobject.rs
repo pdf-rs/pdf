@@ -130,7 +130,7 @@ impl ImageXObject {
                 }
                 data
             }
-            StreamFilter::DCTDecode(ref p) => dct_decode(&data, p)?,
+            StreamFilter::DCTDecode(ref p) => dct_decode(&data, p, resolve.options())?,
             StreamFilter::JPXDecode => jpx_decode(&data)?,
             StreamFilter::JBIG2Decode(ref p) => {
                 let global_data = p.globals.as_ref().map(|s| s.data(resolve)).transpose()?;

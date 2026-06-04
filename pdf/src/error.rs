@@ -163,7 +163,7 @@ pub enum PdfError {
     #[snafu(display("JPEG Error, caused by\n  {}", source))]
     Jpeg {
         #[snafu(source)]
-        source: jpeg_decoder::Error,
+        source: zune_jpeg::errors::DecodeErrors,
     },
 
     #[snafu(display("IO Error, caused by\n  {}", source))]
@@ -346,7 +346,7 @@ macro_rules! err_from {
 err_from!(std::str::Utf8Error, std::string::FromUtf8Error, std::string::FromUtf16Error,
     istring::FromUtf8Error<istring::IBytes>, istring::FromUtf8Error<istring::SmallBytes> => Encoding);
 err_from!(std::num::ParseIntError, std::string::ParseError => Parse);
-err_from!(jpeg_decoder::Error => Jpeg);
+err_from!(zune_jpeg::errors::DecodeErrors => Jpeg);
 
 macro_rules! other {
     ($($t:tt)*) => ($crate::PdfError::Other { msg: format!($($t)*) })
