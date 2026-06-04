@@ -500,8 +500,8 @@ impl PsFunc {
                 PsOp::Roll => {
                     let j = stack.pop().ok_or(PostScriptError::StackUnderflow)? as isize;
                     let n = stack.pop().ok_or(PostScriptError::StackUnderflow)? as usize;
-                    let start = stack.len() - n;
-                    let slice = &mut stack[start..];
+                    let start = stack.len().checked_sub(n).ok_or(PostScriptError::StackUnderflow)?;
+                    let slice = stack.get_mut(start..).ok_or(PostScriptError::IncorrectStackSize)?;
                     if j > 0 {
                         slice.rotate_right(j as usize);
                     } else {
