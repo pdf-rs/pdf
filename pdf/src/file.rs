@@ -160,7 +160,7 @@ where
             data = Vec::from(t!(decoder.decrypt(id, &mut data)));
         }
         for filter in filters {
-            data = t!(decode(&data, filter), filter);
+            data = t!(decode(&data, filter, &self.options), filter);
         }
         Ok(data.into())
     }

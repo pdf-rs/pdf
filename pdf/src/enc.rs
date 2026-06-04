@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate as pdf;
 use crate::error::*;
-use crate::object::{Object, Resolve, Stream};
+use crate::object::{Object, ParseOptions, Resolve, Stream};
 use crate::primitive::{Primitive, Dictionary};
 use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Write};
@@ -257,23 +257,28 @@ fn encode_85(data: &[u8]) -> Vec<u8> {
     buf
 }
 
-fn inflate_bytes_zlib(data: &[u8]) -> Result<Vec<u8>> {
+fn read_limited(mut reader: impl Read, limit: usize) -> Result<Vec<u8>> {
+    let mut data = vec![];
+    reader.by_ref().take(limit as u64).read_to_end(&mut data)?;
+    if reader.bytes().next().is_some() {
+        return Err(PdfError::LimitsExeeded { requested: data.len() + 1 });
+    }
+    Ok(data)
+}
+
+fn inflate_bytes_zlib(data: &[u8], limit: usize) -> Result<Vec<u8>> {
     use libflate::zlib::Decoder;
-    let mut decoder = Decoder::new(data)?;
-    let mut decoded = Vec::new();
-    decoder.read_to_end(&mut decoded)?;
-    Ok(decoded)
+    let decoder = Decoder::new(data)?;
+    read_limited(decoder, limit)
 }
 
-fn inflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
+fn inflate_bytes(data: &[u8], limit: usize) -> Result<Vec<u8>> {
     use libflate::deflate::Decoder;
-    let mut decoder = Decoder::new(data);
-    let mut decoded = Vec::new();
-    decoder.read_to_end(&mut decoded)?;
-    Ok(decoded)
+    let decoder = Decoder::new(data);
+    read_limited(decoder, limit)
 }
 
-pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions) -> Result<Vec<u8>> {
     if !(0..1024).contains(&params.n_components) {
         bail!("n_components out of range");
     }
@@ -288,9 +293,9 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
 
     // First flate decode
     let decoded = {
-        if let Ok(data) = inflate_bytes_zlib(data) {
+        if let Ok(data) = inflate_bytes_zlib(data, options.object_size_limit) {
             data
-        } else if let Ok(data) = inflate_bytes(data) {
+        } else if let Ok(data) = inflate_bytes(data, options.object_size_limit) {
             data
         } else {
             dump_data(data);
@@ -305,6 +310,7 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         let rows = inp.len() / (stride+1);
 
         // output buffer
+        check_limits!(rows * stride, options.object_size_limit);
         let mut out = vec![0; rows * stride];
 
         // Apply inverse predictor
@@ -476,12 +482,12 @@ pub fn jbig2_decode(data: &[u8], globals: &[u8]) -> Result<Vec<u8>> {
     JBIG2_DECODER.get().ok_or_else(|| PdfError::Other { msg: "jbig2 decoder not set".into()})?(&data)
 }
 
-pub fn decode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
+pub fn decode(data: &[u8], filter: &StreamFilter, options: &ParseOptions) -> Result<Vec<u8>> {
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
         StreamFilter::ASCII85Decode => decode_85(data),
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
-        StreamFilter::FlateDecode(ref params) => flate_decode(data, params),
+        StreamFilter::FlateDecode(ref params) => flate_decode(data, params, options),
         StreamFilter::RunLengthDecode => run_length_decode(data),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params),
 

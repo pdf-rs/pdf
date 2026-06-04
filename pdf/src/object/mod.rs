@@ -39,6 +39,9 @@ pub struct ParseOptions {
     pub allow_xref_error: bool,
     pub allow_invalid_ops: bool,
     pub allow_missing_endobj: bool,
+
+    /// maximum number of bytes a stream can be decompressed into
+    pub object_size_limit: usize,
 }
 impl ParseOptions {
     pub const fn tolerant() -> Self {
@@ -47,6 +50,7 @@ impl ParseOptions {
             allow_xref_error: true,
             allow_invalid_ops: true,
             allow_missing_endobj: true,
+            object_size_limit: 10 * 1024 * 1024,
         }
     }
     pub const fn strict() -> Self {
@@ -55,6 +59,7 @@ impl ParseOptions {
             allow_xref_error: false,
             allow_invalid_ops: true,
             allow_missing_endobj: false,
+            object_size_limit: 1024 * 1024,
         }
     }
 }

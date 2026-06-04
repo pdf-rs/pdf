@@ -224,6 +224,11 @@ pub enum PdfError {
     #[snafu(display("Invalid"))]
     Invalid,
 
+    #[snafu(display("LimitsExeeded: {}", requested))]
+    LimitsExeeded {
+        requested: usize,
+    },
+
     #[snafu(display("Could not parse as {} because of {}, or as {} because of {}", left_t, left_e, right_t, right_e))]
     Either { left_t: &'static str, left_e: Box<PdfError>, right_t: &'static str, right_e: Box<PdfError> }
 }
@@ -362,7 +367,14 @@ macro_rules! unimplemented {
         bail!("Unimplemented @ {}:{}", file!(), line!())
     };
 }
-
+macro_rules! check_limits {
+    ($e:expr, $limit:expr) => {
+        let requested = $e;
+        if requested > $limit {
+            return Err($crate::PdfError::LimitsExeeded { requested });
+        }
+    };
+}
 #[cfg(not(feature = "dump"))]
 pub fn dump_data(_data: &[u8]) {}
 

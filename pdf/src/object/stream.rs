@@ -96,7 +96,7 @@ impl<I: Object> Stream<I> {
                     use std::borrow::Cow;
                     let mut data: Cow<[u8]> = (&**data).into();
                     for filter in filters {
-                        data = t!(decode(&data, filter), filter).into();
+                        data = t!(decode(&data, filter, resolve.options()), filter).into();
                     }
                     Ok(data.into())
                 }
