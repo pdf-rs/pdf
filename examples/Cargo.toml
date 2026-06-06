@@ -10,10 +10,16 @@ resolver = "2"
 pdf = { path = "../pdf" }
 datasize = "0.2.13"
 clap = { version = "*", features = ["derive"] }
-image = "*"
-uuid = { version = "*", features = ["v4"] }
+image = { version = "*", default-features = false, features = ["png", "jpeg"] }
 qrcodegen = "*"
 pdf_derive = { path = "../pdf_derive" }
+
+[target.'cfg(not(target_arch="wasm32"))'.dependencies]
+uuid = { version = "*", features = ["v4", "rng-getrandom"] }
+
+[target.'cfg(target_arch="wasm32")'.dependencies]
+uuid = { version = "*", features = ["v4", "js"] }
+
 
 [[bin]]
 name = "extract_page"
