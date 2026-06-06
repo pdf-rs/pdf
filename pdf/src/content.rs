@@ -689,7 +689,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
             }
             Op::TextScaling { horiz_scale } => writeln!(f, "{} Tz", horiz_scale)?,
             Op::Leading { leading } => match ops[1..] {
-                [Op::MoveTextPosition { translation }, ..] if leading == -translation.x => {
+                [Op::MoveTextPosition { translation }, ..] if leading == -translation.y => {
                     writeln!(f, "{} {} TD", translation.x, translation.y)?;
                     advance += 1;
                 }
@@ -744,7 +744,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
 
 impl Content {
     pub fn from_ops(operations: Vec<Op>, update: &mut impl Updater) -> Result<Self> {
-        let data = serialize_ops(&operations).unwrap();
+        let data = serialize_ops(&operations)?;
         Ok(Content {
             parts: vec![update.create(Stream::new((), &data)?)?]
         })
