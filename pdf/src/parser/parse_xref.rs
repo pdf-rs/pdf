@@ -12,7 +12,11 @@ use std::convert::TryInto;
 fn parse_xref_section_from_stream(first_id: u32, mut num_entries: usize, width: &[usize], data: &mut &[u8], resolve: &impl Resolve) -> Result<XRefSection> {
     let mut entries = Vec::new();
     let [w0, w1, w2]: [usize; 3] = width.try_into().map_err(|_| other!("invalid xref length array"))?;
-    if num_entries * (w0 + w1 + w2) > data.len() {
+    if w0 >= 20 || w1 >= 20 || w2 >= 20 {
+        bail!("XRref widths far too large");
+    }
+
+    if try_opt!(num_entries.checked_mul(w0 + w1 + w2)) > data.len() {
         if resolve.options().allow_xref_error {
             warn!("not enough xref data. truncating.");
             num_entries = data.len() / (w0 + w1 + w2);
@@ -76,11 +80,11 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
 
     let xref_stream = t!(Stream::<XRefInfo>::from_primitive(Primitive::Stream(xref_stream), resolve));
     let mut data_left = &*t!(xref_stream.data(resolve));
-    
+
     let width = &xref_stream.w;
 
     let index = &xref_stream.index;
-    
+
     if index.len() % 2 != 0 {
         return Err(PdfError::Other { msg: format!("xref stream has {} elements which is not an even number", index.len()) });
     }
@@ -98,7 +102,7 @@ pub fn parse_xref_stream_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) 
 /// Reads xref sections (from table) and trailer starting at the position of the Lexer.
 pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
     let mut sections = Vec::new();
-    
+
     // Keep reading subsections until we hit `trailer`
     while lexer.peek()? != "trailer" {
         let start_id = t!(lexer.next_as::<u32>());

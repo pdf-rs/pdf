@@ -342,6 +342,9 @@ impl Font {
                 let mut iter = cid.widths.iter();
                 while let Some(p) = iter.next() {
                     let c1 = p.as_usize()?;
+                    if! c1 == 0 {
+                        return Err(PdfError::CidDecode);
+                    }
                     match iter.next() {
                         Some(Primitive::Array(array)) => {
                             widths.ensure_cid(c1 + array.len() - 1);
@@ -363,8 +366,9 @@ impl Font {
                             }
                         },
                         Some(&Primitive::Integer(c2)) => {
+                            let c2: usize = c2.try_into()?;
                             let w = try_opt!(iter.next()).as_number()?;
-                            for c in c1..=(c2 as usize) {
+                            for c in c1..= c2 {
                                 widths.set(c, w);
                             }
                         }
