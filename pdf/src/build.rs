@@ -319,7 +319,7 @@ impl<R: Resolve> ImporterMap<R> {
         for b_key in b_unvisited.iter() {
             println!("missing key {b_key} in a.");
         }
-        Ok(same && !b_unvisited.is_empty())
+        Ok(same && b_unvisited.is_empty())
     }
     fn compare_prim(
         &self,
