@@ -75,7 +75,7 @@ impl<'a> Lexer<'a> {
     pub fn next_stream(&mut self) -> Result<()> {
         let pos = self.skip_whitespace(self.pos)?;
         if !self.buf[pos ..].starts_with(b"stream") {
-            // bail!("next token isn't 'stream'");
+            bail!("next token isn't 'stream'");
         }
 
         let &b0 = self.buf.get(pos + 6).ok_or(PdfError::EOF)?;
