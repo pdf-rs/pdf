@@ -1,16 +1,16 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
-
 use crate as pdf;
-use aes::cipher::generic_array::{sequence::Split, GenericArray};
-use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use aes::cipher::block_padding::{NoPadding, Pkcs7};
-use sha2::{Digest, Sha256, Sha384, Sha512};
-use std::fmt;
-use std::collections::HashMap;
-use datasize::DataSize;
-use crate::object::PlainRef;
-use crate::primitive::{Dictionary, PdfString, Name};
 use crate::error::{PdfError, Result};
+use crate::object::PlainRef;
+use crate::primitive::{Dictionary, Name, PdfString};
+use aes::cipher::block_padding::{NoPadding, Pkcs7};
+use aes::cipher::inout::InOutBufReserved;
+use aes::cipher::{Array, BlockModeEncrypt, InOutBuf};
+use aes::cipher::{BlockModeDecrypt, KeyIvInit};
+use datasize::DataSize;
+use sha2::{Digest, Sha256, Sha384, Sha512};
+use std::collections::HashMap;
+use std::fmt;
 
 type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
 type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
@@ -470,12 +470,12 @@ impl Decoder {
                 }
             };
 
-            let zero_iv = GenericArray::from_slice(&[0u8; 16]);
+            let zero_iv = Array::from_slice(&[0u8; 16]);
             let key_slice = t!(Aes256CbcDec::new(&intermediate_key, zero_iv)
-                .decrypt_padded_mut::<NoPadding>(&mut wrapped_key)
+                .decrypt_padded_inout::<NoPadding>(InOutBuf::from(wrapped_key.as_mut_slice()))
                 .map_err(|_| PdfError::InvalidPassword));
 
-            let decoder = Decoder::new(key_slice.into(),  32, method, dict.encrypt_metadata)?;
+            let decoder = Decoder::new(key_slice.into(), 32, method, dict.encrypt_metadata)?;
             Ok(decoder)
         } else {
             err!(format!("unsupported V value {}", level).into())
@@ -513,10 +513,12 @@ impl Decoder {
             }
             data_total_len = data_repeat_len * 64;
 
+            let inout_buf =
+                InOutBufReserved::from_mut_slice(&mut data[..data_total_len], data_total_len)
+                    .unwrap();
+
             // The plaintext length will always be a multiple of the block size, unwrap is okay
-            let encrypted = aes
-                .encrypt_padded_mut::<NoPadding>(&mut data[..data_total_len], data_total_len)
-                .unwrap();
+            let encrypted = aes.encrypt_padded_inout::<NoPadding>(inout_buf).unwrap();
 
             let sum: usize = encrypted[..16].iter().map(|byte| *byte as usize).sum();
             block_size = sum % 3 * 16 + 32;
@@ -603,7 +605,7 @@ impl Decoder {
                 let cipher =
                     t!(Aes128CbcDec::new_from_slices(key, iv).map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
-                    .decrypt_padded_mut::<Pkcs7>(ciphertext)
+                    .decrypt_padded_inout::<Pkcs7>(InOutBuf::from(ciphertext))
                     .map_err(|_| PdfError::DecryptionFailure)))
             }
             CryptMethod::AESV3 => {
@@ -614,7 +616,7 @@ impl Decoder {
                 let cipher =
                     t!(Aes256CbcDec::new_from_slices(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
-                    .decrypt_padded_mut::<Pkcs7>(ciphertext)
+                    .decrypt_padded_inout::<Pkcs7>(InOutBuf::from(ciphertext))
                     .map_err(|_| PdfError::DecryptionFailure)))
             }
         }
