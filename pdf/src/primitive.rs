@@ -808,8 +808,75 @@ fn parse_or<T: str::FromStr + Clone>(buffer: &str, range: Range<usize>, default:
         .unwrap_or(default)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, DataSize)]
 pub struct Date {
+    pub string: PdfString,
+}
+
+impl Object for Date {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        match p.resolve(r)? {
+            Primitive::String(string) => Ok(Date { string }),
+            p => unexpected_primitive!(String, p.get_debug_name()),
+        }
+    }
+}
+
+impl ObjectWrite for Date {
+    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::String(self.string.clone()))
+    }
+}
+
+impl Date {
+    pub fn try_parse(&self) -> Result<ParsedDate> {
+        let s = str::from_utf8(&self.string.data)?;
+        if s.starts_with("D:") {
+            let year = match s.get(2..6) {
+                Some(year) => str::parse::<u16>(year)?,
+                None => bail!("Missing obligatory year in date"),
+            };
+
+            let (time, rel, zone) = match s.find(['+', '-', 'Z']) {
+                Some(p) => {
+                    let rel = match &s[p..p + 1] {
+                        "-" => TimeRel::Earlier,
+                        "+" => TimeRel::Later,
+                        "Z" => TimeRel::Universal,
+                        _ => unreachable!(),
+                    };
+                    (&s[..p], rel, &s[p + 1..])
+                }
+                None => (s, TimeRel::Universal, ""),
+            };
+
+            let month = parse_or(time, 6..8, 1);
+            let day = parse_or(time, 8..10, 1);
+            let hour = parse_or(time, 10..12, 0);
+            let minute = parse_or(time, 12..14, 0);
+            let second = parse_or(time, 14..16, 0);
+            let tz_hour = parse_or(zone, 0..2, 0);
+            let tz_minute = parse_or(zone, 3..5, 0);
+
+            Ok(ParsedDate {
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+                tz_hour,
+                tz_minute,
+                rel,
+            })
+        } else {
+            bail!("Failed parsing date");
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedDate {
     pub year: u16,
     pub month: u8,
     pub day: u8,
@@ -821,69 +888,9 @@ pub struct Date {
     pub tz_minute: u8,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub enum TimeRel {
-    Earlier,
-    Later,
-    Universal,
-}
-datasize::non_dynamic_const_heap_size!(Date, std::mem::size_of::<Date>());
-
-impl Object for Date {
-    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
-        match p.resolve(r)? {
-            Primitive::String(PdfString { data }) => {
-                let s = str::from_utf8(&data)?;
-                if s.starts_with("D:") {
-                    let year = match s.get(2..6) {
-                        Some(year) => str::parse::<u16>(year)?,
-                        None => bail!("Missing obligatory year in date"),
-                    };
-
-                    let (time, rel, zone) = match s.find(['+', '-', 'Z']) {
-                        Some(p) => {
-                            let rel = match &s[p..p + 1] {
-                                "-" => TimeRel::Earlier,
-                                "+" => TimeRel::Later,
-                                "Z" => TimeRel::Universal,
-                                _ => unreachable!(),
-                            };
-                            (&s[..p], rel, &s[p + 1..])
-                        }
-                        None => (s, TimeRel::Universal, ""),
-                    };
-
-                    let month = parse_or(time, 6..8, 1);
-                    let day = parse_or(time, 8..10, 1);
-                    let hour = parse_or(time, 10..12, 0);
-                    let minute = parse_or(time, 12..14, 0);
-                    let second = parse_or(time, 14..16, 0);
-                    let tz_hour = parse_or(zone, 0..2, 0);
-                    let tz_minute = parse_or(zone, 3..5, 0);
-
-                    Ok(Date {
-                        year,
-                        month,
-                        day,
-                        hour,
-                        minute,
-                        second,
-                        tz_hour,
-                        tz_minute,
-                        rel,
-                    })
-                } else {
-                    bail!("Failed parsing date");
-                }
-            }
-            p => unexpected_primitive!(String, p.get_debug_name()),
-        }
-    }
-}
-
-impl ObjectWrite for Date {
-    fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
-        let Date {
+impl ParsedDate {
+    pub fn to_date(&self) -> Result<Date> {
+        let Self {
             year,
             month,
             day,
@@ -911,9 +918,19 @@ impl ObjectWrite for Date {
         };
 
         let s = format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}{o}{tz_hour:02}'{tz_minute:02}");
-        Ok(Primitive::String(PdfString { data: s.into() }))
+        Ok(Date {
+            string: PdfString { data: s.into() },
+        })
     }
 }
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub enum TimeRel {
+    Earlier,
+    Later,
+    Universal,
+}
+datasize::non_dynamic_const_heap_size!(ParsedDate, std::mem::size_of::<ParsedDate>());
 
 #[cfg(test)]
 mod tests {
@@ -922,7 +939,7 @@ mod tests {
         primitive::{PdfString, TimeRel},
     };
 
-    use super::Date;
+    use super::{Date, ParsedDate};
     #[test]
     fn utf16be_string() {
         let s = PdfString::new([0xfe, 0xff, 0x20, 0x09].as_slice().into());
@@ -968,9 +985,12 @@ mod tests {
     #[test]
     fn date() {
         let p = PdfString::from("D:199812231952-08'00");
-        let d = Date::from_primitive(p.into(), &NoResolve);
+        let d = Date::from_primitive(p.into(), &NoResolve)
+            .unwrap()
+            .try_parse()
+            .unwrap();
 
-        let d2 = Date {
+        let d2 = ParsedDate {
             year: 1998,
             month: 12,
             day: 23,
@@ -981,6 +1001,6 @@ mod tests {
             tz_hour: 8,
             tz_minute: 0,
         };
-        assert_eq!(d.unwrap(), d2);
+        assert_eq!(d, d2);
     }
 }
