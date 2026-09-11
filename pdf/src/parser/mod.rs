@@ -137,6 +137,19 @@ pub fn parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Co
         }
     }
 }
+
+/// Parse an integer token.
+///
+/// `/P` in an encryption dictionary is a 32-bit flag word that the spec reads
+/// as unsigned, so some writers put `4294967292` where others put `-4`. A value
+/// between `i32::MAX` and `u32::MAX` is kept as the `i32` with the same bits.
+/// Anything larger is still an error.
+fn parse_integer(lexeme: &Substr) -> Result<i32> {
+    lexeme
+        .to::<i32>()
+        .or_else(|err| lexeme.to::<u32>().map(|n| n as i32).map_err(|_| err))
+}
+
 fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, flags: ParseFlags, max_depth: usize) -> Result<Primitive> {
 
     let input = lexer.get_remaining_slice();
@@ -177,13 +190,13 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
                 check(flags, ParseFlags::INTEGER)?;
                 // We are probably in an array of numbers - it's not a reference anyway
                 lexer.set_pos(pos_bk); // (roll back the lexer first)
-                Primitive::Integer(t!(first_lexeme.to::<i32>()))
+                Primitive::Integer(t!(parse_integer(&first_lexeme)))
             }
         } else {
             check(flags, ParseFlags::INTEGER)?;
             // It is but a number
             lexer.set_pos(pos_bk); // (roll back the lexer first)
-            Primitive::Integer(t!(first_lexeme.to::<i32>()))
+            Primitive::Integer(t!(parse_integer(&first_lexeme)))
         }
     } else if let Some(s) = first_lexeme.real_number() {
         check(flags, ParseFlags::NUMBER)?;
@@ -370,6 +383,34 @@ mod tests {
             assert_eq!(dict.len(), 2);
             assert!(dict.get("").unwrap().as_bool().unwrap());
         }
+    }
+
+    #[test]
+    fn integers_above_i32_max_read_as_u32_bits() {
+        use super::ParseFlags;
+        use crate::object::NoResolve;
+
+        // Flag words such as /P are sometimes written as their unsigned value.
+        // The array covers both places the parser builds an integer: one
+        // followed by another integer, and the last one, followed by `]`.
+        let data = b"[4294967292 -4 2147483647 2147483648 4294967295]";
+        let array = super::parse(data, &NoResolve, ParseFlags::ARRAY)
+            .unwrap()
+            .into_array()
+            .unwrap();
+        let ints: Vec<i32> = array.iter().map(|p| p.as_integer().unwrap()).collect();
+        assert_eq!(ints, [-4, -4, i32::MAX, i32::MIN, -1]);
+
+        // The case from the issue: /P in an encryption dictionary.
+        let data = b"<</P 4294967292 /R 3>>";
+        let dict = super::parse(data, &NoResolve, ParseFlags::DICT)
+            .unwrap()
+            .into_dictionary()
+            .unwrap();
+        assert_eq!(dict.get("P").unwrap().as_integer().unwrap(), -4);
+
+        // Beyond u32 is still an error.
+        assert!(super::parse(b"[4294967296]", &NoResolve, ParseFlags::ARRAY).is_err());
     }
 
     #[test]
