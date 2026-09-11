@@ -319,7 +319,9 @@ struct SampledFunctionInput {
 }
 impl SampledFunctionInput {
     fn map(&self, x: f32) -> (usize, usize, f32) {
-        let x = x.clamp(self.domain.0, self.domain.1);
+        // /Domain is not validated, and f32::clamp panics if min > max.
+        let (d0, d1) = self.domain;
+        let x = x.clamp(d0.min(d1), d0.max(d1));
         let y = x.mul_add(self.encode_scale, self.encode_offset);
         (y.floor() as usize, self.size, y.fract())
     }
@@ -598,7 +600,7 @@ impl PsOp {
 mod tests {
     use super::*;
     use crate::object::NoResolve;
-    use crate::primitive::{Dictionary, Primitive};
+    use crate::primitive::{Dictionary, PdfStream, Primitive, StreamInner};
 
     fn nums(v: &[f32]) -> Primitive {
         Primitive::Array(v.iter().map(|&x| Primitive::Number(x)).collect())
@@ -642,5 +644,32 @@ mod tests {
         assert!((out[0] - 0.0).abs() < 1e-4, "got {}", out[0]);
         f.apply(&[1.0], &mut out).unwrap();
         assert!((out[0] - 2.0).abs() < 1e-4, "got {}", out[0]);
+    }
+
+    #[test]
+    fn sampled_function_with_inverted_domain() {
+        // A two-sample ramp from 0 to 1 whose /Domain is written high to low.
+        // Evaluating it used to panic in f32::clamp.
+        let mut d = Dictionary::new();
+        d.insert("FunctionType", Primitive::Integer(0));
+        d.insert("Domain", nums(&[1.0, 0.0]));
+        d.insert("Range", nums(&[0.0, 1.0]));
+        d.insert("Size", Primitive::Array(vec![Primitive::Integer(2)]));
+        d.insert("BitsPerSample", Primitive::Integer(8));
+        d.insert("Length", Primitive::Integer(2));
+        let stream = PdfStream {
+            info: d,
+            inner: StreamInner::Pending {
+                data: Arc::from(&[0u8, 255][..]),
+            },
+        };
+
+        let f = Function::from_primitive(Primitive::Stream(stream), &NoResolve).unwrap();
+        let mut out = [0.0];
+        for x in [-1.0, 0.0, 0.25, 0.5, 1.0, 2.0] {
+            f.apply(&[x], &mut out).unwrap();
+            let want = x.clamp(0.0, 1.0);
+            assert!((out[0] - want).abs() < 1e-4, "x = {x}: got {}", out[0]);
+        }
     }
 }
