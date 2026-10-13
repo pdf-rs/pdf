@@ -78,6 +78,21 @@ fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
         let token = t!(lexer.next());
         if token.starts_with(b"/") {
             let key = token.reslice(1..).to_name()?;
+            // `/P` of the encryption dictionary is a 32-bit flag word that some writers
+            // give as its unsigned value (4294967292 instead of -4). Keep the same bits.
+            // This is deliberately not applied to integers in general.
+            if key.as_str() == "P" {
+                let pos = lexer.get_pos();
+                if let Ok(lexeme) = lexer.next() {
+                    if lexeme.to::<i32>().is_err() {
+                        if let Ok(n) = lexeme.to::<u32>() {
+                            dict.insert(key, Primitive::Integer(n as i32));
+                            continue;
+                        }
+                    }
+                }
+                lexer.set_pos(pos);
+            }
             let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, ParseFlags::ANY, max_depth));
             dict.insert(key, obj);
         } else if token.equals(b">>") {
@@ -370,6 +385,26 @@ mod tests {
             assert_eq!(dict.len(), 2);
             assert!(dict.get("").unwrap().as_bool().unwrap());
         }
+    }
+
+    #[test]
+    fn unsigned_p_only_in_dict_key_p() {
+        use super::ParseFlags;
+        use crate::object::NoResolve;
+
+        let parse = |data: &[u8], flags| super::parse(data, &NoResolve, flags);
+        let p = |data: &[u8]| {
+            parse(data, ParseFlags::DICT).unwrap().into_dictionary().unwrap()
+                .get("P").unwrap().as_integer().unwrap()
+        };
+        assert_eq!(p(b"<</P 4294967292 /R 3>>"), -4);
+        assert_eq!(p(b"<</P -4 /R 3>>"), -4);
+        assert_eq!(p(b"<</R 3 /P 2147483648>>"), i32::MIN);
+
+        // beyond u32, and every other place, is still an error
+        assert!(parse(b"<</P 4294967296>>", ParseFlags::DICT).is_err());
+        assert!(parse(b"<</Q 4294967292>>", ParseFlags::DICT).is_err());
+        assert!(parse(b"[4294967292 1]", ParseFlags::ARRAY).is_err());
     }
 
     #[test]

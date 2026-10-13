@@ -1,8 +1,8 @@
 /// PDF "cryptography" – This is why you don't write your own crypto.
 use crate as pdf;
 use crate::error::{PdfError, Result};
-use crate::object::PlainRef;
-use crate::primitive::{Dictionary, Name, PdfString};
+use crate::object::{Object, ObjectWrite, PlainRef, Resolve, Updater};
+use crate::primitive::{Dictionary, Name, PdfString, Primitive};
 use aes::cipher::block_padding::{NoPadding, Pkcs7};
 use aes::cipher::inout::InOutBufReserved;
 use aes::cipher::{Array, BlockModeEncrypt, InOutBuf};
@@ -60,6 +60,43 @@ impl Rc4 {
     }
 }
 
+/// The `/P` entry: a 32-bit set of permission flags.
+///
+/// The spec allows reading it as signed or unsigned (`-4` and `4294967292` are
+/// the same flags), so both are accepted when reading (the parser maps the
+/// unsigned form to the `i32` with the same bits). It is always written as a
+/// signed integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, DataSize)]
+pub struct Permissions(pub i32);
+
+impl Permissions {
+    pub fn bits(self) -> u32 {
+        self.0 as u32
+    }
+}
+
+impl Object for Permissions {
+    fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
+        let p = match p {
+            Primitive::Reference(id) => r.resolve(id)?,
+            p => p,
+        };
+        match p {
+            Primitive::Integer(n) => Ok(Permissions(n)),
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Integer",
+                found: p.get_debug_name(),
+            }),
+        }
+    }
+}
+
+impl ObjectWrite for Permissions {
+    fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
+        Ok(Primitive::Integer(self.0))
+    }
+}
+
 /// 7.6.1 Table 20 + 7.6.3.2 Table 21
 #[derive(Object, Debug, Clone, DataSize)]
 pub struct CryptDict {
@@ -73,7 +110,7 @@ pub struct CryptDict {
     r: u32,
 
     #[pdf(key="P")]
-    p: i32,
+    p: Permissions,
 
     #[pdf(key="V")]
     v: i32,
@@ -235,7 +272,7 @@ impl Decoder {
             pass: &[u8],
         ) -> Vec<u8> {
             let o = dict.o.as_bytes();
-            let p = dict.p;
+            let p = dict.p.0;
             // 7.6.3.3 - Algorithm 2
             // a) and b)
             let mut hash = md5::Context::new();
@@ -701,5 +738,22 @@ mod tests {
             file.trailer.encrypt_dict.unwrap().o.as_ref(),
             b"owner pwd hash!!",
         );
+    }
+
+    use super::*;
+    use crate::object::{NoResolve, NoUpdate};
+
+    #[test]
+    fn permissions_read_unsigned_write_signed() {
+        let p = crate::parser::parse(b"<</P 4294967292>>", &NoResolve, crate::parser::ParseFlags::DICT)
+            .unwrap()
+            .into_dictionary()
+            .unwrap()
+            .remove("P")
+            .unwrap();
+        let perm = Permissions::from_primitive(p, &NoResolve).unwrap();
+        assert_eq!(perm, Permissions(-4));
+        assert_eq!(perm.bits(), 4294967292);
+        assert_eq!(perm.to_primitive(&mut NoUpdate).unwrap(), Primitive::Integer(-4));
     }
 }
