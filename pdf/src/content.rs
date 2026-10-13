@@ -504,8 +504,17 @@ impl Object for Content {
                     parts.push(part);
                 }
             }
-            Primitive::Reference(_) => {
-                parts.push(RcRef::from_primitive(p, resolve)?);
+            Primitive::Reference(r) => {
+                // a reference to a single stream, or to an array of streams
+                match resolve.resolve(r)? {
+                    Primitive::Array(arr) => {
+                        for p in arr {
+                            let part = t!(RcRef::from_primitive(p, resolve));
+                            parts.push(part);
+                        }
+                    }
+                    _ => parts.push(RcRef::from_primitive(p, resolve)?),
+                }
             }
             p => {
                 return Err(PdfError::UnexpectedPrimitive { expected: "list of references or reference", found: p.get_debug_name() });
