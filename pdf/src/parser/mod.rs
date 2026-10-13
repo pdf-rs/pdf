@@ -78,21 +78,6 @@ fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Con
         let token = t!(lexer.next());
         if token.starts_with(b"/") {
             let key = token.reslice(1..).to_name()?;
-            // `/P` of the encryption dictionary is a 32-bit flag word that some writers
-            // give as its unsigned value (4294967292 instead of -4). Keep the same bits.
-            // This is deliberately not applied to integers in general.
-            if key.as_str() == "P" {
-                let pos = lexer.get_pos();
-                if let Ok(lexeme) = lexer.next() {
-                    if lexeme.to::<i32>().is_err() {
-                        if let Ok(n) = lexeme.to::<u32>() {
-                            dict.insert(key, Primitive::Integer(n as i32));
-                            continue;
-                        }
-                    }
-                }
-                lexer.set_pos(pos);
-            }
             let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, ParseFlags::ANY, max_depth));
             dict.insert(key, obj);
         } else if token.equals(b">>") {
@@ -192,13 +177,13 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
                 check(flags, ParseFlags::INTEGER)?;
                 // We are probably in an array of numbers - it's not a reference anyway
                 lexer.set_pos(pos_bk); // (roll back the lexer first)
-                Primitive::Integer(t!(first_lexeme.to::<i32>()))
+                Primitive::Integer(t!(first_lexeme.to::<i64>()))
             }
         } else {
             check(flags, ParseFlags::INTEGER)?;
             // It is but a number
             lexer.set_pos(pos_bk); // (roll back the lexer first)
-            Primitive::Integer(t!(first_lexeme.to::<i32>()))
+            Primitive::Integer(t!(first_lexeme.to::<i64>()))
         }
     } else if let Some(s) = first_lexeme.real_number() {
         check(flags, ParseFlags::NUMBER)?;
@@ -388,23 +373,21 @@ mod tests {
     }
 
     #[test]
-    fn unsigned_p_only_in_dict_key_p() {
+    fn integers_are_64_bit() {
         use super::ParseFlags;
         use crate::object::NoResolve;
 
-        let parse = |data: &[u8], flags| super::parse(data, &NoResolve, flags);
-        let p = |data: &[u8]| {
-            parse(data, ParseFlags::DICT).unwrap().into_dictionary().unwrap()
-                .get("P").unwrap().as_integer().unwrap()
-        };
-        assert_eq!(p(b"<</P 4294967292 /R 3>>"), -4);
-        assert_eq!(p(b"<</P -4 /R 3>>"), -4);
-        assert_eq!(p(b"<</R 3 /P 2147483648>>"), i32::MIN);
+        let array = super::parse(b"[4294967292 -4 1]", &NoResolve, ParseFlags::ARRAY)
+            .unwrap()
+            .into_array()
+            .unwrap();
+        assert_eq!(array[0].as_i64().unwrap(), 4294967292);
+        // only the 32-bit accessors reject it
+        assert!(array[0].as_integer().is_err());
+        assert!(array[0].as_u32().is_ok());
+        assert_eq!(array[1].as_integer().unwrap(), -4);
 
-        // beyond u32, and every other place, is still an error
-        assert!(parse(b"<</P 4294967296>>", ParseFlags::DICT).is_err());
-        assert!(parse(b"<</Q 4294967292>>", ParseFlags::DICT).is_err());
-        assert!(parse(b"[4294967292 1]", ParseFlags::ARRAY).is_err());
+        assert!(super::parse(b"[9223372036854775808 1]", &NoResolve, ParseFlags::ARRAY).is_err());
     }
 
     #[test]

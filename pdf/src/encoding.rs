@@ -76,7 +76,7 @@ impl ObjectWrite for Encoding {
 
             for &(&gid, name) in diff_list.iter() {
                 if !last.map(|n| n + 1 == gid).unwrap_or(false) {
-                    list.push(Primitive::Integer(gid as i32));
+                    list.push(Primitive::Integer(gid as i64));
                 }
 
                 list.push(Primitive::Name(name.clone()));

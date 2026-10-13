@@ -598,7 +598,7 @@ impl Object for i32 {
 }
 impl ObjectWrite for i32 {
     fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
-        Ok(Primitive::Integer(*self))
+        Ok(Primitive::Integer(*self as i64))
     }
 }
 

@@ -193,3 +193,14 @@ fn parse_objects_from_stream() {
 }
 
 // TODO test decoding
+
+// `/P` written as the unsigned 32-bit value (4294967292 instead of -4), see #293.
+#[test]
+fn unsigned_permissions() {
+    let file = run!(FileOptions::uncached()
+        .password(b"foo")
+        .open(file_path("unsigned_p/bad-encrypted.pdf")));
+    for i in 0..file.num_pages() {
+        let _ = run!(file.get_page(i));
+    }
+}

@@ -17,7 +17,7 @@ use std::{fmt, io, str};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
     Null,
-    Integer(i32),
+    Integer(i64),
     Number(f32),
     Boolean(bool),
     String(PdfString),
@@ -577,6 +577,12 @@ impl Primitive {
     }
     pub fn as_integer(&self) -> Result<i32> {
         match *self {
+            Primitive::Integer(n) => i32::try_from(n).map_err(|_| other!("integer {} out of range for i32", n)),
+            ref p => unexpected_primitive!(Integer, p.get_debug_name()),
+        }
+    }
+    pub fn as_i64(&self) -> Result<i64> {
+        match *self {
             Primitive::Integer(n) => Ok(n),
             ref p => unexpected_primitive!(Integer, p.get_debug_name()),
         }
@@ -590,14 +596,14 @@ impl Primitive {
     }
     pub fn as_u32(&self) -> Result<u32> {
         match *self {
-            Primitive::Integer(n) if n >= 0 => Ok(n as u32),
+            Primitive::Integer(n) if n >= 0 => u32::try_from(n).map_err(|_| other!("integer {} out of range for u32", n)),
             Primitive::Integer(_) => bail!("negative integer"),
             ref p => unexpected_primitive!(Integer, p.get_debug_name()),
         }
     }
     pub fn as_usize(&self) -> Result<usize> {
         match *self {
-            Primitive::Integer(n) if n >= 0 => Ok(n as usize),
+            Primitive::Integer(n) if n >= 0 => usize::try_from(n).map_err(|_| other!("integer {} out of range for usize", n)),
             Primitive::Integer(_) => bail!("negative integer"),
             ref p => unexpected_primitive!(Integer, p.get_debug_name()),
         }
@@ -687,6 +693,11 @@ impl Primitive {
 
 impl From<i32> for Primitive {
     fn from(x: i32) -> Primitive {
+        Primitive::Integer(x as i64)
+    }
+}
+impl From<i64> for Primitive {
+    fn from(x: i64) -> Primitive {
         Primitive::Integer(x)
     }
 }

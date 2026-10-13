@@ -63,9 +63,8 @@ impl Rc4 {
 /// The `/P` entry: a 32-bit set of permission flags.
 ///
 /// The spec allows reading it as signed or unsigned (`-4` and `4294967292` are
-/// the same flags), so both are accepted when reading (the parser maps the
-/// unsigned form to the `i32` with the same bits). It is always written as a
-/// signed integer.
+/// the same flags), so both are accepted when reading. It is always written as
+/// a signed integer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DataSize)]
 pub struct Permissions(pub i32);
 
@@ -82,7 +81,11 @@ impl Object for Permissions {
             p => p,
         };
         match p {
-            Primitive::Integer(n) => Ok(Permissions(n)),
+            // 32 bits, read as signed or unsigned: keep the bits
+            Primitive::Integer(n) if (i32::MIN as i64..=u32::MAX as i64).contains(&n) => {
+                Ok(Permissions(n as i32))
+            }
+            Primitive::Integer(n) => bail!("/P {} does not fit in 32 bits", n),
             p => Err(PdfError::UnexpectedPrimitive {
                 expected: "Integer",
                 found: p.get_debug_name(),
@@ -93,7 +96,7 @@ impl Object for Permissions {
 
 impl ObjectWrite for Permissions {
     fn to_primitive(&self, _: &mut impl Updater) -> Result<Primitive> {
-        Ok(Primitive::Integer(self.0))
+        Ok(Primitive::Integer(self.0 as i64))
     }
 }
 
@@ -755,5 +758,10 @@ mod tests {
         assert_eq!(perm, Permissions(-4));
         assert_eq!(perm.bits(), 4294967292);
         assert_eq!(perm.to_primitive(&mut NoUpdate).unwrap(), Primitive::Integer(-4));
+
+        let signed = Permissions::from_primitive(Primitive::Integer(-4), &NoResolve).unwrap();
+        assert_eq!(signed, perm);
+        assert!(Permissions::from_primitive(Primitive::Integer(1 << 32), &NoResolve).is_err());
+        assert!(Permissions::from_primitive(Primitive::Integer(i32::MIN as i64 - 1), &NoResolve).is_err());
     }
 }
