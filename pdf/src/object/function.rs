@@ -323,6 +323,13 @@ impl SampledFunctionInput {
         let (d0, d1) = self.domain;
         let x = x.clamp(d0.min(d1), d0.max(d1));
         let y = x.mul_add(self.encode_scale, self.encode_offset);
+        // The encoded value is clipped to the sample grid. /Encode is not validated and
+        // may be infinite or NaN, which would otherwise give out-of-range indices.
+        let y = if y.is_nan() {
+            0.0
+        } else {
+            y.clamp(0.0, self.size.saturating_sub(1) as f32)
+        };
         (y.floor() as usize, self.size, y.fract())
     }
 }
@@ -374,14 +381,14 @@ impl SampledFunction {
             1 => match self.order {
                 Interpolation::Linear => {
                     let (i, _, s) = self.input[0].map(x[0]);
-                    let idx = i * n_out;
+                    let idx = i.saturating_mul(n_out);
 
                     if let Some(part) = self.data.get(idx..) {
                         for (o, &a) in out.iter_mut().zip(part) {
                             *o = a as f32 * (1. - s);
                         }
                     }
-                    if let Some(part) = self.data.get(idx + n_out..) {
+                    if let Some(part) = self.data.get(idx.saturating_add(n_out)..) {
                         for (o, &b) in out.iter_mut().zip(part) {
                             *o += b as f32 * s;
                         }
@@ -397,10 +404,10 @@ impl SampledFunction {
                     let (g0, g1) = (1. - f0, 1. - f1);
 
                     out.fill(0.0);
-                    let mut add = |i0, i1, f| {
-                        let idx = (i0 + s0 * i1) * n_out;
+                    let mut add = |i0: usize, i1: usize, f: f32| {
+                        let idx = i0.saturating_add(s0.saturating_mul(i1)).saturating_mul(n_out);
 
-                        if let Some(part) = self.data.get(idx..idx + n_out) {
+                        if let Some(part) = self.data.get(idx..idx.saturating_add(n_out)) {
                             for (o, &b) in out.iter_mut().zip(part) {
                                 *o += f * b as f32;
                             }
@@ -423,10 +430,10 @@ impl SampledFunction {
                     let (g0, g1, g2) = (1. - f0, 1. - f1, 1. - f2);
 
                     out.fill(0.0);
-                    let mut add = |i0, i1, i2, f| {
-                        let idx = (i0 + s0 * (i1 + s1 * i2)) * n_out;
+                    let mut add = |i0: usize, i1: usize, i2: usize, f: f32| {
+                        let idx = i1.saturating_add(s1.saturating_mul(i2)).saturating_mul(s0).saturating_add(i0).saturating_mul(n_out);
 
-                        if let Some(part) = self.data.get(idx..idx + n_out) {
+                        if let Some(part) = self.data.get(idx..idx.saturating_add(n_out)) {
                             for (o, &b) in out.iter_mut().zip(part) {
                                 *o += f * b as f32;
                             }
@@ -644,6 +651,43 @@ mod tests {
         assert!((out[0] - 0.0).abs() < 1e-4, "got {}", out[0]);
         f.apply(&[1.0], &mut out).unwrap();
         assert!((out[0] - 2.0).abs() < 1e-4, "got {}", out[0]);
+    }
+
+    fn sampled_1d(encode: &[f32]) -> Function {
+        let mut d = Dictionary::new();
+        d.insert("FunctionType", Primitive::Integer(0));
+        d.insert("Domain", nums(&[0.0, 1.0]));
+        d.insert("Range", nums(&[0.0, 1.0, 0.0, 1.0]));
+        d.insert("Encode", nums(encode));
+        d.insert("Size", Primitive::Array(vec![Primitive::Integer(2)]));
+        d.insert("BitsPerSample", Primitive::Integer(8));
+        d.insert("Length", Primitive::Integer(4));
+        let stream = PdfStream {
+            info: d,
+            inner: StreamInner::Pending {
+                data: Arc::from(&[0u8, 0, 255, 255][..]),
+            },
+        };
+        Function::from_primitive(Primitive::Stream(stream), &NoResolve).unwrap()
+    }
+
+    // #289: a non-finite /Encode used to overflow the sample index.
+    #[test]
+    fn sampled_function_with_non_finite_encode() {
+        for encode in [
+            [0.0, f32::INFINITY],
+            [f32::INFINITY, f32::INFINITY],
+            [f32::NEG_INFINITY, 1.0],
+            [f32::NAN, 1.0],
+            [0.0, f32::NAN],
+        ] {
+            let f = sampled_1d(&encode);
+            let mut out = [0.0; 2];
+            for x in [0.0, 0.5, 1.0] {
+                f.apply(&[x], &mut out).unwrap();
+                assert!(out.iter().all(|y| (0.0..=1.0).contains(y)), "{encode:?} x={x}: {out:?}");
+            }
+        }
     }
 
     #[test]

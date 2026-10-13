@@ -242,3 +242,20 @@ fn contents_reference_to_array() {
         assert_eq!(content.parts.len(), 2);
     }
 }
+
+// #289: a Type 0 function whose /Encode overflows f32 to infinity used to panic in `apply`.
+#[test]
+fn sampled_function_infinite_encode() {
+    use pdf::object::ColorSpace;
+
+    let file = run!(FileOptions::uncached().open(file_path("invalid/289-crash.pdf")));
+    let page = run!(file.get_page(0));
+    let resources = run!(page.resources());
+    let cs = resources.color_spaces.get("CS1").expect("CS1");
+    let ColorSpace::Separation(_, _, tint) = cs else {
+        panic!("expected Separation, got {:?}", cs);
+    };
+    let mut out = [0.0; 2];
+    run!(tint.apply(&[0.5], &mut out));
+    assert!(out.iter().all(|y| (0.0..=1.0).contains(y)), "{:?}", out);
+}
