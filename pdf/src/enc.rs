@@ -379,7 +379,7 @@ pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams, options: &ParseOptions
     let requested = info.height as usize * info.width as usize * info.components as usize;
     check_limits!(requested, options.object_size_limit);
 
-    let mut pixels = decoder.decode()?;
+    let pixels = decoder.decode()?;
     Ok(pixels)
 }
 

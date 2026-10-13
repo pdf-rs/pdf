@@ -56,7 +56,7 @@ fuzz_target!(|data: &[u8]| {
     if offset > data.len() { return; }
     let payload = &data[offset..];
 
-    let options = ParseOptions::tolerant();
+    let options = ParseOptions::strict();
     // Execute decode
     let _ = decode(payload, &filter, &options);
 });

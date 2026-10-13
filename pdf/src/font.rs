@@ -347,14 +347,19 @@ impl Font {
                     }
                     match iter.next() {
                         Some(Primitive::Array(array)) => {
-                            widths.ensure_cid(c1 + array.len() - 1);
+                            // an empty sub-array covers no CID: `len() - 1` would wrap
+                            if let Some(last) = (c1 + array.len()).checked_sub(1) {
+                                widths.ensure_cid(last);
+                            }
                             for (i, w) in array.iter().enumerate() {
                                 widths.set(c1 + i, w.as_number()?);
                             }
                         }
                         Some(&Primitive::Reference(r)) => match resolve.resolve(r)? {
                             Primitive::Array(array) => {
-                                widths.ensure_cid(c1 + array.len() - 1);
+                                if let Some(last) = (c1 + array.len()).checked_sub(1) {
+                                    widths.ensure_cid(last);
+                                }
                                 for (i, w) in array.iter().enumerate() {
                                     widths.set(c1 + i, w.as_number()?);
                                 }
