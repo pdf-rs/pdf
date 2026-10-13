@@ -187,6 +187,31 @@ mod tests {
     // `[/Lab << /WhitePoint [..] /Range [..] >>]` should parse into the typed
     // `Lab` variant rather than falling through to `Other`.
     #[test]
+    fn colorspace_write_roundtrip() {
+        use crate::object::{NoUpdate, ObjectWrite};
+
+        let mut cal = Dictionary::new();
+        cal.insert("Gamma", Primitive::Number(2.2));
+        let spaces = vec![
+            ColorSpace::DeviceGray,
+            ColorSpace::DeviceRGB,
+            ColorSpace::DeviceCMYK,
+            ColorSpace::Pattern,
+            ColorSpace::Named("Cs1".into()),
+            ColorSpace::CalGray(cal.clone()),
+            ColorSpace::CalRGB(cal.clone()),
+            ColorSpace::CalCMYK(cal),
+            ColorSpace::Indexed(Box::new(ColorSpace::DeviceRGB), 1, Arc::from(&[0u8, 0, 0, 255, 255, 255][..])),
+            ColorSpace::Other(vec![Primitive::name("Unknown"), Primitive::Integer(1)]),
+        ];
+        for cs in spaces {
+            let p = cs.to_primitive(&mut NoUpdate).unwrap();
+            let back = ColorSpace::from_primitive(p.clone(), &NoResolve).unwrap();
+            assert_eq!(format!("{:?}", cs), format!("{:?}", back), "{p:?}");
+        }
+    }
+
+    #[test]
     fn lab_colorspace_parses() {
         let mut dict = Dictionary::new();
         dict.insert(
@@ -234,10 +259,41 @@ impl ObjectWrite for ColorSpace {
             ColorSpace::Lab(ref params) => {
                 Ok(Primitive::Array(vec![Primitive::name("Lab"), params.to_primitive(update)?]))
             }
-            ref p => {
-                dbg!(p);
-                unimplemented!()
+            ColorSpace::CalGray(ref dict) => {
+                Ok(Primitive::Array(vec![Primitive::name("CalGray"), Primitive::Dictionary(dict.clone())]))
             }
+            ColorSpace::CalRGB(ref dict) => {
+                Ok(Primitive::Array(vec![Primitive::name("CalRGB"), Primitive::Dictionary(dict.clone())]))
+            }
+            ColorSpace::CalCMYK(ref dict) => {
+                Ok(Primitive::Array(vec![Primitive::name("CalCMYK"), Primitive::Dictionary(dict.clone())]))
+            }
+            ColorSpace::Separation(ref name, ref alt, ref tint) => {
+                Ok(Primitive::Array(vec![
+                    Primitive::name("Separation"),
+                    name.to_primitive(update)?,
+                    alt.to_primitive(update)?,
+                    tint.to_primitive(update)?,
+                ]))
+            }
+            ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
+                let mut arr = vec![
+                    Primitive::name("DeviceN"),
+                    names.to_primitive(update)?,
+                    alt.to_primitive(update)?,
+                    tint.to_primitive(update)?,
+                ];
+                if let Some(attr) = attr {
+                    arr.push(Primitive::Dictionary(attr.clone()));
+                }
+                Ok(Primitive::Array(arr))
+            }
+            ColorSpace::Icc(ref stream) => {
+                Ok(Primitive::Array(vec![Primitive::name("ICCBased"), stream.to_primitive(update)?]))
+            }
+            ColorSpace::Pattern => Ok(Primitive::name("Pattern")),
+            ColorSpace::Named(ref name) => name.to_primitive(update),
+            ColorSpace::Other(ref arr) => Ok(Primitive::Array(arr.clone())),
         }
     }
 }
