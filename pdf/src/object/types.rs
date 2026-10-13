@@ -537,11 +537,27 @@ pub struct InfoDict {
 
     #[pdf(key = "Trapped")]
     pub trapped: Option<Trapped>,
+
+    /// Custom (non-standard) metadata entries
+    #[pdf(other)]
+    pub other: Dictionary,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn info_dict_custom_metadata() {
+        let mut d = Dictionary::new();
+        d.insert("Title", Primitive::String(PdfString::from("t")));
+        d.insert("MyKey", Primitive::String(PdfString::from("v")));
+        let info = InfoDict::from_primitive(Primitive::Dictionary(d), &NoResolve).unwrap();
+        assert!(info.title.is_some());
+        assert_eq!(info.other.len(), 1);
+        assert!(info.other.get("MyKey").is_some());
+        assert!(info.other.get("Title").is_none());
+    }
 
     #[test]
     fn parse_struct_type() {
