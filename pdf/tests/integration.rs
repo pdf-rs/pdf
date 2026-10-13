@@ -204,3 +204,41 @@ fn unsigned_permissions() {
         let _ = run!(file.get_page(i));
     }
 }
+
+// /Contents as an indirect reference to an array of content streams, see #297.
+fn contents_reference_to_array_pdf() -> Vec<u8> {
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>",
+        "[5 0 R 6 0 R]",
+        "<< /Length 4 >>\nstream\n0 g \nendstream",
+        "<< /Length 4 >>\nstream\n1 g \nendstream",
+    ];
+    let mut data = b"%PDF-1.4\n".to_vec();
+    let mut offsets = vec![];
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(data.len());
+        data.extend(format!("{} 0 obj\n{}\nendobj\n", i + 1, o).bytes());
+    }
+    let xref = data.len();
+    data.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).bytes());
+    for o in offsets {
+        data.extend(format!("{:010} 00000 n \n", o).bytes());
+    }
+    data.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", objs.len() + 1, xref).bytes());
+    data
+}
+
+#[test]
+fn contents_reference_to_array() {
+    for options in [ParseOptions::strict(), ParseOptions::tolerant()] {
+        let file = run!(FileOptions::uncached()
+            .parse_options(options)
+            .load(contents_reference_to_array_pdf()));
+        let page = run!(file.get_page(0));
+        // in tolerant mode a parse error would show up here as `None`
+        let content = page.contents.as_ref().expect("contents");
+        assert_eq!(content.parts.len(), 2);
+    }
+}
