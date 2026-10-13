@@ -372,6 +372,9 @@ impl Decoder {
             }
             v => err!(other!("unsupported V value {}", v)),
         };
+        if key_bits == 0 || key_bits % 8 != 0 {
+            err!(other!("invalid key length {}", key_bits))
+        }
         let level = dict.r;
         if !(2..=6).contains(&level) {
             err!(other!("unsupported standard security handler revision {}", level))
@@ -763,5 +766,15 @@ mod tests {
         assert_eq!(signed, perm);
         assert!(Permissions::from_primitive(Primitive::Integer(1 << 32), &NoResolve).is_err());
         assert!(Permissions::from_primitive(Primitive::Integer(i32::MIN as i64 - 1), &NoResolve).is_err());
+    }
+
+    #[test]
+    fn invalid_key_length_is_an_error() {
+        for len in [0, 7, 45] {
+            let src = format!("<</Filter /Standard /V 2 /R 3 /Length {len} /P -4 /O (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) /U (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)>>");
+            let prim = crate::parser::parse(src.as_bytes(), &NoResolve, crate::parser::ParseFlags::DICT).unwrap();
+            let dict = CryptDict::from_primitive(prim, &NoResolve).unwrap();
+            assert!(Decoder::from_password(&dict, b"id", b"").is_err(), "Length {len}");
+        }
     }
 }
