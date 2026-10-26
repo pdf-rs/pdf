@@ -379,6 +379,15 @@ impl Decoder {
         if !(2..=6).contains(&level) {
             err!(other!("unsupported standard security handler revision {}", level))
         };
+        // The key length is taken from the file (`/Length` or a crypt filter's
+        // `/Length`). RC4 tops out at 128 bits and AES-256 at 256, so anything
+        // beyond that is malformed and only reaches a panic or a huge
+        // allocation further down (`Rc4::new` asserts, key derivation sizes a
+        // key buffer from it).
+        let max_key_bits = if level >= 5 { 256 } else { 128 };
+        if key_bits > max_key_bits {
+            err!(other!("key length {} bits exceeds the {} bit maximum", key_bits, max_key_bits))
+        }
         if level <= 4 {
             let key_size = key_bits as usize / 8;
             let key = key_derivation_user_password_rc4(level, key_size, dict, id, pass);
