@@ -369,6 +369,16 @@ impl Object for ObjectStream {
         {
             debug!("parsing stream");
             let data = stream.data(resolve)?;
+
+            // `/N` is attacker controlled and used to size both the allocation
+            // and the loop below. Every entry needs at least an object number
+            // and an offset in the stream, so a count larger than half of the
+            // decoded bytes cannot be honest.
+            let max_entries = data.len() / 2;
+            if stream.info.num_objects > max_entries {
+                err!(PdfError::Other { msg: format!("/N declares {} objects, but the stream only holds {} bytes", stream.info.num_objects, data.len()) });
+            }
+
             let mut lexer = Lexer::new(&data);
             for _ in 0..(stream.info.num_objects as ObjNr) {
                 let _obj_nr = lexer.next()?.to::<ObjNr>()?;
