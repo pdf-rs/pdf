@@ -383,7 +383,27 @@ pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams, options: &ParseOptions
     Ok(pixels)
 }
 
-pub fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
+/// Writes at most `limit` bytes into a `Vec`, failing the decode once the
+/// output would grow past it. The decoders below are fed by the file, so an
+/// output size can not be trusted without a ceiling.
+struct SizeLimitedWriter<'a> {
+    buf: &'a mut Vec<u8>,
+    limit: usize,
+}
+impl std::io::Write for SizeLimitedWriter<'_> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.buf.len() + data.len() > self.limit {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "decoded stream exceeds object_size_limit"));
+        }
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub fn lzw_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions) -> Result<Vec<u8>> {
     use weezl::{BitOrder, decode::Decoder};
     let mut out = vec![];
 
@@ -393,9 +413,11 @@ pub fn lzw_decode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
         Decoder::new(BitOrder::Msb, 9)
     };
 
+    let mut writer = SizeLimitedWriter { buf: &mut out, limit: options.object_size_limit };
     decoder
-        .into_stream(&mut out)
+        .into_stream(&mut writer)
         .decode_all(data).status?;
+    check_limits!(out.len(), options.object_size_limit);
     Ok(out)
 }
 fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
@@ -441,7 +463,7 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
     }
 }
 
-pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
+pub fn run_length_decode(data: &[u8], options: &ParseOptions) -> Result<Vec<u8>> {
     // Used <http://benno.id.au/refs/PDFReference15_v5.pdf> as specification
     let mut buf = Vec::new();
     let d = data;
@@ -454,11 +476,13 @@ pub fn run_length_decode(data: &[u8]) -> Result<Vec<u8>> {
             let end = start + length as usize + 1;
             // copy _following_ length + 1 bytes literally
             let source = d.get(start..end).ok_or(PdfError::RleError)?;
+            check_limits!(buf.len() + source.len(), options.object_size_limit);
             buf.extend_from_slice(source);
             c = end; // move cursor to next run
         } else if length >= 129 {
             let copy = 257 - length as usize; // copy 2 - 128 times
             let b = *d.get(c + 1).ok_or(PdfError::RleError)?; // copied byte
+            check_limits!(buf.len() + copy, options.object_size_limit);
             buf.extend(std::iter::repeat(b).take(copy));
             c += 2; // move cursor to next run
         } else {
@@ -504,9 +528,9 @@ pub fn decode(data: &[u8], filter: &StreamFilter, options: &ParseOptions) -> Res
     match *filter {
         StreamFilter::ASCIIHexDecode => decode_hex(data),
         StreamFilter::ASCII85Decode => decode_85(data),
-        StreamFilter::LZWDecode(ref params) => lzw_decode(data, params),
+        StreamFilter::LZWDecode(ref params) => lzw_decode(data, params, options),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params, options),
-        StreamFilter::RunLengthDecode => run_length_decode(data),
+        StreamFilter::RunLengthDecode => run_length_decode(data, options),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params, options),
 
         _ => bail!("unimplemented {filter:?}"),
@@ -690,7 +714,16 @@ mod tests {
 
     #[test]
     fn run_length_decode_test() {
-        let x = run_length_decode(&[254, b'a', 255, b'b', 2, b'c', b'b', b'c', 254, b'a', 128]).unwrap();
+        let x = run_length_decode(&[254, b'a', 255, b'b', 2, b'c', b'b', b'c', 254, b'a', 128], &ParseOptions::strict()).unwrap();
         assert_eq!(b"aaabbcbcaaa", x.as_slice());
+    }
+
+    #[test]
+    fn caps_are_enforced() {
+        let tiny = ParseOptions { object_size_limit: 4, ..ParseOptions::strict() };
+        let encoded = lzw_encode(b"aaaaaaaaaaaaaaaa", &LZWFlateParams::default()).unwrap();
+        assert!(lzw_decode(&encoded, &LZWFlateParams::default(), &tiny).is_err());
+        // two 3 byte repeat runs, 6 bytes in total, over a limit of 4
+        assert!(run_length_decode(&[254, b'a', 254, b'b'], &tiny).is_err());
     }
 }
