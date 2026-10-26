@@ -360,11 +360,14 @@ impl Decoder {
 
                 match default.method {
                     CryptMethod::V2 | CryptMethod::AESV2 => (
-                        default.length.map(|n| 8 * n).unwrap_or(dict.bits),
+                        // `n` is a u32 straight from the file, so 8 * n has to
+                        // be saturating: a `/Length 536870912` would otherwise
+                        // overflow before the bound below ever sees it.
+                        default.length.map(|n| n.saturating_mul(8)).unwrap_or(dict.bits),
                         default.method,
                     ),
                     CryptMethod::AESV3 if dict.v == 5 => (
-                        default.length.map(|n| 8 * n).unwrap_or(dict.bits),
+                        default.length.map(|n| n.saturating_mul(8)).unwrap_or(dict.bits),
                         default.method,
                     ),
                     m => err!(other!("unimplemented crypt method {:?}", m)),
@@ -380,11 +383,16 @@ impl Decoder {
             err!(other!("unsupported standard security handler revision {}", level))
         };
         // The key length is taken from the file (`/Length` or a crypt filter's
-        // `/Length`). RC4 tops out at 128 bits and AES-256 at 256, so anything
-        // beyond that is malformed and only reaches a panic or a huge
+        // `/Length`). RC4 and AES-128 top out at 128 bits and AESV3 at 256, so
+        // anything beyond is malformed and only reaches a panic or a huge
         // allocation further down (`Rc4::new` asserts, key derivation sizes a
         // key buffer from it).
-        let max_key_bits = if level >= 5 { 256 } else { 128 };
+        let max_key_bits = match method {
+            CryptMethod::AESV3 => 256,
+            // `None` is rejected for V 4..=6 above, so this arm is unreachable;
+            // it gets the tightest bound anyway.
+            CryptMethod::V2 | CryptMethod::AESV2 | CryptMethod::None => 128,
+        };
         if key_bits > max_key_bits {
             err!(other!("key length {} bits exceeds the {} bit maximum", key_bits, max_key_bits))
         }
