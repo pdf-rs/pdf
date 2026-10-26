@@ -108,6 +108,15 @@ pub fn parse_xref_table_and_trailer(lexer: &mut Lexer, resolve: &impl Resolve) -
         let start_id = t!(lexer.next_as::<u32>());
         let num_ids = t!(lexer.next_as::<u32>());
 
+        // `num_ids` is attacker controlled and must not size the loop below on
+        // its own: the xref stream path has its own size check, this one had
+        // none. Every entry needs at least two tokens, so a count far beyond
+        // the bytes that are left is a broken or hostile file.
+        let remaining = lexer.get_remaining_slice().len();
+        if num_ids as usize > remaining / 2 {
+            return Err(PdfError::Other { msg: format!("xref subsection declares {} entries, but only {} bytes are left in the file", num_ids, remaining) });
+        }
+
         let mut section = XRefSection::new(start_id);
 
         for i in 0..num_ids {
