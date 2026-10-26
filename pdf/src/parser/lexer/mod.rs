@@ -319,12 +319,13 @@ impl<'a> Lexer<'a> {
     #[allow(dead_code)]
     pub fn read_n(&mut self, n: usize) -> Substr<'a> {
         let start_pos = self.pos;
-        self.pos += n;
-        if self.pos >= self.buf.len() {
-            self.pos = self.buf.len() - 1;
-        }
+        // `n` comes from the file, so neither the addition nor the clamp may
+        // wrap. Overshooting simply yields a short slice, which callers detect
+        // as EOF.
+        let end = start_pos.saturating_add(n).min(self.buf.len());
+        self.pos = end;
         if start_pos < self.buf.len() {
-            self.new_substr(start_pos..self.pos)
+            self.new_substr(start_pos..end)
         } else {
             self.new_substr(0..0)
         }

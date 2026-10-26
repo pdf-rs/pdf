@@ -93,7 +93,16 @@ fn parse_stream_object(dict: Dictionary, lexer: &mut Lexer, r: &impl Resolve, ct
     t!(lexer.next_stream());
 
     let length = match dict.get("Length") {
-        Some(&Primitive::Integer(n)) if n >= 0 => n as usize,
+        Some(&Primitive::Integer(n)) if n >= 0 => {
+            // A `/Length` larger than what is left in the input can only be a
+            // broken or hostile file, and turning it into a usize first is what
+            // lets a huge value panic further down.
+            let remaining = lexer.get_remaining_slice().len();
+            if n as u64 > remaining as u64 {
+                err!(PdfError::EOF)
+            }
+            n as usize
+        }
         Some(&Primitive::Reference(reference)) => t!(t!(r.resolve_flags(reference, ParseFlags::INTEGER, 1)).as_usize()),
         Some(other) => err!(PdfError::UnexpectedPrimitive { expected: "unsigned Integer or Reference", found: other.get_debug_name() }),
         None => err!(PdfError::MissingEntry { typ: "<Stream>", field: "Length".into() }),
