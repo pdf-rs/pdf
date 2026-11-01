@@ -18,6 +18,36 @@ Written 2026-11-01 by Hematite, for other agents working in this repo.
 `README.md` also names the sibling projects: `pdf_render` (pathfinder renderer) and
 `inspect-prim` (interactive primitive hierarchy viewer). Rendering is **not** in this repo.
 
+## Spec audit notes: `<source file>.md` next to the source
+
+Every Rust file that was cross-referenced against **PDF 32000-1:2008** has a note file beside it,
+named after the source file: e.g. `pdf/src/enc.rs` → `pdf/src/enc.rs.md`. Structure of each note:
+*mismatches* (with clause numbers), *deliberate deviations*, *checked, no mismatch* (so an agent
+knows what is already covered and does not re-audit it).
+
+Notes written (2026-11-01):
+
+| note | most consequential item |
+|---|---|
+| `pdf/src/parser/lexer/mod.rs.md` | FF (0x0C) missing from the whitespace set (7.2.2 Table 1) |
+| `pdf/src/parser/lexer/str.rs.md` | unknown escape emits NUL; unescaped EOL not normalised to 0Ah (7.3.4.2) |
+| `pdf/src/parser/mod.rs.md` | dict keys not `#XX`-decoded; null values kept (7.3.5, 7.3.9) |
+| `pdf/src/parser/parse_xref.rs.md` | xref entry type > 2 errors instead of "null reference" (7.5.8.3) |
+| `pdf/src/xref.rs.md` | `/XRefStm` unsupported; older section overrides newer entry (7.5.8.4, 7.5.6) |
+| `pdf/src/file.rs.md` | panics on missing `startxref`; single crypt decoder for `/StmF`+`/StrF` |
+| `pdf/src/enc.rs.md` | `Crypt` filter unimplemented; CCITT `K>=0` panics; PNG predictor ignores BitsPerComponent |
+| `pdf/src/crypt.rs.md` | `/StrF` never read; per-stream `/Crypt /Name` ignored (7.6.5) |
+| `pdf/src/content.rs.md` | unknown operator aborts the page; inline image cannot be written back |
+| `pdf/src/object/stream.rs.md` | ObjStm `/First`+offsets unvalidated; header object numbers ignored (7.5.7) |
+| `pdf/src/object/types/page.rs.md` | `inherit()` loops forever on a `/Parent` cycle |
+| `pdf/src/object/types/pagesnode.rs.md` | `/Count` trusted, never verified (7.7.3.2) |
+| `pdf/src/font.rs.md` | `/MissingWidth` ignored for simple fonts (9.6.2.1) |
+| `pdf/src/primitive.rs.md` | written dates miss the closing apostrophe (7.9.4 Table 23) |
+
+Not audited (no note file): `object/mod.rs` (traits), `object/types/*` other than page/pagesnode,
+`encoding.rs`, `error.rs`, `object/function.rs` (PDF functions), `pdf_derive/`, `tests/`, `fuzz/`.
+Full prose report with the same findings: `/home/hematite/report/pdf-rs-vs-pdf32000-2026-11-01.md`.
+
 ## Workspace layout
 
 ```
