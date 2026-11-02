@@ -313,6 +313,19 @@ impl ObjectWrite for PdfStream {
     }
 }
 impl PdfStream {
+    /// A stream whose data is held in memory rather than read from the file it
+    /// was parsed from. Its `/Length` is set from `data`; the caller is
+    /// responsible for any filters (the data is stored as given).
+    pub fn new_memory(info: Dictionary, data: impl Into<Arc<[u8]>>) -> PdfStream {
+        let data = data.into();
+        let mut info = info;
+        info.insert("Length", Primitive::Integer(data.len() as i64));
+        PdfStream {
+            info,
+            inner: StreamInner::Pending { data },
+        }
+    }
+
     pub fn serialize(&self, out: &mut impl io::Write) -> Result<()> {
         match self.inner {
             StreamInner::InFile { .. } => {
