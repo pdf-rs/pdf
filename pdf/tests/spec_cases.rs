@@ -374,6 +374,164 @@ fn c13_encode_unsupported_filter_is_an_error() {
     assert!(r.is_err(), "RunLengthEncode is not implemented, got {:?}", r);
 }
 
+// ---------------------------------------------------------------- wave 3: file structure (§7.5, §7.7)
+
+/// Run `f` on a worker thread and give up after `secs`. A tree walk that never
+/// terminates is a bug, but a test must not hang the suite either.
+fn with_timeout<T: Send + 'static>(
+    secs: u64,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(secs)).ok()
+}
+
+#[test]
+fn c14_page_tree_parent_cycle_terminates() {
+    // 7.7.3.2: a page tree is a tree. A crafted file can make /Parent point
+    // back into the chain. pdf-rs rejects that while resolving the references
+    // ("Recursive reference"), so nothing hangs — this case pins that down, and
+    // `inherit()` additionally carries a depth bound as defence in depth.
+    let bytes = {
+        let objects = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            // object 2 is its own parent
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 /Parent 2 0 R >>".to_vec(),
+            // no /MediaBox and no /Resources: both are inherited
+            b"<< /Type /Page /Parent 2 0 R >>".to_vec(),
+        ];
+        build_pdf(&objects, 1)
+    };
+    write_case("c14-parent-cycle", &bytes);
+
+    let probe = bytes.clone();
+    let result = with_timeout(10, move || {
+        match pdf::file::FileOptions::uncached().load(&probe[..]) {
+            // rejected at load time
+            Err(_) => true,
+            // or loaded, but then inheriting must not spin
+            Ok(file) => match file.get_page(0) {
+                Ok(page) => page.media_box().is_err(),
+                Err(_) => true,
+            },
+        }
+    });
+    assert_eq!(
+        result,
+        Some(true),
+        "a cyclic /Parent chain must be reported, not loop forever"
+    );
+}
+
+/// A file whose cross-reference is a stream (7.5.8), with `extra` entries for
+/// object numbers after the stream itself: `(type, field1, field2)`.
+fn xref_stream_doc(objects: &[Vec<u8>], root: u32, extra: &[(u8, u32, u16)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+    let mut offsets = Vec::new();
+    for (i, obj) in objects.iter().enumerate() {
+        offsets.push(out.len() as u32);
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(obj);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref_nr = objects.len() as u32 + 1;
+    let xref_off = out.len() as u32;
+
+    // /W [1 4 2]: type, field 1, field 2
+    let mut data = Vec::new();
+    let mut entry = |t: u8, a: u32, b: u16| {
+        data.push(t);
+        data.extend_from_slice(&a.to_be_bytes());
+        data.extend_from_slice(&b.to_be_bytes());
+    };
+    entry(0, 0, 0xffff);
+    for off in &offsets {
+        entry(1, *off, 0);
+    }
+    entry(1, xref_off, 0);
+    for &(t, a, b) in extra {
+        entry(t, a, b);
+    }
+
+    let total = xref_nr + 1 + extra.len() as u32;
+    let mut enc = Vec::new();
+    for b in &data {
+        enc.extend_from_slice(format!("{:02X}", b).as_bytes());
+    }
+    enc.push(b'>');
+
+    out.extend_from_slice(
+        format!(
+            "{xref_nr} 0 obj\n<< /Type /XRef /Size {total} /Index [0 {total}] /W [1 4 2] \
+             /Root {root} 0 R /Filter /ASCIIHexDecode /Length {} >>\nstream\n",
+            enc.len()
+        )
+        .as_bytes(),
+    );
+    out.extend_from_slice(&enc);
+    out.extend_from_slice(b"\nendstream\nendobj\n");
+    out.extend_from_slice(format!("startxref\n{xref_off}\n%%EOF\n").as_bytes());
+    out
+}
+
+#[test]
+fn c15_reserved_xref_stream_type_is_ignored() {
+    // 7.5.8.3: "only types 0, 1, and 2 are allowed. Any other value shall be
+    // interpreted as a reference to the null object" — a type 3 entry must not
+    // make the whole file unreadable.
+    let content = b"BT /F1 24 Tf 72 120 Td (Hello) Tj ET";
+    let mut contents = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+    contents.extend_from_slice(content);
+    contents.extend_from_slice(b"\nendstream");
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] \
+          /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+            .to_vec(),
+        contents,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    // one reserved entry for object 7 (nothing refers to it)
+    let bytes = xref_stream_doc(&objects, 1, &[(3, 0, 0)]);
+    write_case("c15-reserved-xref-type", &bytes);
+
+    let r = pdf_rs_read(&bytes, "c15-reserved-xref-type");
+    assert_eq!(r.text, "Hello", "file with a reserved xref entry type, got {:?}", r);
+}
+
+#[test]
+fn c16_newer_compressed_xref_entry_wins() {
+    // 7.5.6: the most recent copy of each object shall be the one accessed.
+    // Sections are merged newest first, so a later (older) section must not
+    // replace an entry that is already known to be compressed.
+    use pdf::xref::{XRef, XRefSection, XRefTable};
+
+    let mut table = XRefTable::new(4);
+    let mut newer = XRefSection::new(1);
+    newer.entries.push(XRef::Stream { stream_id: 9, index: 0 });
+    table.add_entries_from(newer).unwrap();
+
+    let mut older = XRefSection::new(1);
+    older.add_inuse_entry(1234, 0);
+    table.add_entries_from(older).unwrap();
+
+    let entry = table
+        .entries()
+        .find(|(nr, _)| *nr == 1)
+        .map(|(_, e)| e.clone())
+        .expect("entry for object 1");
+    assert!(
+        matches!(entry, XRef::Stream { stream_id: 9, index: 0 }),
+        "the newer compressed entry must survive, got {:?}",
+        entry
+    );
+}
+
 #[test]
 fn fixtures_control_plain() {
     // No anomalies: the file both mupdf and pdf-rs must read (control).

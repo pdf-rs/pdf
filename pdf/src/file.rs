@@ -209,8 +209,19 @@ where
         Ok(trailer)
     }
     pub fn scan(&self) -> impl Iterator<Item = Result<ScanItem>> + '_ {
-        let xref_offset = self.backend.locate_xref_offset().unwrap();
-        let slice = self.backend.read(self.start_offset .. xref_offset).unwrap();
+        // `scan` walks the file body between the header and the cross-reference
+        // section. A caller may do this on a damaged file, so a missing
+        // startxref must be an error in the iterator, not a panic.
+        let mut error = None;
+        let slice = match self.backend.locate_xref_offset()
+            .and_then(|xref_offset| self.backend.read(self.start_offset .. xref_offset))
+        {
+            Ok(slice) => slice,
+            Err(e) => {
+                error = Some(e);
+                &[][..]
+            }
+        };
         let mut lexer = Lexer::with_offset(slice, 0);
 
         fn skip_xref(lexer: &mut Lexer) -> Result<()> {
@@ -222,6 +233,9 @@ where
 
         let resolver = StorageResolver::new(self);
         std::iter::from_fn(move || {
+            if let Some(e) = error.take() {
+                return Some(Err(e));
+            }
             loop {
                 let pos = lexer.get_pos();
                 match parse_indirect_object(&mut lexer, &resolver, self.decoder.as_ref(), ParseFlags::all()) {

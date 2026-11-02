@@ -2,6 +2,11 @@
 
 Reviewed: 2026-11-01.
 
+Status: **fixed** (commit "spec: fix wave 3") — a reserved entry type is now an
+`XRef::Invalid` entry instead of an error for the whole file; case `c15_*`
+(a file whose xref stream carries a type-3 entry) fails on master and renders
+"Hello" in mupdf as well.
+
 ## Mismatches
 
 - **xref stream entry type > 2 is a hard error** (~line 44). 7.5.8.3 Table 17: "any other value

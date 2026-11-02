@@ -2,6 +2,15 @@
 
 Reviewed: 2026-11-01.
 
+Status (commit "spec: fix wave 3"):
+- the **section precedence** item is **fixed** (`XRef::Stream` entries are no longer replaced by
+  an older section; case `c16_newer_compressed_xref_entry_wins`).
+- `/XRefStm` is still unsupported (**not fixed**: it needs a second pass over the hybrid stream;
+  tracked in the report rather than guessed at).
+- the `get_gen_nr` panic is **not reachable from a parsed file**: xref sections only ever contain
+  `Raw`/`Free`/`Stream` entries, so the `_ => panic!()` arm cannot be hit there. Left as is; the
+  old wording ("reached from file.rs object loading") was wrong.
+
 ## Mismatches
 
 - **`/XRefStm` (hybrid-reference files) unsupported** — 7.5.8.4. `grep -r XRefStm` finds nothing:

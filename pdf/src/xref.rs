@@ -116,8 +116,12 @@ impl XRefTable {
                 let should_be_updated = match *dst {
                     XRef::Raw { gen_nr: gen, .. } | XRef::Free { gen_nr: gen, .. }
                         => entry.get_gen_nr() > gen,
-                    XRef::Stream { .. } | XRef::Invalid
-                        => true,
+                    // 7.5.6: the most recent copy of each object shall be the one
+                    // accessed, and sections are merged newest first — so an
+                    // entry that is already compressed inside an object stream
+                    // must not be replaced by an older section.
+                    XRef::Stream { .. } => false,
+                    XRef::Invalid => true,
                     x => bail!("found {:?}", x)
                 };
                 if should_be_updated {

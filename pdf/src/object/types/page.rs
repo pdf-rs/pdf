@@ -188,13 +188,17 @@ fn inherit<'a, T: 'a, F>(mut parent: &'a PageTree, f: F) -> Result<Option<T>>
 where
     F: Fn(&'a PageTree) -> Option<T>,
 {
-    loop {
+    // A /Parent chain is finite in a well-formed file; a cyclic one (a Pages
+    // node whose ancestor is itself) must not spin forever.
+    const MAX_DEPTH: usize = 64;
+    for _ in 0..MAX_DEPTH {
         match (&parent.parent, f(parent)) {
             (_, Some(t)) => return Ok(Some(t)),
             (Some(ref p), None) => parent = p,
             (None, None) => return Ok(None),
         }
     }
+    Err(PdfError::Other { msg: "page tree: /Parent chain is cyclic or deeper than 64".into() })
 }
 
 impl Page {
