@@ -324,7 +324,15 @@ impl Font {
     }
     pub fn widths(&self, resolve: &impl Resolve) -> Result<Option<Widths>> {
         match self.data {
-            FontData::Type0(ref t0) => t0.descendant_fonts[0].widths(resolve),
+            // 9.7.4: /DescendantFonts "shall be an array of a single ...
+            // entry"; a Type 0 font without one cannot supply widths. Report
+            // it instead of indexing [0] into an empty vector.
+            FontData::Type0(ref t0) => match t0.descendant_fonts.first() {
+                Some(descendant) => descendant.widths(resolve),
+                None => Err(PdfError::Other {
+                    msg: "Type 0 font without a /DescendantFonts entry (9.7.4)".into(),
+                }),
+            },
             FontData::Type1(ref info) | FontData::TrueType(ref info) => match *info {
                 TFont {
                     first_char: Some(first),

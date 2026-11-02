@@ -2,15 +2,20 @@
 
 Reviewed: 2026-11-01.
 
-## Status (commit "fonts: honour /MissingWidth for simple fonts (9.6.2.1)")
+## Status (commits "fonts: honour /MissingWidth for simple fonts (9.6.2.1)" and
+"fonts: reject a Type 0 font without /DescendantFonts (9.7.4)")
 
-The first item below is fixed; cases `c27`, `c27b` in `pdf/tests/spec_cases.rs` cover it and
-fail on the parent commit.
+The first two items below are fixed; cases `c27`, `c27b` and `c28`, `c28b` in
+`pdf/tests/spec_cases.rs` cover them and fail on the parent commit.
 
 - `Font::widths` now takes `Widths::default` from `TFont::font_descriptor`'s `missing_width`
   (absent descriptor, or absent key → the `#[pdf(default = "0.")]` value, 0.0, as Table 122
   requires). This covers both "code outside `/FirstChar`…`/LastChar`" and "no `/Widths` at all".
   The `first_char: None` arm (no `/FirstChar`, standard-14 style metrics) still returns `None`.
+- `Font::widths` takes `descendant_fonts.first()` and returns
+  `PdfError::Other { msg: "Type 0 font without a /DescendantFonts entry (9.7.4)" }` when there
+  is none, instead of indexing `[0]` and panicking. More than one entry still uses the first
+  (tolerated, 9.7.4 wants exactly one).
 
 ## Mismatches
 
@@ -23,9 +28,10 @@ fail on the parent commit.
 - **`/Widths` length is not checked against `/LastChar`**: 9.6.2.1 requires exactly
   `LastChar - FirstChar + 1` entries; a short array silently truncates (codes past the end get
   width 0), a long one is ignored beyond the end. Neither is reported.
-- **`descendant_fonts[0]` panics** (line 327) when a Type 0 font has an empty or missing
-  `/DescendantFonts`. 9.7.4 requires exactly one entry, so this is malformed input — but the
-  failure mode is an index panic, not an error value.
+- ~~**`descendant_fonts[0]` panics**~~ — **fixed** (see status above). `Font::widths`, formerly
+  line 327, indexed `[0]` into `Type0Font::descendant_fonts` and panicked when a Type 0 font had
+  an empty or missing `/DescendantFonts`. 9.7.4 requires exactly one entry, so this is malformed
+  input — it now comes back as `PdfError::Other` instead of an index panic.
 - Type 0 `/W` parsing: an empty sub-array `[c []]` is handled (fixed earlier), but the `c1 > c2`
   ordering of the `c1 c2 w` form is not validated and produces an empty range instead of an error
   (9.7.4.3 — tolerant deviation).
@@ -34,7 +40,8 @@ fail on the parent commit.
   Unicode mapping, so text extraction depends entirely on `/ToUnicode` (9.10.2). Fonts without it
   (common in older files) fall back to the raw byte code.
 - Type 3: `/FontMatrix` scaling by 1/1000 is not applied anywhere in width computation
-  (9.6.5) — widths are taken as if the matrix were the default.
+  (9.6.5) — widths are taken as if the matrix were the default. **Intentional** (Sebastian,
+  2026-11-02): the default matrix is the only case wanted, so this is not fixed.
 
 ## Checked, no mismatch
 
