@@ -2,8 +2,10 @@
 
 Reviewed: 2026-11-01.
 
-Status (commit "content: fail on an unknown operator in strict parsing (7.8.2)"):
-the first mismatch below is fixed; the rest are open.
+Status (commit "content: keep the Type 3 glyph width operator d0 (9.6.5)"):
+the first two mismatches below are fixed; the rest are open. `d0` now has an
+`Op::GlyphWidth { wx, wy }` variant, so the declared advance survives parsing and
+serialising (`d1` is still dropped — next commit).
 
 ## Mismatches
 
@@ -14,9 +16,11 @@ the first mismatch below is fixed; the rest are open.
   partial-recovery rule allows. Inside `BX … EX` unknown operators are ignored either way.
   (The other half of the old note still stands: the *lexer* bails on a stray `EI` / `ID`
   out of sentence, independent of the flag.)
-- **`d0` / `d1` are parsed and dropped** (lines 325-326, no `Op` variant). 7.8.2 / Table A.1
-  define them as Type 3 glyph-metric operators; dropping them loses the declared glyph advance
-  for Type 3 fonts whose `/Widths` disagree.
+- ~~**`d0` is parsed and dropped**~~ — **fixed**. 7.8.2 / Table A.1 define `d0` as a Type 3
+  glyph-metric operator; it is now `Op::GlyphWidth { wx, wy }` (`c34`), so the declared glyph
+  advance is no longer lost for Type 3 fonts whose `/Widths` disagree.
+- **`d1` is parsed and dropped** (line 332, no `Op` variant). Same table: `d1` also carries the
+  glyph bounding box. Open.
 - **`Op::InlineImage` cannot be written** (`unimplemented!()` in the writer path, ~line 743):
   any content stream containing an inline image panics on `to_string`/save. 8.9.7 round-trip.
 - **Inline image `/DP` is reused for every entry of `/F`** (`inline_image`, `decode_parms.clone()`),
