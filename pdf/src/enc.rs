@@ -1,11 +1,10 @@
 #![allow(clippy::many_single_char_names)]
 #![allow(dead_code)]  // TODO
 
-use itertools::Itertools;
 use crate as pdf;
 use crate::error::*;
 use crate::object::{Object, ParseOptions, Resolve, Stream};
-use crate::primitive::{Primitive, Dictionary};
+use crate::primitive::{Primitive, Dictionary, Name};
 use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Write};
 use once_cell::sync::OnceCell;
@@ -80,6 +79,16 @@ pub struct JBIG2DecodeParams {
     #[pdf(key="JBIG2Globals")]
     pub globals: Option<Stream<()>>
 }
+
+/// Parameters of the `Crypt` filter (PDF 32000-1:2008 7.4.6, Table 20):
+/// `/Name` selects a crypt filter in the document's `/CF` dictionary, the
+/// default being `/Identity`.
+#[derive(Object, ObjectWrite, Debug, Clone, DataSize, DeepClone, Default)]
+pub struct CryptFilterParams {
+    #[pdf(key="Name")]
+    pub name: Option<Name>,
+}
+
 #[derive(Debug, Clone, DataSize, DeepClone)]
 pub enum StreamFilter {
     ASCIIHexDecode,
@@ -90,7 +99,7 @@ pub enum StreamFilter {
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
     JBIG2Decode(JBIG2DecodeParams),
-    Crypt,
+    Crypt(CryptFilterParams),
     RunLengthDecode
 }
 impl StreamFilter {
@@ -106,7 +115,7 @@ impl StreamFilter {
            "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
            "JBIG2Decode" => StreamFilter::JBIG2Decode(JBIG2DecodeParams::from_primitive(params, r)?),
-           "Crypt" => StreamFilter::Crypt,
+           "Crypt" => StreamFilter::Crypt(CryptFilterParams::from_primitive(params, r)?),
            "RunLengthDecode" => StreamFilter::RunLengthDecode,
            ty => bail!("Unrecognized filter type {:?}", ty),
        }
@@ -136,16 +145,22 @@ fn encode_nibble(c: u8) -> u8 {
 
 pub fn decode_hex(data: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(data.len() / 2);
-    let pairs = data.iter().cloned()
+    let mut high: Option<u8> = None;
+    for (i, b) in data.iter().cloned()
         .take_while(|&b| b != b'>')
         .filter(|&b| !matches!(b, 0 | 9 | 10 | 12 | 13 | 32))
-        .tuples();
-    for (i, (high, low)) in pairs.enumerate() {
-        if let (Some(low), Some(high)) = (decode_nibble(low), decode_nibble(high)) {
-            out.push(high << 4 | low);
-        } else {
-            return Err(PdfError::HexDecode {pos: i * 2, bytes: [high, low]})
+        .enumerate()
+    {
+        let nibble = decode_nibble(b).ok_or(PdfError::HexDecode { pos: i, bytes: [b, 0] })?;
+        match high.take() {
+            Some(h) => out.push(h << 4 | nibble),
+            None => high = Some(nibble),
         }
+    }
+    // 7.4.2.1: when the filter meets the end of data with an odd number of
+    // digits, the last digit shall be assumed to be followed by 0.
+    if let Some(h) = high {
+        out.push(h << 4);
     }
     Ok(out)
 }
@@ -287,7 +302,21 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions
     let predictor: usize = params.predictor.try_into()?;
     let n_components: usize = params.n_components.try_into()?;
     let columns: usize = params.columns.try_into()?;
-    let stride = columns * n_components;
+    let bpc: usize = params.bits_per_component.try_into()?;
+    if !(1..=16).contains(&bpc) {
+        bail!("BitsPerComponent out of range");
+    }
+    if columns == 0 || n_components == 0 {
+        bail!("predictor needs Columns and Colors greater than zero");
+    }
+    // 7.4.4.4: a row holds Columns × Colors samples of BitsPerComponent bits.
+    let row_bits = columns
+        .checked_mul(n_components)
+        .and_then(|v| v.checked_mul(bpc))
+        .ok_or_else(|| PdfError::Other { msg: "predictor row size overflow".into() })?;
+    let stride = (row_bits + 7) / 8;
+    // The PNG predictors look back one *pixel*, i.e. ceil(Colors×BitsPerComponent/8) bytes.
+    let bpp = ((n_components * bpc) + 7) / 8;
 
 
     // First flate decode
@@ -301,47 +330,90 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions
             bail!("can't inflate");
         }
     };
-    // Then unfilter (PNG)
+    // Then unfilter (PNG or TIFF)
     // For this, take the old out as input, and write output to out
 
-    if predictor > 10 {
-        let inp = decoded; // input buffer
-        let rows = inp.len() / (stride+1);
+    match predictor {
+        // 7.4.4.4: 10-15 are the PNG predictors, each row prefixed by its filter byte.
+        10..=15 => {
+            let inp = decoded; // input buffer
+            let rows = inp.len() / (stride+1);
 
-        // output buffer
-        check_limits!(rows * stride, options.object_size_limit);
-        let mut out = vec![0; rows * stride];
+            // output buffer
+            check_limits!(rows * stride, options.object_size_limit);
+            let mut out = vec![0; rows * stride];
 
-        // Apply inverse predictor
-        let null_vec = vec![0; stride];
+            // Apply inverse predictor
+            let null_vec = vec![0; stride];
 
-        let mut in_off = 0; // offset into input buffer
+            let mut in_off = 0; // offset into input buffer
 
-        let mut out_off = 0; // offset into output buffer
-        let mut last_out_off = 0; // last offset to output buffer
+            let mut out_off = 0; // offset into output buffer
+            let mut last_out_off = 0; // last offset to output buffer
 
-        while in_off + stride < inp.len() {
-            let predictor = PredictorType::from_u8(inp[in_off])?;
-            in_off += 1; // +1 because the first byte on each row is predictor
+            while in_off + stride < inp.len() {
+                let predictor = PredictorType::from_u8(inp[in_off])?;
+                in_off += 1; // +1 because the first byte on each row is predictor
 
-            let row_in = &inp[in_off .. in_off + stride];
-            let (prev_row, row_out) = if out_off == 0 {
-                (&null_vec[..], &mut out[out_off .. out_off+stride])
-            } else {
-                let (prev, curr) = out.split_at_mut(out_off);
-                (&prev[last_out_off ..], &mut curr[.. stride])
-            };
-            unfilter(predictor, n_components, prev_row, row_in, row_out);
+                let row_in = &inp[in_off .. in_off + stride];
+                let (prev_row, row_out) = if out_off == 0 {
+                    (&null_vec[..], &mut out[out_off .. out_off+stride])
+                } else {
+                    let (prev, curr) = out.split_at_mut(out_off);
+                    (&prev[last_out_off ..], &mut curr[.. stride])
+                };
+                unfilter(predictor, bpp, prev_row, row_in, row_out);
 
-            last_out_off = out_off;
+                last_out_off = out_off;
 
-            in_off += stride;
-            out_off += stride;
+                in_off += stride;
+                out_off += stride;
+            }
+            Ok(out)
         }
-        Ok(out)
-    } else {
-        Ok(decoded)
+        // 7.4.4.4: predictor 2 is the TIFF horizontal differencing predictor.
+        2 => {
+            let mut buf = decoded;
+            check_limits!(buf.len(), options.object_size_limit);
+            tiff_unpredict(&mut buf, stride, n_components, bpc)?;
+            Ok(buf)
+        }
+        1 => Ok(decoded),
+        n => bail!("unsupported Predictor {n}"),
     }
+}
+
+/// Inverse of the TIFF predictor 2 (horizontal differencing, 7.4.4.4): every
+/// sample is stored as the difference to the sample `Colors` positions before
+/// it in the same row.
+fn tiff_unpredict(data: &mut [u8], stride: usize, n_components: usize, bpc: usize) -> Result<()> {
+    if n_components == 0 || stride < n_components {
+        bail!("predictor needs Columns and Colors greater than zero");
+    }
+    match bpc {
+        8 => {
+            for row in data.chunks_mut(stride) {
+                for i in n_components..row.len() {
+                    row[i] = row[i].wrapping_add(row[i - n_components]);
+                }
+            }
+        }
+        16 => {
+            let comps = n_components;
+            for row in data.chunks_mut(stride) {
+                let samples = row.len() / 2;
+                for i in comps..samples {
+                    let prev_at = 2 * (i - comps);
+                    let at = 2 * i;
+                    let prev = u16::from_be_bytes([row[prev_at], row[prev_at + 1]]);
+                    let cur = u16::from_be_bytes([row[at], row[at + 1]]);
+                    row[at .. at + 2].copy_from_slice(&cur.wrapping_add(prev).to_be_bytes());
+                }
+            }
+        }
+        _ => bail!("TIFF Predictor with BitsPerComponent {} is not implemented", bpc),
+    }
+    Ok(())
 }
 fn flate_encode(data: &[u8], params: &LZWFlateParams) -> Vec<u8> {
     if params.predictor == 1 {
@@ -459,7 +531,10 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
         }
         Ok(buf)
     } else {
-        unimplemented!()
+        // 7.4.5 CCITTFaxDecode: K = 0 is modified Huffman (1-D), K > 0 is
+        // mixed 1-D/2-D G3. pdf-rs only decodes G4 (K < 0); say so instead of
+        // panicking, so a hostile or unusual file is an error, not a crash.
+        bail!("CCITTFaxDecode with K = {} is not implemented (only K < 0, group 4)", params.k)
     }
 }
 
@@ -532,8 +607,20 @@ pub fn decode(data: &[u8], filter: &StreamFilter, options: &ParseOptions) -> Res
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params, options),
         StreamFilter::RunLengthDecode => run_length_decode(data, options),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params, options),
+        StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params),
+        StreamFilter::Crypt(ref params) => crypt_filter_decode(data, params),
 
         _ => bail!("unimplemented {filter:?}"),
+    }
+}
+
+/// PDF 32000-1:2008 7.4.6: with `/Name /Identity` the crypt filter performs no
+/// encryption. Any other name selects a filter from the document's `/CF`
+/// dictionary, applied by the security handler rather than here.
+fn crypt_filter_decode(data: &[u8], params: &CryptFilterParams) -> Result<Vec<u8>> {
+    match params.name.as_ref().map_or("Identity", |n| n.as_str()) {
+        "Identity" => Ok(data.to_vec()),
+        name => bail!("Crypt filter /{} needs the document's security handler", name),
     }
 }
 
@@ -543,7 +630,9 @@ pub fn encode(data: &[u8], filter: &StreamFilter) -> Result<Vec<u8>> {
         StreamFilter::ASCII85Decode => Ok(encode_85(data)),
         StreamFilter::LZWDecode(ref params) => lzw_encode(data, params),
         StreamFilter::FlateDecode (ref params) => Ok(flate_encode(data, params)),
-        _ => unimplemented!(),
+        // Writing DCT/CCITT/JPX/JBIG2/RunLength/Crypt encoded data is not
+        // implemented; report it instead of panicking on a user request.
+        _ => bail!("encoding with {filter:?} is not implemented"),
     }
 }
 

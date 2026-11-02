@@ -159,7 +159,7 @@ impl<I: ObjectWrite> Stream<I> {
                 StreamFilter::DCTDecode(ref _p) => "DCTDecode",
                 StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
                 StreamFilter::JBIG2Decode(ref _p) => "JBIG2Decode",
-                StreamFilter::Crypt => "Crypt",
+                StreamFilter::Crypt(_) => "Crypt",
                 StreamFilter::RunLengthDecode => "RunLengthDecode",
             })
             .map(|s| Primitive::Name(s.into()));

@@ -270,6 +270,110 @@ fn write_case(name: &str, bytes: &[u8]) -> std::path::PathBuf {
     path
 }
 
+// ---------------------------------------------------------------- wave 2: filters (§7.4)
+
+/// A raw deflate block holding `data` verbatim (stored block, BFINAL=1), so the
+/// tests need no compression library.
+fn stored_deflate(data: &[u8]) -> Vec<u8> {
+    assert!(data.len() <= 0xffff, "stored block too large for one block");
+    let len = data.len() as u16;
+    let mut out = vec![0x01];
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(&(!len).to_le_bytes());
+    out.extend_from_slice(data);
+    out
+}
+
+#[test]
+fn c08_asciihex_odd_digit_is_padded() {
+    // 7.4.2.1: an odd number of digits: the last digit is followed by 0.
+    assert_eq!(pdf::enc::decode_hex(b"f>").unwrap(), vec![0xf0]);
+    assert_eq!(pdf::enc::decode_hex(b"61 62 7>").unwrap(), vec![0x61, 0x62, 0x70]);
+    // and through the filter interface
+    let out = pdf::enc::decode(
+        b"f>",
+        &pdf::enc::StreamFilter::ASCIIHexDecode,
+        &pdf::object::ParseOptions::strict(),
+    )
+    .unwrap();
+    assert_eq!(out, vec![0xf0]);
+}
+
+#[test]
+fn c09_tiff_predictor_2() {
+    // 7.4.4.4: Predictor 2 is TIFF horizontal differencing. Row [10, 20] with
+    // Colors 1 is stored as [10, 10].
+    use pdf::enc::LZWFlateParams;
+    let params = LZWFlateParams {
+        predictor: 2,
+        n_components: 1,
+        bits_per_component: 8,
+        columns: 2,
+        early_change: 1,
+    };
+    let data = stored_deflate(&[10, 10]);
+    let out = pdf::enc::flate_decode(&data, &params, &pdf::object::ParseOptions::strict()).unwrap();
+    assert_eq!(out, vec![10, 20], "TIFF predictor 2 must be un-differenced");
+}
+
+#[test]
+fn c10_predictor_row_stride_uses_bits_per_component() {
+    // 7.4.4.4: a row is ceil(Columns × Colors × BitsPerComponent / 8) bytes.
+    // 8 columns × 1 component × 1 bit = 1 byte per row, not 8.
+    use pdf::enc::LZWFlateParams;
+    let params = LZWFlateParams {
+        predictor: 12, // PNG "Up"
+        n_components: 1,
+        bits_per_component: 1,
+        columns: 8,
+        early_change: 1,
+    };
+    // row 1: filter 0, 0x0F; row 2: filter 2 (Up), 0x00 -> 0x0F
+    let data = stored_deflate(&[0x00, 0x0f, 0x02, 0x00]);
+    let out = pdf::enc::flate_decode(&data, &params, &pdf::object::ParseOptions::strict()).unwrap();
+    assert_eq!(out, vec![0x0f, 0x0f], "row stride must follow BitsPerComponent");
+}
+
+#[test]
+fn c11_crypt_filter_identity_is_transparent() {
+    // 7.4.6: /Name /Identity means "no encryption"; the filter must not fail.
+    let opts = pdf::object::ParseOptions::strict();
+    let filter =
+        pdf::enc::StreamFilter::from_kind_and_params("Crypt", Default::default(), &NoResolve)
+            .expect("Crypt filter must be constructible");
+    let out = pdf::enc::decode(b"hello", &filter, &opts).unwrap();
+    assert_eq!(out, b"hello");
+}
+
+#[test]
+fn c12_ccitt_k0_is_an_error_not_a_panic() {
+    // 7.4.5: K = 0 is 1-D modified Huffman; pdf-rs only decodes G4 (K < 0).
+    // Conforming already, because the crate's own `unimplemented!` macro
+    // (error.rs:365) returns an error instead of panicking — this test keeps it
+    // that way rather than documenting a mismatch.
+    let params = pdf::enc::CCITTFaxDecodeParams {
+        k: 0,
+        end_of_line: false,
+        encoded_byte_align: false,
+        columns: 1728,
+        rows: 0,
+        end_of_block: true,
+        black_is_1: false,
+        damaged_rows_before_error: 0,
+    };
+    let r = pdf::enc::fax_decode(&[0u8; 8], &params);
+    assert!(r.is_err(), "K = 0 must yield an error, got {:?}", r);
+}
+
+#[test]
+fn c13_encode_unsupported_filter_is_an_error() {
+    // Writing DCT/CCITT/JPX/JBIG2/RunLength data is not implemented; it must
+    // report that instead of panicking (also true on master: `unimplemented!`
+    // here is the crate's error-returning macro).
+    let r = pdf::enc::encode(b"x", &pdf::enc::StreamFilter::RunLengthDecode);
+    assert!(r.is_err(), "RunLengthEncode is not implemented, got {:?}", r);
+}
+
 #[test]
 fn fixtures_control_plain() {
     // No anomalies: the file both mupdf and pdf-rs must read (control).
