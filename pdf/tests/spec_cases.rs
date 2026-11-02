@@ -956,3 +956,126 @@ fn c25_strings_default_to_identity() {
     );
 }
 
+// ---------------------------------------------------------------- wave 4: file structure (§7.5.8.4)
+
+/// A hybrid-reference file (7.5.8.4): the update section is a classic table
+/// whose trailer carries `/XRefStm`, and the object that only the
+/// cross-reference stream knows about (8, a /PageLabels number tree) is marked
+/// free with generation 65535 in the section that `/Prev` names.
+fn hybrid_doc() -> Vec<u8> {
+    let content = b"BT /F1 24 Tf 72 120 Td (Hello) Tj ET";
+    let mut contents = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+    contents.extend_from_slice(content);
+    contents.extend_from_slice(b"\nendstream");
+
+    let objects: Vec<(u32, Vec<u8>)> = vec![
+        (
+            1,
+            b"<< /Type /Catalog /Pages 2 0 R /PageLabels 8 0 R >>".to_vec(),
+        ),
+        (2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec()),
+        (
+            3,
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] \
+              /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+                .to_vec(),
+        ),
+        (4, contents),
+        (
+            5,
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        ),
+        // the hidden object: reachable from the catalog, but it appears only in
+        // the cross-reference stream
+        (8, b"<< /Nums [0 << /S /D >>] >>".to_vec()),
+    ];
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n");
+    let mut pos = std::collections::HashMap::new();
+    for (nr, body) in &objects {
+        pos.insert(*nr, out.len() as u32);
+        out.extend_from_slice(format!("{} 0 obj\n", nr).as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+
+    // main section: objects 6 and 7 do not exist yet, object 8 is free with
+    // generation 65535 (that is how a hybrid file hides it)
+    let main_xref = out.len() as u32;
+    out.extend_from_slice(b"xref\n0 9\n");
+    out.extend_from_slice(b"0000000000 65535 f \n");
+    for nr in 1..=5u32 {
+        out.extend_from_slice(format!("{:010} 00000 n \n", pos[&nr]).as_bytes());
+    }
+    out.extend_from_slice(b"0000000000 00000 f \n0000000000 00000 f \n");
+    out.extend_from_slice(b"0000000000 65535 f \n");
+    out.extend_from_slice(b"trailer\n<< /Size 9 /Root 1 0 R >>\n");
+    out.extend_from_slice(format!("startxref\n{}\n%%EOF\n", main_xref).as_bytes());
+
+    // cross-reference stream (object 6), /Index [8 1]: one in-use entry for 8
+    let xrefstm_off = out.len() as u32;
+    let mut data = vec![1u8];
+    data.extend_from_slice(&pos[&8].to_be_bytes());
+    data.extend_from_slice(&0u16.to_be_bytes());
+    let mut enc = Vec::new();
+    for b in &data {
+        enc.extend_from_slice(format!("{:02X}", b).as_bytes());
+    }
+    enc.push(b'>');
+    out.extend_from_slice(
+        format!(
+            "6 0 obj\n<< /Type /XRef /Size 9 /Index [8 1] /W [1 4 2] \
+             /Filter /ASCIIHexDecode /Length {} >>\nstream\n",
+            enc.len()
+        )
+        .as_bytes(),
+    );
+    out.extend_from_slice(&enc);
+    out.extend_from_slice(b"\nendstream\nendobj\n");
+
+    // update section: classic table, /XRefStm names the stream above, /Prev
+    // names the main table that marks object 8 free
+    let update_xref = out.len() as u32;
+    out.extend_from_slice(b"xref\n0 1\n0000000000 65535 f \n6 1\n");
+    out.extend_from_slice(format!("{:010} 00000 n \n", xrefstm_off).as_bytes());
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size 9 /Root 1 0 R /Prev {main_xref} /XRefStm {xrefstm_off} >>\n\
+             startxref\n{update_xref}\n%%EOF\n"
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn c26_hybrid_xref_stream_entry_wins() {
+    // 7.5.8.4: a hybrid-reference file hides an object by listing it as free
+    // (generation 65535) in the previous section and as in use in the
+    // cross-reference stream that /XRefStm names; the reader shall use the
+    // stream entry and ignore the free one. The lookup order inside an update
+    // section is: the section itself, then its /XRefStm, then /Prev.
+    use pdf::object::{PlainRef, Resolve};
+
+    let bytes = hybrid_doc();
+    write_case("c26-hybrid-xrefstm", &bytes);
+
+    let r = pdf_rs_read(&bytes, "c26-hybrid-xrefstm");
+    assert_eq!(r.text, "Hello", "hybrid file must still render, got {:?}", r);
+
+    let file = pdf::file::FileOptions::uncached()
+        .load(&bytes[..])
+        .expect("c26: hybrid file must open");
+    let resolver = file.resolver();
+    let hidden = resolver
+        .resolve(PlainRef { id: 8, gen: 0 })
+        .expect("the entry from /XRefStm must not be replaced by the older free entry");
+    let dict = hidden.into_dictionary().expect("object 8 is a dictionary");
+    assert!(
+        dict.contains_key("Nums"),
+        "object 8 must be the number tree, got {:?}",
+        dict
+    );
+}
+
