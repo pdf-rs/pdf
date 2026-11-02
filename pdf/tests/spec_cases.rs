@@ -1177,3 +1177,59 @@ fn c27b_missing_width_without_widths_array() {
     );
 }
 
+#[test]
+fn c28_type0_without_descendant_font() {
+    // 9.7.4: /DescendantFonts "shall be an array of a single ... entry"; Table
+    // 110 makes it required for Type 0 fonts. pdf-rs indexed `[0]` into it and
+    // panicked on an empty or absent array - malformed input must come back as
+    // an error, not as an index-out-of-bounds panic.
+    for (name, font) in [
+        (
+            "c28-type0-empty-descendants",
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H \
+               /DescendantFonts [ ] >>",
+        ),
+        (
+            "c28b-type0-no-descendants",
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Foo /Encoding /Identity-H >>",
+        ),
+    ] {
+        let bytes = font_doc(font, HELVETICA_DESCRIPTOR, b"BT /F1 12 Tf 72 120 Td (A) Tj ET");
+        write_case(name, &bytes);
+
+        let file = pdf::file::FileOptions::uncached()
+            .load(&bytes[..])
+            .unwrap_or_else(|e| panic!("{}: pdf-rs cannot open the file: {}", name, e));
+        let resolver = file.resolver();
+        let page = file
+            .get_page(0)
+            .unwrap_or_else(|e| panic!("{}: page 0: {}", name, e));
+        let res = page
+            .resources()
+            .unwrap_or_else(|e| panic!("{}: resources: {}", name, e));
+        let lazy = res
+            .data()
+            .fonts
+            .get(&Name::from("F1"))
+            .unwrap_or_else(|| panic!("{}: /F1 missing from /Resources /Font", name));
+        let font = match lazy.load(&resolver) {
+            Ok(f) => f,
+            // rejected while parsing the font dictionary: an error already,
+            // and not a panic - that is fine
+            Err(_) => continue,
+        };
+
+        let data = font.data();
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| data.widths(&resolver)));
+        match outcome {
+            Err(_) => panic!(
+                "{}: pdf-rs panicked on a Type 0 font without /DescendantFonts",
+                name
+            ),
+            Ok(Err(_)) => {}
+            Ok(Ok(w)) => panic!("{}: expected an error, got widths {:?}", name, w),
+        }
+    }
+}
+
