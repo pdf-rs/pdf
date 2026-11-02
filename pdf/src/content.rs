@@ -329,7 +329,10 @@ impl OpBuilder {
                 numbers!(args, wx, wy);
                 push(Op::GlyphWidth { wx, wy });
             }
-            "d1"  => {}
+            "d1"  => {
+                numbers!(args, wx, wy, llx, lly, urx, ury);
+                push(Op::GlyphWidthAndBBox { wx, wy, bbox: ViewRect { x: llx, y: lly, width: urx - llx, height: ury - lly } });
+            }
             "Do" | "Do0" => {
                 names!(args, name);
                 push(Op::XObject { name });
@@ -747,6 +750,10 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                 writeln!(f, "] TJ")?;
             },
             Op::GlyphWidth { wx, wy } => writeln!(f, "{} {} d0", wx, wy)?,
+            Op::GlyphWidthAndBBox { wx, wy, bbox } => writeln!(
+                f, "{} {} {} {} {} {} d1",
+                wx, wy, bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height
+            )?,
             Op::InlineImage { image: _ } => unimplemented!(),
             Op::XObject { ref name } => {
                 serialize_name(name, f)?;
@@ -1150,6 +1157,12 @@ pub enum Op {
     ///
     /// operator: `d0` (9.6.5). `wy` shall be 0.
     GlyphWidth { wx: f32, wy: f32 },
+
+    /// The advance width and the bounding box of a Type 3 glyph, in glyph space.
+    ///
+    /// operator: `d1` (9.6.5). Unlike `d0` the glyph procedure paints its own
+    /// colour. `wy` shall be 0.
+    GlyphWidthAndBBox { wx: f32, wy: f32, bbox: ViewRect },
 
     XObject { name: Name },
 
