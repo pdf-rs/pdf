@@ -2,6 +2,12 @@
 
 Reviewed: 2026-11-01.
 
+Status (commit "spec: fix wave 3"): the **hang claim was wrong** — a cyclic `/Parent` chain is
+rejected while resolving the references ("Recursive reference", `RcRef` cycle guard), so
+`media_box()` never spins. Case `c14_*` pins that down (a file whose `/Pages` node is its own
+parent is reported, not looped on). `inherit()` now also carries a depth bound (64) as defence
+in depth. The other three items are unchanged.
+
 ## Mismatches
 
 - **`inherit()` hangs on a `/Parent` cycle** (lines 187-200: an unbounded `loop` walking

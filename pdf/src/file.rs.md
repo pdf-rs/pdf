@@ -2,6 +2,12 @@
 
 Reviewed: 2026-11-01.
 
+Status (commit "spec: fix wave 3"): `scan()` no longer unwraps — a missing/unusable `startxref`
+now yields a single `Err` item instead of aborting. Correcting the rest of this note: `scan()` is
+*not* on the `load()` path (nothing in the crate calls it, and a successful `load()` implies a
+usable `startxref`), and `XRef::Promised` hits the crate's error-returning `unimplemented!`
+macro, not a panic. `version()`, the `%%EOF` check and the `/StrF` item are still open.
+
 ## Mismatches
 
 - **Reachable panics on malformed files** (7.5.5 / Annex C expect recovery instead):

@@ -40,7 +40,10 @@ fn parse_xref_section_from_stream(first_id: u32, mut num_entries: usize, width: 
             0 => XRef::Free {next_obj_nr: field1 as ObjNr, gen_nr: field2 as GenNr},
             1 => XRef::Raw {pos: field1 as usize, gen_nr: field2 as GenNr},
             2 => XRef::Stream {stream_id: field1 as ObjNr, index: field2 as usize},
-            _ => return Err(PdfError::XRefStreamType {found: _type}), // TODO: Should actually just be seen as a reference to the null object
+            // 7.5.8.3: "In PDF 1.5 through PDF 1.7, only types 0, 1, and 2 are
+            // allowed. Any other value shall be interpreted as a reference to
+            // the null object", so a future entry type must not fail the file.
+            _ => XRef::Invalid,
         };
         entries.push(entry);
     }
