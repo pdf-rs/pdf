@@ -541,6 +541,51 @@ pub struct UpdateOptions {
     pub merge: bool
 }
 
+/// Options for [`Storage::rebuild`].
+#[derive(Clone, Debug)]
+pub struct RebuildOptions {
+    /// Pack the objects that are not streams into object streams (7.5.7)
+    /// instead of writing each of them at the top level. Object numbers do not
+    /// change, only where the object is stored.
+    pub object_streams: bool,
+
+    /// Maximum number of objects in one object stream.
+    pub object_stream_max_objects: usize,
+
+    /// Maximum number of bytes (before compression) in one object stream.
+    pub object_stream_max_bytes: usize,
+
+    /// Objects to leave out of the output. They are still used while writing
+    /// (an object stream that is excluded still yields its members), and they
+    /// end up as free entries in the new cross-reference stream (7.5.4).
+    pub exclude: Vec<ObjNr>,
+}
+
+impl Default for RebuildOptions {
+    fn default() -> Self {
+        RebuildOptions {
+            object_streams: true,
+            object_stream_max_objects: 1000,
+            object_stream_max_bytes: 64 * 1024,
+            exclude: Vec::new(),
+        }
+    }
+}
+
+/// The dictionary of an object stream (7.5.7, Table 16).
+#[derive(Object, ObjectWrite, Debug, DataSize)]
+#[pdf(Type = "ObjStm")]
+struct ObjStmInfo {
+    /// The number of objects in the stream.
+    #[pdf(key = "N")]
+    n: u32,
+
+    /// The byte offset of the first object, relative to the start of the
+    /// decoded stream data.
+    #[pdf(key = "First")]
+    first: u32,
+}
+
 impl<OC, SC, L, B> Storage<B, OC, SC, L>
 where
     B: BackendAppend,
@@ -548,7 +593,41 @@ where
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log
 {
+    /// Replace object `id` with a stream holding `data`, keeping its object
+    /// number. The data is stored unfiltered, so drop any existing `/Filter`
+    /// from `info` first.
+    pub fn replace_with_stream(&mut self, id: ObjNr, info: Dictionary, data: impl Into<Arc<[u8]>>) -> Result<()> {
+        let stream = PdfStream::new_memory(info, data);
+        self.replace_with_primitive(id, Primitive::Stream(stream));
+        Ok(())
+    }
+
+    /// Replace the object `id` resolves to. The object number is kept, so
+    /// references to it stay valid.
+    pub fn replace_with_primitive(&mut self, id: ObjNr, prim: Primitive) {
+        let r = PlainRef { id, gen: 0 };
+        self.cache.remove(r);
+        self.stream_cache.remove(r);
+        self.changes.insert(id, ("replacement", prim, 0));
+    }
+
+    /// Write the whole document to a new byte buffer.
+    ///
+    /// Objects that are not streams are packed into object streams (7.5.7), so
+    /// the result is roughly the size of the input rather than the size of its
+    /// uncompressed object dictionaries. Like the cross-reference stream that is
+    /// written here, that needs PDF 1.5.
     pub fn rebuild(&mut self, trailer: &mut Trailer) -> Result<Vec<u8>> {
+        self.rebuild_with(trailer, &RebuildOptions::default())
+    }
+
+    /// `rebuild`, with control over the object streams.
+    ///
+    /// The trailer that gets written is the one that is passed in, so the caller
+    /// decides about /ID and /Info. /Size is set here, /Prev is dropped: it
+    /// points into the file that is being rewritten. [`Trailer::normalise`]
+    /// clears the parts that make two copies of a document differ.
+    pub fn rebuild_with(&mut self, trailer: &mut Trailer, options: &RebuildOptions) -> Result<Vec<u8>> {
         if self.promises.len() > 0 {
             for (id, name) in self.promises.iter() {
                 eprintln!("Promise unfulfilled: id={id} type={name}");
@@ -556,68 +635,161 @@ where
             }
         }
 
-        // writing the trailer generates another id for the info dictionary
-        trailer.size = (self.refs.len() + 2) as _;
-        let trailer_dict = trailer.to_dict(self)?;
-        let xref_promise = self.promise::<Stream<XRefInfo>>();
+        // 7.5.5: /Prev is the offset of the previous cross-reference section in
+        // *this* file. A full rewrite has none.
+        trailer.prev_trailer_pos = None;
 
         let mut out = Vec::new();
         out.extend_from_slice(PDF_HEADER);
-        let mut new_refs = HashMap::new();
-        let resolver = StorageResolver::new(self);
-        for (obj_nr, r) in self.refs.entries() {
-            let id = obj_nr as u64;
-            let prim = t!(self.resolve_ref(PlainRef { id, gen: 0 }, ParseFlags::ANY, &resolver), id, r);
 
-            let byte_pos = out.len();
-            writeln!(out, "{id} 0 obj")?;
-            match prim {
-                Primitive::Stream(PdfStream { inner: StreamInner::InFile { file_range, .. }, info }) => {
-                    let data = self.backend.read(file_range)?;
+        // Resolve every object once, in ascending object number. Streams have to
+        // stay top level (7.5.7), everything else goes into an object stream.
+        let mut objstms: Vec<(Vec<(ObjNr, usize)>, Vec<u8>)> = Vec::new();
+        let mut members: Vec<(ObjNr, usize)> = Vec::new();
+        let mut data: Vec<u8> = Vec::new();
+        let mut top: Vec<(ObjNr, Primitive)> = Vec::new();
+        let mut excluded: Vec<ObjNr> = Vec::new();
+        {
+            let max_objects = options.object_stream_max_objects.max(1);
+            let max_bytes = options.object_stream_max_bytes.max(1);
+            let resolver = StorageResolver::new(self);
+            for (obj_nr, r) in self.refs.entries() {
+                let id = obj_nr as ObjNr;
+                let prim = t!(self.resolve_ref(PlainRef { id, gen: 0 }, ParseFlags::ANY, &resolver), id, r);
 
-                    let len_val = try_opt!(info.get("Length")).clone();
-                    let info_len = t!(len_val.resolve(&resolver)).as_usize()?;
-                    assert_eq!(info_len, data.len());
-                    t!(info.serialize(&mut out));
-                    writeln!(out, "stream")?;
-                    out.write_all(&data)?;
-                    writeln!(out, "\nendstream")?;
+                // resolved anyway: an object stream that is dropped has to stay
+                // readable for the objects it contains
+                if options.exclude.contains(&id) {
+                    excluded.push(id);
+                    continue;
                 }
-                prim => {
-                    t!(prim.serialize(&mut out));
+
+                if options.object_streams && !matches!(prim, Primitive::Stream(_)) {
+                    members.push((id, data.len()));
+                    t!(prim.serialize(&mut data));
+                    data.push(b'\n');
+                    if members.len() >= max_objects || data.len() >= max_bytes {
+                        objstms.push((
+                            std::mem::replace(&mut members, Vec::new()),
+                            std::mem::replace(&mut data, Vec::new())
+                        ));
+                    }
+                } else {
+                    top.push((id, prim));
                 }
             }
-
-            writeln!(out, "endobj")?;
-            new_refs.insert(id, XRef::Raw { pos: byte_pos, gen_nr: 0 });
         }
-        for (&id, (_, prim, _)) in self.changes.iter() {
-            match self.refs.get(id) {
-                Ok(XRef::Raw { .. }) | Ok(XRef::Stream { .. }) => continue,
-                _ => {}
-            }
-            let byte_pos = out.len();
-            writeln!(out, "{id} 0 obj")?;
-            prim.serialize(&mut out)?;
-            if !out.last_byte().map(|b| b.is_ascii_whitespace()).unwrap_or(false) {
-                out.write_all(b"\n")?;
-            }
-            writeln!(out, "endobj")?;
-            new_refs.insert(id, XRef::Raw { pos: byte_pos, gen_nr: 0 });
+        if !members.is_empty() {
+            objstms.push((members, data));
         }
 
-        for (id, xref) in new_refs {
+        // Each object stream is an indirect object of its own. Its number has to
+        // be above every number in use, so nothing the trailer adds can collide
+        // with it.
+        let mut objstm_ids = Vec::with_capacity(objstms.len());
+        for _ in 0..objstms.len() {
+            objstm_ids.push(self.refs.len() as ObjNr);
+            self.refs.push(XRef::Invalid);
+        }
+
+        // writing the trailer generates another id for the info dictionary
+        trailer.size = (self.refs.len() + 1) as _;
+        let mut trailer_dict = trailer.to_dict(self)?;
+        let xref_promise = self.promise::<Stream<XRefInfo>>();
+        trailer.size = self.refs.len() as i32;
+        trailer_dict.insert("Size", Primitive::Integer(trailer.size as _));
+        if trailer.id.is_empty() {
+            // 7.5.5: /ID is optional, but if it is there it is an array of two
+            // byte strings. An empty one is not.
+            trailer_dict.remove("ID");
+        }
+
+        let mut xrefs: Vec<(ObjNr, XRef)> = Vec::new();
+        {
+            let resolver = StorageResolver::new(self);
+            for &(id, ref prim) in top.iter() {
+                let byte_pos = out.len();
+                writeln!(out, "{id} 0 obj")?;
+                match prim {
+                    Primitive::Stream(PdfStream { inner: StreamInner::InFile { file_range, .. }, info }) => {
+                        let data = self.backend.read(file_range.clone())?;
+
+                        let len_val = try_opt!(info.get("Length")).clone();
+                        let info_len = t!(len_val.resolve(&resolver)).as_usize()?;
+                        assert_eq!(info_len, data.len());
+                        t!(info.serialize(&mut out));
+                        writeln!(out, "stream")?;
+                        out.write_all(&data)?;
+                        writeln!(out, "\nendstream")?;
+                    }
+                    prim => {
+                        t!(prim.serialize(&mut out));
+                    }
+                }
+
+                writeln!(out, "endobj")?;
+                xrefs.push((id, XRef::Raw { pos: byte_pos, gen_nr: 0 }));
+            }
+            for (&id, &(_, ref prim, _)) in self.changes.iter() {
+                if options.exclude.contains(&id) {
+                    continue;
+                }
+                match self.refs.get(id) {
+                    Ok(XRef::Raw { .. }) | Ok(XRef::Stream { .. }) => continue,
+                    _ => {}
+                }
+                let byte_pos = out.len();
+                writeln!(out, "{id} 0 obj")?;
+                prim.serialize(&mut out)?;
+                if !out.last_byte().map(|b| b.is_ascii_whitespace()).unwrap_or(false) {
+                    out.write_all(b"\n")?;
+                }
+                writeln!(out, "endobj")?;
+                xrefs.push((id, XRef::Raw { pos: byte_pos, gen_nr: 0 }));
+            }
+
+            // 7.5.7: the object stream holds a header of `obj_nr offset` pairs
+            // (offsets relative to /First) followed by the objects themselves.
+            for ((members, data), &id) in objstms.iter().zip(objstm_ids.iter()) {
+                let mut header = String::new();
+                for (obj_nr, offset) in members.iter() {
+                    header.push_str(&format!("{} {} ", obj_nr, offset));
+                }
+                let first = header.len();
+                let mut payload = Vec::with_capacity(first + data.len());
+                payload.extend_from_slice(header.as_bytes());
+                payload.extend_from_slice(data);
+
+                let info = ObjStmInfo { n: members.len() as u32, first: first as u32 };
+                let stream = t!(Stream::new(info, &payload));
+
+                let byte_pos = out.len();
+                writeln!(out, "{id} 0 obj")?;
+                let pdf_stream = t!(stream.to_pdf_stream(&mut NoUpdate));
+                t!(pdf_stream.serialize(&mut out));
+                writeln!(out, "endobj")?;
+
+                xrefs.push((id, XRef::Raw { pos: byte_pos, gen_nr: 0 }));
+                for (index, &(obj_nr, _)) in members.iter().enumerate() {
+                    xrefs.push((obj_nr, XRef::Stream { stream_id: id, index }));
+                }
+            }
+        }
+        for id in excluded {
+            self.refs.set(id, XRef::Free { next_obj_nr: 0, gen_nr: 0 });
+        }
+        for (id, xref) in xrefs {
             self.refs.set(id, xref);
         }
 
         let xref_pos = out.len();
         self.refs.set(xref_promise.get_inner().id, XRef::Raw { pos: xref_pos, gen_nr: 0 });
         // only write up to the xref stream obj id
-
-        let stream = t!(self.refs.write_stream(xref_promise.get_inner().id as usize + 1));
+        let size = self.refs.len();
+        let xref_stream = t!(self.refs.write_stream(size));
 
         writeln!(out, "{} {} obj", xref_promise.get_inner().id, 0)?;
-        let mut xref_and_trailer = stream.to_pdf_stream(&mut NoUpdate)?;
+        let mut xref_and_trailer = xref_stream.to_pdf_stream(&mut NoUpdate)?;
         for (k, v) in trailer_dict.iter() {
             xref_and_trailer.info.insert(k.clone(), v.clone());
         }
@@ -625,7 +797,7 @@ where
         xref_and_trailer.serialize(&mut out)?;
         writeln!(out, "endobj")?;
 
-        let _ = self.fulfill(xref_promise, stream)?;
+        let _ = self.fulfill(xref_promise, xref_stream)?;
 
         write!(out, "\nstartxref\n{}\n%%EOF", xref_pos).unwrap();
 
@@ -972,6 +1144,17 @@ pub struct Trailer {
 
     #[pdf(key = "ID")]
     pub id:                 Vec<PdfString>,
+}
+
+impl Trailer {
+    /// Drop the entries that only describe where this copy of the document came
+    /// from, so that rewriting the same document twice gives the same bytes: the
+    /// previous cross-reference section (7.5.5) and the file identifier (14.4).
+    /// Set a new /ID afterwards if the document needs one.
+    pub fn normalise(&mut self) {
+        self.prev_trailer_pos = None;
+        self.id.clear();
+    }
 }
 
 /*
