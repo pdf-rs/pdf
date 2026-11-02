@@ -1526,3 +1526,40 @@ fn c34_type3_glyph_width_operator_d0() {
     );
 }
 
+#[test]
+fn c35_type3_glyph_width_and_bbox_operator_d1() {
+    // 9.6.5 / Table 113: `d1` sets the glyph width (wx wy) and the glyph
+    // bounding box (llx lly urx ury); the charproc paints its own colour.
+    // Like `d0` it was parsed and dropped, so a read/write round trip of a
+    // charproc lost the operator and with it the declared metrics.
+    use pdf::content::{parse_ops, serialize_ops, Op};
+
+    let ops = parse_ops(b"700 0 0 0 700 700 d1", &NoResolve).expect("c35: d1 must parse");
+    assert!(
+        matches!(
+            ops.as_slice(),
+            [Op::GlyphWidthAndBBox { wx, wy, bbox }]
+                if *wx == 700.0 && *wy == 0.0
+                    && bbox.x == 0.0 && bbox.y == 0.0
+                    && bbox.width == 700.0 && bbox.height == 700.0
+        ),
+        "c35: d1 must survive parsing, got {:?}",
+        ops
+    );
+    assert_eq!(
+        serialize_ops(&ops).expect("c35: d1 must serialize"),
+        b"700 0 0 0 700 700 d1\n".to_vec(),
+        "c35: `d1` must be written back"
+    );
+
+    // a document whose glyph procedures use d1 and paint blue themselves
+    let bytes = type3_doc(b"0 0 1 rg 700 0 0 0 700 700 d1\n0 0 700 700 re f");
+    let path = write_case("c35-type3-d1", &bytes);
+    assert!(path.exists());
+    assert_eq!(
+        pdf_rs_read(&bytes, "c35-type3-d1").text,
+        "AB",
+        "c35: the text still comes from the page content stream"
+    );
+}
+
