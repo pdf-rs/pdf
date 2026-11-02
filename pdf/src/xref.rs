@@ -109,8 +109,28 @@ impl XRefTable {
         (max_a, max_b)
     }
 
+    /// Grow the table so that object number `num_objects - 1` fits. A section
+    /// may declare a larger /Size than the one the table was created with
+    /// (7.5.8.4: /Size shall cover every object in the file, including the ones
+    /// a hybrid file only lists in its cross-reference stream).
+    pub fn ensure_len(&mut self, num_objects: ObjNr) {
+        if self.entries.len() < num_objects as usize {
+            self.entries.resize(num_objects as usize, XRef::Invalid);
+        }
+    }
+
     pub fn add_entries_from(&mut self, section: XRefSection) -> Result<()> {
+        self.add_entries_from_skipping(section, &[])
+    }
+
+    /// `add_entries_from`, but entries whose object number is marked in `skip`
+    /// are left alone. `skip` is shorter than the table in general: an object
+    /// number beyond its end is not skipped.
+    pub fn add_entries_from_skipping(&mut self, section: XRefSection, skip: &[bool]) -> Result<()> {
         for (i, &entry) in section.entries() {
+            if skip.get(i).copied().unwrap_or(false) {
+                continue;
+            }
             if let Some(dst) = self.entries.get_mut(i) {
                 // Early return if the entry we have has larger or equal generation number
                 let should_be_updated = match *dst {

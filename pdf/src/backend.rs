@@ -1,7 +1,7 @@
 use crate::error::*;
 use crate::parser::Lexer;
 use crate::parser::read_xref_and_trailer_at;
-use crate::xref::XRefTable;
+use crate::xref::{XRef, XRefSection, XRefTable};
 use crate::primitive::Dictionary;
 use crate::object::*;
 use std::ops::Deref;
@@ -52,14 +52,7 @@ pub trait Backend: Sized {
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self, start_offset: usize, resolve: &impl Resolve) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
-        let pos = t!(start_offset.checked_add(xref_offset).ok_or(PdfError::Invalid));
-        if pos >= self.len() {
-            bail!("XRef offset outside file bounds");
-        }
-
-        let mut lexer = Lexer::with_offset(t!(self.read(pos ..)), pos);
-
-        let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
+        let (xref_sections, trailer) = t!(self.read_xref_section_at(start_offset, xref_offset, resolve));
 
         let size = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
@@ -72,6 +65,13 @@ pub trait Backend: Sized {
         for section in xref_sections {
             refs.add_entries_from(section)?;
         }
+
+        // 7.5.8.4: in a hybrid-reference file a cross-reference stream named by
+        // /XRefStm lists objects that the older section marks free with
+        // generation 65535. Those sections are merged below, so remember what
+        // the stream claimed and let nothing replace it.
+        let mut from_xref_stream = vec![false; refs.len()];
+        t!(self.add_xrefstm_entries(start_offset, &trailer, resolve, &mut refs, &mut from_xref_stream));
 
         let mut prev_trailer = {
             match trailer.get("Prev") {
@@ -87,13 +87,12 @@ pub trait Backend: Sized {
             }
             seen.push(prev_xref_offset);
 
-            let pos = t!(start_offset.checked_add(prev_xref_offset).ok_or(PdfError::Invalid));
-            let mut lexer = Lexer::with_offset(t!(self.read(pos..)), pos);
-            let (xref_sections, trailer) = t!(read_xref_and_trailer_at(&mut lexer, resolve));
+            let (xref_sections, trailer) = t!(self.read_xref_section_at(start_offset, prev_xref_offset, resolve));
 
             for section in xref_sections {
-                refs.add_entries_from(section)?;
+                refs.add_entries_from_skipping(section, &from_xref_stream)?;
             }
+            t!(self.add_xrefstm_entries(start_offset, &trailer, resolve, &mut refs, &mut from_xref_stream));
 
             prev_trailer = {
                 match trailer.get("Prev") {
@@ -108,6 +107,84 @@ pub trait Backend: Sized {
         refs.sanitize();
 
         Ok((refs, trailer))
+    }
+
+    /// Read the cross-reference section (table or stream) that starts `offset`
+    /// bytes after the beginning of the file, i.e. after the `%PDF-` header.
+    fn read_xref_section_at(&self, start_offset: usize, offset: usize, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+        let pos = t!(start_offset.checked_add(offset).ok_or(PdfError::Invalid));
+        if pos >= self.len() {
+            bail!("XRef offset outside file bounds");
+        }
+        let mut lexer = Lexer::with_offset(t!(self.read(pos ..)), pos);
+        read_xref_and_trailer_at(&mut lexer, resolve)
+    }
+
+    /// 7.5.8.4: the trailer of an update section in a hybrid-reference file may
+    /// carry `/XRefStm`, the offset of a cross-reference stream. Its entries are
+    /// consulted after the classic section and before the one `/Prev` names
+    /// ("the cross-reference stream shall be consulted first"), so this is
+    /// called between the two.
+    ///
+    /// The stream lists the objects that the file hides: the older section
+    /// carries a free entry with generation 65535 for each of them, and the
+    /// stream's in-use entry shall win. `from_xref_stream` records those object
+    /// numbers so that the older sections cannot overwrite them.
+    fn add_xrefstm_entries(
+        &self,
+        start_offset: usize,
+        trailer: &Dictionary,
+        resolve: &impl Resolve,
+        refs: &mut XRefTable,
+        from_xref_stream: &mut Vec<bool>,
+    ) -> Result<()> {
+        let offset = match trailer.get("XRefStm") {
+            Some(p) => t!(p.as_usize()),
+            None => return Ok(()),
+        };
+        let (sections, stream_trailer) = match self.read_xref_section_at(start_offset, offset, resolve) {
+            Ok(read) => read,
+            Err(e) => {
+                // The stream only duplicates information: every object it
+                // mentions is also reachable through the older sections, minus
+                // the hidden ones. Losing it is an xref error, not a reason to
+                // refuse the file.
+                if resolve.options().allow_xref_error {
+                    warn!("ignoring unusable /XRefStm at {}: {}", offset, e);
+                    return Ok(());
+                }
+                return Err(e);
+            }
+        };
+
+        if let Some(size) = stream_trailer.get("Size").and_then(|p| p.as_u32().ok()) {
+            if size > MAX_ID {
+                bail!("too many objects");
+            }
+            refs.ensure_len(size as ObjNr);
+        }
+
+        for section in sections {
+            let end = section.entries().map(|(nr, _)| nr as ObjNr + 1).max().unwrap_or(0);
+            refs.ensure_len(end);
+
+            let claimed: Vec<ObjNr> = section.entries()
+                .filter(|(_, e)| matches!(e, XRef::Raw { .. } | XRef::Stream { .. }))
+                .map(|(nr, _)| nr as ObjNr)
+                .collect();
+            refs.add_entries_from(section)?;
+
+            if from_xref_stream.len() < refs.len() {
+                from_xref_stream.resize(refs.len(), false);
+            }
+            for id in claimed {
+                if let Some(flag) = from_xref_stream.get_mut(id as usize) {
+                    *flag = true;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn last_byte(&self) -> Option<u8> {
