@@ -322,7 +322,13 @@ impl OpBuilder {
                 let phase = args.next().ok_or(PdfError::NoOpArg)?.as_number()?;
                 push(Op::Dash { pattern, phase });
             }
-            "d0"  => {}
+            // 9.6.5 / Table 113: `d0` and `d1` occur only in the content stream
+            // of a Type 3 glyph (`/CharProcs`), where they declare the glyph's
+            // advance width (and, for `d1`, its bounding box).
+            "d0"  => {
+                numbers!(args, wx, wy);
+                push(Op::GlyphWidth { wx, wy });
+            }
             "d1"  => {}
             "Do" | "Do0" => {
                 names!(args, name);
@@ -740,6 +746,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                 }
                 writeln!(f, "] TJ")?;
             },
+            Op::GlyphWidth { wx, wy } => writeln!(f, "{} {} d0", wx, wy)?,
             Op::InlineImage { image: _ } => unimplemented!(),
             Op::XObject { ref name } => {
                 serialize_name(name, f)?;
@@ -1138,6 +1145,11 @@ pub enum Op {
     TextDraw { text: PdfString },
 
     TextDrawAdjusted { array: Vec<TextDrawAdjusted> },
+
+    /// The advance width of a Type 3 glyph, in glyph space.
+    ///
+    /// operator: `d0` (9.6.5). `wy` shall be 0.
+    GlyphWidth { wx: f32, wy: f32 },
 
     XObject { name: Name },
 

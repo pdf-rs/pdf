@@ -1465,3 +1465,64 @@ fn c33_unknown_operator_fails_in_strict_and_is_skipped_in_tolerant() {
     );
 }
 
+/// One-page document whose text uses a Type 3 font with the given glyph
+/// procedures (`/A` for code 65, `/B` for code 66).
+fn type3_doc(glyph_proc: &[u8]) -> Vec<u8> {
+    let stream = |data: &[u8]| {
+        let mut v = format!("<< /Length {} >>\nstream\n", data.len()).into_bytes();
+        v.extend_from_slice(data);
+        v.extend_from_slice(b"\nendstream");
+        v
+    };
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] \
+          /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+            .to_vec(),
+        stream(b"BT /F1 60 Tf 72 100 Td (AB) Tj ET"),
+        b"<< /Type /Font /Subtype /Type3 /Name /F1 /FontBBox [0 0 700 700] \
+          /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs 6 0 R \
+          /Encoding << /Type /Encoding /Differences [65 /A /B] >> \
+          /FirstChar 65 /LastChar 66 /Widths [700 700] /Resources << >> >>"
+            .to_vec(),
+        b"<< /A 7 0 R /B 8 0 R >>".to_vec(),
+        stream(glyph_proc),
+        stream(glyph_proc),
+    ];
+    build_pdf(&objects, 1)
+}
+
+#[test]
+fn c34_type3_glyph_width_operator_d0() {
+    // 9.6.5 / Table 113: `d0` sets the glyph width (operands wx wy, and wy
+    // shall be 0) and paints with the text state colour. It occurs only in a
+    // Type 3 font's charproc, so dropping it loses nothing on an ordinary
+    // page — but an op stream that is read and written back lost it silently.
+    use pdf::content::{parse_ops, serialize_ops, Op};
+
+    let ops = parse_ops(b"700 0 d0", &NoResolve).expect("c34: d0 must parse");
+    assert!(
+        matches!(ops.as_slice(), [Op::GlyphWidth { wx, wy }] if *wx == 700.0 && *wy == 0.0),
+        "c34: d0 must survive parsing, got {:?}",
+        ops
+    );
+    assert_eq!(
+        serialize_ops(&ops).expect("c34: d0 must serialize"),
+        b"700 0 d0\n".to_vec(),
+        "c34: `d0` must be written back"
+    );
+
+    // a whole document that really uses it: the glyph procedures are filled
+    // boxes, instrumentation from pdf-rs only reads the page, so the fixture
+    // is for the outside viewer.
+    let bytes = type3_doc(b"700 0 d0\n0 0 700 700 re f");
+    let path = write_case("c34-type3-d0", &bytes);
+    assert!(path.exists());
+    assert_eq!(
+        pdf_rs_read(&bytes, "c34-type3-d0").text,
+        "AB",
+        "c34: the text still comes from the page content stream"
+    );
+}
+
