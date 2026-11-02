@@ -2,31 +2,45 @@
 
 Reviewed: 2026-11-01.
 
+Status: the first five items below are **fixed** in this tree (commit "spec: fix wave 2"),
+each with a case in `pdf/tests/spec_cases.rs` that failed before the fix: `c08_*` (ASCIIHex
+odd digit), `c09_*` (TIFF predictor 2), `c10_*` (row stride vs `BitsPerComponent`),
+`c11_*` (Crypt /Identity), and the `StreamFilter::Crypt` variant now carries its `/Name`.
+**Correction to the first version of this note:** the "panic" claims below were wrong —
+this crate's `unimplemented!()` is a local macro (error.rs:365) that returns an error, so
+CCITT `K >= 0` and unsupported `encode()` paths already fail with `Err`. `c12_*` and `c13_*`
+are regression guards, not evidence of a bug.
+
 ## Mismatches / gaps
 
-- **`Crypt` filter unimplemented** — `decode()` (~line 527) has no `StreamFilter::Crypt` arm and
-  falls through to `bail!("unimplemented")`. 7.4.6 / 7.6.5: a stream may select a crypt filter
-  per stream with `/Filter [/Crypt] /DecodeParms << /Name /Foo >>`; that stream fails to decode.
+- **`Crypt` filter was unimplemented** — `decode()` had no `StreamFilter::Crypt` arm and fell
+  through to `bail!("unimplemented")`. 7.4.6 / 7.6.5: a stream may select a crypt filter per
+  stream with `/Filter [/Crypt] /DecodeParms << /Name /Foo >>`. Now `/Identity` (the default)
+  passes data through and any other name is reported as needing the security handler, which is
+  where `/CF` lookups belong.
 - **CCITTFaxDecode: only `K < 0` (G4) works** (`fax_decode`). `K >= 0` (modified Huffman 1-D and
-  G3 2-D, 7.4.6) hits `unimplemented!()` → panic. `BlackIs1`, `EndOfLine`, `EndOfBlock`,
+  G3 2-D, 7.4.6) returns "not implemented". `BlackIs1`, `EndOfLine`, `EndOfBlock`,
   `EncodedByteAlign`, `DamagedRowsBeforeError` are parsed but only `Columns`/`Rows` are honoured;
-  output is always 0/255 grey bytes regardless of `BlackIs1`.
-- **ASCIIHexDecode silently drops an odd final digit** (`decode_hex`, `tuples()`). 7.4.2.1: "if
-  the filter encounters the end of data with an odd number of digits, the last digit shall be
-  assumed to be followed by 0". E.g. `>f>` should decode to 0xF0.
-- **TIFF predictor 2 not implemented** (`flate_decode` only handles `predictor > 10`, i.e. the
-  PNG predictors 10-15; 7.4.4.4 also defines 2 for TIFF, which is left as raw bytes). A
-  `predictor` value of, say, 5 or 20 is also accepted as "PNG".
-- **Predictor ignores `BitsPerComponent`**: row stride is `Columns * Colors`, but 7.4.4.4 says
-  `ceil(Columns * Colors * BitsPerComponent / 8)`. Any stream with `/BitsPerComponent 1/2/4`
-  (common for fax-like images and some object streams) decodes to garbage.
-- **Encoding is mostly `unimplemented!()`** (`encode()`): DCT, CCITT, JPX, JBIG2, RunLength and
-  Crypt panic when used to write. Only ASCIIHex, ASCII85, LZW, Flate exist (7.4).
+  output is always 0/255 grey bytes regardless of `BlackIs1`. **Not fixed** (needs a 1-D/G3
+  decoder); the error path is now the documented behaviour.
+- **ASCIIHexDecode dropped an odd final digit** (`decode_hex`). 7.4.2.1: "the last digit shall
+  be assumed to be followed by 0", so `f>` is 0xF0, not nothing. Fixed. Note this can only ever
+  change the *last byte* of a decoded stream, so it cannot be shown with a rendered page — the
+  case is unit-level, checked against the clause.
+- **TIFF predictor 2 was not implemented** (`flate_decode` only handled `predictor > 10`).
+  7.4.4.4 also defines 2; fixed for `BitsPerComponent` 8 and 16, other widths report an error.
+  Unknown predictor values now error instead of being silently treated as PNG.
+- **Predictor ignored `BitsPerComponent`**: the row stride was `Columns * Colors`, but 7.4.4.4
+  says `ceil(Columns * Colors * BitsPerComponent / 8)`; the PNG left-pixel offset is
+  `ceil(Colors * BitsPerComponent / 8)` bytes. Fixed. Any 1/2/4-bit image or object stream with
+  a predictor decoded to garbage before.
+- **Encoding is mostly unimplemented** (`encode()`): DCT, CCITT, JPX, JBIG2, RunLength and Crypt
+  return an error (the local macro, so no panic). Only ASCIIHex, ASCII85, LZW, Flate exist (7.4).
 - **JPX/JBIG2 need an external decoder** (`set_jpx_decoder`/`set_jbig2_decoder`); unset →
   `"decoder not set"` error, so 7.4.7/7.4.8 images are unreadable in a default build.
 - **`JBIG2Globals`** streams are prepended to the page stream with a synthetic file header; the
-  spec leaves the embedding to the implementation, but the `.get(jbig2)` segment layout here is
-  a heuristic — documents with a real `/JBIG2Globals` header may mis-decode.
+  spec leaves the embedding to the implementation, but the segment layout here is a heuristic —
+  documents with a real `/JBIG2Globals` header may mis-decode.
 
 ## Deliberate deviations (tolerant)
 
@@ -47,3 +61,5 @@ Reviewed: 2026-11-01.
 - `/Filter` may be a name or an array, `/DecodeParms` may be null or an array with null holes
   (7.4.2) — handled in `object/stream.rs::StreamInfo::from_primitive`, including `/FFilter`
   and `/FDecodeParms`.
+- ASCIIHex whitespace skipping and the `>` terminator (7.4.2.1); `CCITTFaxDecode`/`Crypt` now
+  reachable from `decode()` as well as from the image path (`xobject.rs`).
