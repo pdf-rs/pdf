@@ -156,11 +156,25 @@ where
         let data = self.backend.read(range)?;
 
         let mut data = Vec::from(data);
+        // 7.6.5: a /Crypt filter in the stream's own filter array replaces the
+        // default /StmF for this stream, so the default decryption must not run
+        // when one is present — that filter does the work, possibly with
+        // /Identity.
+        let has_crypt_filter = filters.iter().any(|f| matches!(f, StreamFilter::Crypt(_)));
         if let Some(ref decoder) = self.decoder {
-            data = Vec::from(t!(decoder.decrypt(id, &mut data)));
+            if !has_crypt_filter {
+                data = Vec::from(t!(decoder.decrypt_stream(id, &mut data)));
+            }
         }
         for filter in filters {
-            data = t!(decode(&data, filter, &self.options), filter);
+            match (filter, self.decoder.as_ref()) {
+                (StreamFilter::Crypt(params), Some(decoder)) => {
+                    data = Vec::from(t!(decoder.decrypt_named(id, &mut data, params.name.as_ref())));
+                }
+                _ => {
+                    data = t!(decode(&data, filter, &self.options), filter);
+                }
+            }
         }
         Ok(data.into())
     }

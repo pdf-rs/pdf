@@ -15,9 +15,12 @@ are regression guards, not evidence of a bug.
 
 - **`Crypt` filter was unimplemented** — `decode()` had no `StreamFilter::Crypt` arm and fell
   through to `bail!("unimplemented")`. 7.4.6 / 7.6.5: a stream may select a crypt filter per
-  stream with `/Filter [/Crypt] /DecodeParms << /Name /Foo >>`. Now `/Identity` (the default)
-  passes data through and any other name is reported as needing the security handler, which is
-  where `/CF` lookups belong.
+  stream with `/Filter [/Crypt] /DecodeParms << /Name /Foo >>`. `/Identity` (the default) passes
+  data through here. Any other name is resolved by the security handler, not by this module:
+  `Storage::decode` (`file.rs`) looks the name up in `/CF` and calls `Decoder::decrypt_named`
+  before `decode()` ever sees the filter (commit "crypt: honour /StrF, /StmF and per-stream crypt
+  filter /Name", cases `c23`/`c24`). This fallback still reports a named filter as an error,
+  which is what happens for `Stream` data generated in memory (never encrypted).
 - **CCITTFaxDecode: only `K < 0` (G4) works** (`fax_decode`). `K >= 0` (modified Huffman 1-D and
   G3 2-D, 7.4.6) returns "not implemented". `BlackIs1`, `EndOfLine`, `EndOfBlock`,
   `EncodedByteAlign`, `DamagedRowsBeforeError` are parsed but only `Columns`/`Rows` are honoured;

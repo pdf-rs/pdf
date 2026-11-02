@@ -127,6 +127,10 @@ pub struct CryptDict {
     #[pdf(key="StmF")]
     default_crypt_filter: Option<Name>,
 
+    /// 7.6.5 Table 20: the crypt filter for strings. Absent means `/Identity`.
+    #[pdf(key="StrF")]
+    string_crypt_filter: Option<Name>,
+
     #[pdf(key="EncryptMetadata", default="true")]
     encrypt_metadata: bool,
 
@@ -140,7 +144,7 @@ pub struct CryptDict {
     _other: Dictionary
 }
 
-#[derive(Object, Debug, Clone, Copy, DataSize)]
+#[derive(Object, Debug, Clone, Copy, PartialEq, Eq, DataSize)]
 pub enum CryptMethod {
     None,
     V2,
@@ -170,11 +174,37 @@ pub struct CryptFilter {
     _other: Dictionary
 }
 
+/// One entry of the `/CF` dictionary: the algorithm and the key length it uses.
+/// 7.6.5 Table 25: `/CFM None` is the Identity crypt filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FilterSpec {
+    method: CryptMethod,
+    /// Key length in bits: the filter's `/Length`, else the file's `/Length`.
+    key_bits: usize,
+}
+
+impl FilterSpec {
+    fn identity(key_bits: usize) -> FilterSpec {
+        FilterSpec { method: CryptMethod::None, key_bits }
+    }
+    fn is_identity(&self) -> bool {
+        matches!(self.method, CryptMethod::None)
+    }
+}
+
 #[derive(Clone)]
 pub struct Decoder {
     key_size: usize,
     key: Vec<u8>, // maximum length
-    method: CryptMethod,
+    /// Default crypt filter for streams (`/StmF`, 7.6.5). A stream's own
+    /// `/Crypt` filter overrides it.
+    stream: FilterSpec,
+    /// Default crypt filter for strings (`/StrF`, 7.6.5). Independent of
+    /// `stream`: a file may encrypt the one and not the other.
+    string: FilterSpec,
+    /// The `/CF` dictionary by name, for `/Crypt` filters that select their
+    /// filter with `/Name` instead of using the default.
+    filters: HashMap<Name, FilterSpec>,
     /// A reference to the /Encrypt dictionary, if it is in an indirect
     /// object. The strings in this dictionary are not encrypted, so
     /// decryption must be skipped when accessing them.
@@ -194,25 +224,48 @@ impl Decoder {
     }
 
     fn key(&self) -> &[u8] {
-        // RC4 (V2) and AES-128 (AESV2) use at most a 16-byte key, but AES-256
-        // (AESV3) needs the full 32 bytes — capping at 16 there truncates the
-        // file key and corrupts every stream/string it decrypts.
-        let max = if matches!(self.method, CryptMethod::AESV3) { 32 } else { 16 };
-        &self.key[.. std::cmp::min(self.key_size, max)]
+        &self.key[..self.key_size]
+    }
+
+    /// Number of file-key bytes one filter uses: 7.6.3.2 Algorithm 1 b) hashes
+    /// the first `n` bytes of the file key, where `n` is that filter's key
+    /// length (RC4 and AES-128 top out at 16 bytes, AES-256 uses 32).
+    fn object_key_len(&self, spec: FilterSpec) -> usize {
+        let cap = match spec.method {
+            CryptMethod::AESV3 => 32,
+            _ => 16,
+        };
+        let wanted = if spec.key_bits >= 8 { spec.key_bits / 8 } else { self.key_size };
+        wanted.min(self.key_size).min(cap).min(self.key.len())
     }
 
     pub fn new(key: Vec<u8>, key_size: usize, method: CryptMethod, encrypt_metadata: bool) -> Result<Decoder> {
         if key.len() < key_size {
             bail!("Key too short, {key_size} was specified but only {} given", key.len());
         }
+        let spec = FilterSpec { method, key_bits: key_size * 8 };
         Ok(Decoder {
             key_size,
             key,
-            method,
+            stream: spec,
+            string: spec,
+            filters: HashMap::new(),
             encrypt_indirect_object: None,
             metadata_indirect_object: None,
             encrypt_metadata,
         })
+    }
+
+    fn with_filters(
+        mut self,
+        stream: FilterSpec,
+        string: FilterSpec,
+        filters: HashMap<Name, FilterSpec>,
+    ) -> Decoder {
+        self.stream = stream;
+        self.string = string;
+        self.filters = filters;
+        self
     }
 
     pub fn from_password(dict: &CryptDict, id: &[u8], pass: &[u8]) -> Result<Decoder> {
@@ -343,6 +396,35 @@ impl Decoder {
             Ok(digest.to_vec())
         }
 
+        // 7.6.5 Table 25: every entry of /CF is a crypt filter, /CFM None being
+        // the Identity filter. /Length is expressed in multiples of 8 bits.
+        let mut filters: HashMap<Name, FilterSpec> = HashMap::new();
+        for (name, filter) in &dict.crypt_filters {
+            filters.insert(
+                name.clone(),
+                FilterSpec {
+                    method: filter.method,
+                    key_bits: filter
+                        .length
+                        .map(|n| (n as usize).saturating_mul(8))
+                        .unwrap_or(dict.bits as usize),
+                },
+            );
+        }
+        // 7.6.5 Table 20: /StmF and /StrF default to /Identity, which is also a
+        // legal value inside a file (V 4 and above).
+        let resolve = |name: Option<&Name>| -> Result<FilterSpec> {
+            match name.map(|n| n.as_str()) {
+                None | Some("Identity") => Ok(FilterSpec::identity(dict.bits as usize)),
+                Some(n) => filters
+                    .get(name.unwrap())
+                    .copied()
+                    .ok_or_else(|| other!("missing crypt filter entry /{}", n)),
+            }
+        };
+        let stream_filter = resolve(dict.default_crypt_filter.as_ref())?;
+        let string_filter = resolve(dict.string_crypt_filter.as_ref())?;
+
         let (key_bits, method) = match dict.v {
             1 => (40, CryptMethod::V2),
             2 => {
@@ -353,23 +435,20 @@ impl Decoder {
                 }
             },
             4 ..= 6 => {
-                let default = dict
-                    .crypt_filters
-                    .get(try_opt!(dict.default_crypt_filter.as_ref()).as_str())
-                    .ok_or_else(|| other!("missing crypt filter entry {:?}", dict.default_crypt_filter.as_ref()))?;
-
-                match default.method {
-                    CryptMethod::V2 | CryptMethod::AESV2 => (
-                        // `n` is a u32 straight from the file, so 8 * n has to
-                        // be saturating: a `/Length 536870912` would otherwise
-                        // overflow before the bound below ever sees it.
-                        default.length.map(|n| n.saturating_mul(8)).unwrap_or(dict.bits),
-                        default.method,
-                    ),
-                    CryptMethod::AESV3 if dict.v == 5 => (
-                        default.length.map(|n| n.saturating_mul(8)).unwrap_or(dict.bits),
-                        default.method,
-                    ),
+                // The file key length is the length of the filter that actually
+                // encrypts something. With /Identity everywhere nothing is
+                // encrypted, so the length in the encryption dictionary decides
+                // how the key is checked against /U.
+                let reference = if !stream_filter.is_identity() {
+                    stream_filter
+                } else {
+                    string_filter
+                };
+                let reference_bits = reference.key_bits.min(u32::MAX as usize) as u32;
+                match reference.method {
+                    CryptMethod::None => (dict.bits, CryptMethod::None),
+                    CryptMethod::V2 | CryptMethod::AESV2 => (reference_bits, reference.method),
+                    CryptMethod::AESV3 if dict.v == 5 => (reference_bits, reference.method),
                     m => err!(other!("unimplemented crypt method {:?}", m)),
                 }
             }
@@ -378,6 +457,15 @@ impl Decoder {
         if key_bits == 0 || key_bits % 8 != 0 {
             err!(other!("invalid key length {}", key_bits))
         }
+        // 7.6.1: with V 1 or 2 there is no /CF, /StmF or /StrF — the single
+        // standard RC4 crypt filter applies to every string and every stream,
+        // with no way to opt out.
+        let (stream_filter, string_filter) = if dict.v <= 2 {
+            let spec = FilterSpec { method: CryptMethod::V2, key_bits: key_bits as usize };
+            (spec, spec)
+        } else {
+            (stream_filter, string_filter)
+        };
         let level = dict.r;
         if !(2..=6).contains(&level) {
             err!(other!("unsupported standard security handler revision {}", level))
@@ -401,7 +489,8 @@ impl Decoder {
             let key = key_derivation_user_password_rc4(level, key_size, dict, id, pass);
 
             if check_password_rc4(level, dict.u.as_bytes(), id, &key[..std::cmp::min(key_size, 16)]) {
-                let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata)?;
+                let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata)?
+                    .with_filters(stream_filter, string_filter, filters.clone());
                 Ok(decoder)
             } else {
                 let password_wrap_key = key_derivation_owner_password_rc4(level, key_size, pass)?;
@@ -425,7 +514,8 @@ impl Decoder {
                 );
 
                 if check_password_rc4(level, dict.u.as_bytes(), id, &key[..key_size]) {
-                    let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata)?;
+                    let decoder = Decoder::new(key, key_size, method, dict.encrypt_metadata)?
+                        .with_filters(stream_filter, string_filter, filters.clone());
                     Ok(decoder)
                 } else {
                     Err(PdfError::InvalidPassword)
@@ -535,7 +625,8 @@ impl Decoder {
                 .decrypt_padded_inout::<NoPadding>(InOutBuf::from(wrapped_key.as_mut_slice()))
                 .map_err(|_| PdfError::InvalidPassword));
 
-            let decoder = Decoder::new(key_slice.into(), 32, method, dict.encrypt_metadata)?;
+            let decoder = Decoder::new(key_slice.into(), 32, method, dict.encrypt_metadata)?
+                .with_filters(stream_filter, string_filter, filters);
             Ok(decoder)
         } else {
             err!(format!("unsupported V value {}", level).into())
@@ -608,7 +699,44 @@ impl Decoder {
         hash
     }
 
+    /// Decrypt one string with `/StrF` (7.6.5). This is what the parser calls
+    /// for literal and hexadecimal strings; strings and streams have
+    /// independent default filters.
     pub fn decrypt<'buf>(&self, id: PlainRef, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
+        let spec = self.string;
+        self.decrypt_with(id, data, spec)
+    }
+
+    /// Decrypt one stream's data with the default filter `/StmF` (7.6.5).
+    pub fn decrypt_stream<'buf>(&self, id: PlainRef, data: &'buf mut [u8]) -> Result<&'buf [u8]> {
+        let spec = self.stream;
+        self.decrypt_with(id, data, spec)
+    }
+
+    /// Decrypt one stream with the `/CF` entry its `/Crypt` filter names
+    /// (7.6.5). No name, and `/Identity`, mean this stream is not encrypted.
+    pub fn decrypt_named<'buf>(
+        &self,
+        id: PlainRef,
+        data: &'buf mut [u8],
+        name: Option<&Name>,
+    ) -> Result<&'buf [u8]> {
+        let spec = match name.map(|n| n.as_str()) {
+            None | Some("Identity") => return Ok(data),
+            Some(n) => match self.filters.get(name.unwrap()) {
+                Some(spec) => *spec,
+                None => bail!("missing crypt filter entry /{}", n),
+            },
+        };
+        self.decrypt_with(id, data, spec)
+    }
+
+    fn decrypt_with<'buf>(
+        &self,
+        id: PlainRef,
+        data: &'buf mut [u8],
+        spec: FilterSpec,
+    ) -> Result<&'buf [u8]> {
         if self.encrypt_indirect_object == Some(id) {
             // Strings inside the /Encrypt dictionary are not encrypted
             return Ok(data);
@@ -624,16 +752,21 @@ impl Decoder {
             return Ok(data);
         }
 
+        // 7.6.5 Table 25: /CFM None and /Identity pass the data through.
+        if spec.is_identity() {
+            return Ok(data);
+        }
+
         // Algorithm 1
         // a) we have those already
 
-        match self.method {
-            CryptMethod::None => unreachable!(),
+        match spec.method {
+            CryptMethod::None => Ok(data),
             CryptMethod::V2 => {
                 // b)
                 let mut key = [0; 16 + 5];
-                let n = self.key().len();
-                key[..n].copy_from_slice(self.key());
+                let n = self.object_key_len(spec);
+                key[..n].copy_from_slice(&self.key[..n]);
                 key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
                 key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
 
@@ -647,8 +780,8 @@ impl Decoder {
             CryptMethod::AESV2 => {
                 // b)
                 let mut key = [0; 32 + 5 + 4];
-                let n = std::cmp::min(self.key_size, 16);
-                key[..n].copy_from_slice(self.key());
+                let n = self.object_key_len(spec);
+                key[..n].copy_from_slice(&self.key[..n]);
                 key[n..n + 3].copy_from_slice(&id.id.to_le_bytes()[..3]);
                 key[n + 3..n + 5].copy_from_slice(&id.gen.to_le_bytes()[..2]);
                 key[n + 5..n + 9].copy_from_slice(b"sAlT");
@@ -673,8 +806,11 @@ impl Decoder {
                     return Err(PdfError::DecryptionFailure);
                 }
                 let (iv, ciphertext) = data.split_at_mut(16);
-                let cipher =
-                    t!(Aes256CbcDec::new_from_slices(self.key(), iv).map_err(|_| PdfError::DecryptionFailure));
+                let cipher = t!(Aes256CbcDec::new_from_slices(
+                    &self.key[..self.object_key_len(spec)],
+                    iv,
+                )
+                .map_err(|_| PdfError::DecryptionFailure));
                 Ok(t!(cipher
                     .decrypt_padded_inout::<Pkcs7>(InOutBuf::from(ciphertext))
                     .map_err(|_| PdfError::DecryptionFailure)))
@@ -686,7 +822,8 @@ impl fmt::Debug for Decoder {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Decoder")
             .field("key", &self.key())
-            .field("method", &self.method)
+            .field("method", &self.stream.method)
+            .field("string_method", &self.string.method)
             .finish()
     }
 }

@@ -187,6 +187,12 @@ fn text_doc(content: &[u8], font_key: &str) -> Vec<u8> {
 }
 
 fn build_pdf(objects: &[Vec<u8>], root: u32) -> Vec<u8> {
+    build_pdf_with_trailer(objects, root, "")
+}
+
+/// `extra_trailer` is appended to the trailer dictionary verbatim (used for
+/// `/Info`, `/ID` and `/Encrypt`).
+fn build_pdf_with_trailer(objects: &[Vec<u8>], root: u32, extra_trailer: &str) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
     let mut offsets = Vec::new();
@@ -204,9 +210,10 @@ fn build_pdf(objects: &[Vec<u8>], root: u32) -> Vec<u8> {
     }
     out.extend_from_slice(
         format!(
-            "trailer\n<< /Size {} /Root {} 0 R >>\nstartxref\n{}\n%%EOF\n",
+            "trailer\n<< /Size {} /Root {} 0 R{} >>\nstartxref\n{}\n%%EOF\n",
             objects.len() + 1,
             root,
+            extra_trailer,
             xref_pos
         )
         .as_bytes(),
@@ -222,6 +229,8 @@ struct Read {
     text: String,
     fonts_used: Vec<String>,
     fonts_available: Vec<String>,
+    /// `/Info /Title`, as decrypted by pdf-rs.
+    title: Option<String>,
 }
 
 fn pdf_rs_read(bytes: &[u8], name: &str) -> Read {
@@ -235,6 +244,12 @@ fn pdf_rs_read(bytes: &[u8], name: &str) -> Read {
     assert!(num_pages > 0, "{}: no pages", name);
 
     let mut out = Read::default();
+    out.title = file
+        .trailer
+        .info_dict
+        .as_ref()
+        .and_then(|i| i.title.as_ref())
+        .map(|t| String::from_utf8_lossy(&t.data).into_owned());
     for i in 0..num_pages {
         let page = file
             .get_page(i)
@@ -591,3 +606,353 @@ fn fixtures_escaped_font_key() {
     );
     assert_eq!(r.text, "Hello", "got {:?}", r);
 }
+
+// ---------------------------------------------------------------- wave 4: crypt filters (§7.6)
+
+// 7.6.3.2 Table 21: the 32-byte padding string.
+const PAD: [u8; 32] = [
+    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01,
+    0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53,
+    0x69, 0x7A,
+];
+
+/// 7.6.3.3: permissions of the test files (`-4` = all bits set but reserved
+/// ones, no password required).
+const PERMS: i32 = -4;
+
+fn md5_of(parts: &[&[u8]]) -> [u8; 16] {
+    let mut hash = md5::Context::new();
+    for p in parts {
+        hash.consume(p);
+    }
+    *hash.compute()
+}
+
+fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut d = data.to_vec();
+    pdf::crypt::Rc4::encrypt(key, &mut d);
+    d
+}
+
+fn pad_password(pw: &[u8]) -> [u8; 32] {
+    let mut out = PAD;
+    let n = pw.len().min(32);
+    out[..n].copy_from_slice(&pw[..n]);
+    out
+}
+
+/// Algorithm 3: the `/O` entry, for RC4 revisions 2..4.
+fn compute_o(owner_pw: &[u8], user_pw: &[u8], revision: u32, key_len: usize) -> Vec<u8> {
+    let mut ok = md5_of(&[&pad_password(owner_pw)]).to_vec();
+    if revision >= 3 {
+        for _ in 0..50 {
+            ok = md5_of(&[&ok[..key_len]]).to_vec();
+        }
+    }
+    let ok = &ok[..key_len];
+    let data = pad_password(user_pw);
+    if revision == 2 {
+        rc4(ok, &data)
+    } else {
+        let mut data = rc4(ok, &data);
+        for round in 1..=19u8 {
+            let key: Vec<u8> = ok.iter().map(|b| b ^ round).collect();
+            data = rc4(&key, &data);
+        }
+        data
+    }
+}
+
+/// Algorithm 2: the file encryption key, for RC4 revisions 2..4.
+fn compute_key(
+    user_pw: &[u8],
+    o: &[u8],
+    p: i32,
+    id0: &[u8],
+    revision: u32,
+    key_len: usize,
+) -> Vec<u8> {
+    let mut key = md5_of(&[&pad_password(user_pw), o, &p.to_le_bytes(), id0]).to_vec();
+    if revision >= 3 {
+        for _ in 0..50 {
+            key = md5_of(&[&key[..key_len]]).to_vec();
+        }
+    }
+    key.truncate(key_len);
+    key
+}
+
+/// Algorithm 4 (revision 2) / Algorithm 5 (revisions 3, 4): the `/U` entry.
+fn compute_u(key: &[u8], id0: &[u8], revision: u32) -> Vec<u8> {
+    if revision == 2 {
+        return rc4(key, &PAD);
+    }
+    let mut data = rc4(key, &md5_of(&[&PAD[..], id0]));
+    for round in 1..=19u8 {
+        let round_key: Vec<u8> = key.iter().map(|b| b ^ round).collect();
+        data = rc4(&round_key, &data);
+    }
+    data.extend_from_slice(&[0u8; 16]);
+    data
+}
+
+fn hex(data: &[u8]) -> String {
+    data.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// A binary string as a PDF literal string with octal escapes.
+fn pdf_string(data: &[u8]) -> String {
+    let mut s = String::from("(");
+    for &b in data {
+        match b {
+            b'(' | b')' | b'\\' => {
+                s.push('\\');
+                s.push(b as char);
+            }
+            0x20..=0x7e => s.push(b as char),
+            _ => s.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    s.push(')');
+    s
+}
+
+/// A document sealed with the standard security handler (empty user password).
+/// [`Sealed::object`] produces the ciphertext of one object's strings/stream.
+struct Sealed {
+    o: Vec<u8>,
+    u: Vec<u8>,
+    key: Vec<u8>,
+    id0: Vec<u8>,
+}
+
+impl Sealed {
+    fn new(revision: u32, key_len: usize) -> Sealed {
+        let id0 = b"0123456789abcdef".to_vec();
+        let o = compute_o(b"", b"", revision, key_len);
+        let key = compute_key(b"", &o, PERMS, &id0, revision, key_len);
+        let u = compute_u(&key, &id0, revision);
+        Sealed { o, u, key, id0 }
+    }
+
+    /// Algorithm 1: the per-object key, then RC4.
+    fn object(&self, id: u32, gen: u16, data: &[u8]) -> Vec<u8> {
+        let n = self.key.len();
+        let mut seed = self.key.clone();
+        seed.extend_from_slice(&id.to_le_bytes()[..3]);
+        seed.extend_from_slice(&gen.to_le_bytes()[..2]);
+        let key = md5_of(&[&seed]);
+        rc4(&key[..(n + 5).min(16)], data)
+    }
+}
+
+/// One-page document with an `/Encrypt` dictionary. `content` and `title` are
+/// the bytes actually stored (the caller encrypts them or not, depending on
+/// what the file claims); `enc_extra` is appended to the `/Encrypt` dictionary
+/// (`/CF`, `/StmF`, `/StrF`), `stream_extra` to the content stream dictionary
+/// (`/Filter [/Crypt]`, `/DecodeParms`).
+fn crypt_pdf(
+    sealed: &Sealed,
+    v: i32,
+    revision: u32,
+    bits: u32,
+    enc_extra: &str,
+    stream_extra: &str,
+    content: &[u8],
+    title: &[u8],
+) -> Vec<u8> {
+    let contents = {
+        let mut out =
+            format!("<< /Length {} {} >>\nstream\n", content.len(), stream_extra).into_bytes();
+        out.extend_from_slice(content);
+        out.extend_from_slice(b"\nendstream");
+        out
+    };
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] \
+          /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+            .to_vec(),
+        contents,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        format!("<< /Title {} /Producer (pdf-rs spec cases) >>", pdf_string(title))
+            .into_bytes(),
+        format!(
+            "<< /Filter /Standard /V {} /R {} /Length {} /O <{}> /U <{}> /P {}{} >>",
+            v,
+            revision,
+            bits,
+            hex(&sealed.o),
+            hex(&sealed.u),
+            PERMS,
+            enc_extra
+        )
+        .into_bytes(),
+    ];
+    let id = hex(&sealed.id0);
+    build_pdf_with_trailer(
+        &objects,
+        1,
+        &format!(" /Info 6 0 R /ID [<{id}> <{id}>] /Encrypt 7 0 R"),
+    )
+}
+
+const CONTENT: &[u8] = b"BT /F1 24 Tf 72 120 Td (Hello) Tj ET";
+
+#[test]
+fn fixtures_crypt_control_both_default() {
+    // 7.6.5: /StmF and /StrF both point at the same RC4 filter. This file is
+    // the control: mupdf and pdf-rs must both read text and title, which says
+    // the generator (keys, /O, /U, object keys) is correct.
+    let sealed = Sealed::new(4, 16);
+    let content = sealed.object(4, 0, CONTENT);
+    let title = sealed.object(6, 0, b"Crypt control");
+    let bytes = crypt_pdf(
+        &sealed,
+        4,
+        4,
+        128,
+        " /CF << /StdCF << /Type /CryptFilter /CFM /V2 /Length 16 >> >> \
+          /StmF /StdCF /StrF /StdCF",
+        "",
+        &content,
+        &title,
+    );
+    write_case("c20-crypt-control", &bytes);
+    let r = pdf_rs_read(&bytes, "c20-crypt-control");
+    assert_eq!(r.text, "Hello", "encrypted content, got {:?}", r);
+    assert_eq!(r.title.as_deref(), Some("Crypt control"), "got {:?}", r);
+}
+
+#[test]
+fn c21_strings_identity_streams_encrypted() {
+    // 7.6.5 Table 20: /StrF is independent of /StmF. With /StrF /Identity the
+    // strings are stored as plain text, so a reader that decrypts them anyway
+    // returns garbage.
+    let sealed = Sealed::new(4, 16);
+    let content = sealed.object(4, 0, CONTENT);
+    let bytes = crypt_pdf(
+        &sealed,
+        4,
+        4,
+        128,
+        " /CF << /StdCF << /Type /CryptFilter /CFM /V2 /Length 16 >> >> \
+          /StmF /StdCF /StrF /Identity",
+        "",
+        &content,
+        b"ClearTitle",
+    );
+    write_case("c21-strf-identity", &bytes);
+    let r = pdf_rs_read(&bytes, "c21-strf-identity");
+    assert_eq!(r.text, "Hello", "got {:?}", r);
+    assert_eq!(
+        r.title.as_deref(),
+        Some("ClearTitle"),
+        "/StrF /Identity: the title is not encrypted and must not be decrypted, got {:?}",
+        r
+    );
+}
+
+#[test]
+fn c22_streams_identity_strings_encrypted() {
+    // 7.6.5 Table 20: /Identity is a legal value for /StmF, and then the
+    // streams are plain while the strings use /StrF.
+    let sealed = Sealed::new(4, 16);
+    let title = sealed.object(6, 0, b"EncTitle");
+    let bytes = crypt_pdf(
+        &sealed,
+        4,
+        4,
+        128,
+        " /CF << /StdCF << /Type /CryptFilter /CFM /V2 /Length 16 >> >> \
+          /StmF /Identity /StrF /StdCF",
+        "",
+        CONTENT,
+        &title,
+    );
+    write_case("c22-stmf-identity", &bytes);
+    let r = pdf_rs_read(&bytes, "c22-stmf-identity");
+    assert_eq!(r.text, "Hello", "got {:?}", r);
+    assert_eq!(r.title.as_deref(), Some("EncTitle"), "got {:?}", r);
+}
+
+#[test]
+fn c23_stream_crypt_name_identity() {
+    // 7.6.5: a `/Crypt` filter in the stream's /Filter array overrides the
+    // default /StmF; `/Name /Identity` means this stream is not encrypted
+    // while the rest of the file is.
+    let sealed = Sealed::new(4, 16);
+    let title = sealed.object(6, 0, b"EncTitle");
+    let bytes = crypt_pdf(
+        &sealed,
+        4,
+        4,
+        128,
+        " /CF << /StdCF << /Type /CryptFilter /CFM /V2 /Length 16 >> >> \
+          /StmF /StdCF /StrF /StdCF",
+        "/Filter [/Crypt] /DecodeParms [<< /Name /Identity >>]",
+        CONTENT,
+        &title,
+    );
+    write_case("c23-stream-name-identity", &bytes);
+    let r = pdf_rs_read(&bytes, "c23-stream-name-identity");
+    assert_eq!(
+        r.text, "Hello",
+        "/Name /Identity must leave this stream alone, got {:?}",
+        r
+    );
+    assert_eq!(r.title.as_deref(), Some("EncTitle"), "got {:?}", r);
+}
+
+#[test]
+fn c24_stream_crypt_name_from_cf() {
+    // 7.6.5: `/Name` may select any filter from /CF, not just the default one.
+    // /Plain has /CFM /None, i.e. it does nothing.
+    let sealed = Sealed::new(4, 16);
+    let title = sealed.object(6, 0, b"EncTitle");
+    let bytes = crypt_pdf(
+        &sealed,
+        4,
+        4,
+        128,
+        " /CF << /StdCF << /Type /CryptFilter /CFM /V2 /Length 16 >> \
+          /Plain << /Type /CryptFilter /CFM /None >> >> \
+          /StmF /StdCF /StrF /StdCF",
+        "/Filter [/Crypt] /DecodeParms [<< /Name /Plain >>]",
+        CONTENT,
+        &title,
+    );
+    write_case("c24-stream-name-cf", &bytes);
+    let r = pdf_rs_read(&bytes, "c24-stream-name-cf");
+    assert_eq!(r.text, "Hello", "got {:?}", r);
+    assert_eq!(r.title.as_deref(), Some("EncTitle"), "got {:?}", r);
+}
+
+#[test]
+fn c25_strings_default_to_identity() {
+    // 7.6.5 Table 20: /StrF is optional and defaults to /Identity. A file that
+    // sets only /StmF has plain strings, so decrypting them breaks them.
+    let sealed = Sealed::new(4, 16);
+    let content = sealed.object(4, 0, CONTENT);
+    let bytes = crypt_pdf(
+        &sealed,
+        4,
+        4,
+        128,
+        " /CF << /StdCF << /Type /CryptFilter /CFM /V2 /Length 16 >> >> /StmF /StdCF",
+        "",
+        &content,
+        b"ClearTitle",
+    );
+    write_case("c25-strf-absent", &bytes);
+    let r = pdf_rs_read(&bytes, "c25-strf-absent");
+    assert_eq!(r.text, "Hello", "got {:?}", r);
+    assert_eq!(
+        r.title.as_deref(),
+        Some("ClearTitle"),
+        "without /StrF the strings are /Identity, got {:?}",
+        r
+    );
+}
+
