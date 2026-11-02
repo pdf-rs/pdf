@@ -61,7 +61,10 @@ impl ParseOptions {
         ParseOptions {
             allow_error_in_option: false,
             allow_xref_error: false,
-            allow_invalid_ops: true,
+            // 7.8.2: an operator outside the operator set is a conforming
+            // error; a consumer may recover (tolerant), but strict parsing
+            // reports it instead of silently skipping it.
+            allow_invalid_ops: false,
             allow_missing_endobj: false,
             object_size_limit: 1024 * 1024,
             max_img_dim: 1024,
