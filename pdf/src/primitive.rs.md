@@ -2,6 +2,9 @@
 
 Reviewed: 2026-11-01.
 
+Status: the first two mismatches are **fixed** in this tree (commit "spec: fix wave 1");
+`to_date` now also emits a bare `Z` for `TimeRel::Universal`. Cases: `c07_*`, `c07b_*`.
+
 ## Mismatches
 
 - **Date serialisation omits the closing apostrophe** (`ParsedDate::to_date`, ~line 931):

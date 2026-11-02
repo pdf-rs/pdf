@@ -912,8 +912,11 @@ impl ParsedDate {
             tz_minute,
             rel,
         } = *self;
+        // PDF 32000-1:2008 7.9.4: month 01-12, day 01-31, hour 00-23,
+        // minute 00-59, second 00-59, offset hours 00-23, offset minutes 00-59.
         if year > 9999
-            || day > 99
+            || !(1..=12).contains(&month)
+            || !(1..=31).contains(&day)
             || hour > 23
             || minute >= 60
             || second >= 60
@@ -925,10 +928,16 @@ impl ParsedDate {
         let o = match rel {
             TimeRel::Earlier => "-",
             TimeRel::Later => "+",
+            // Z already says "equal to UT", so the offset fields are omitted.
             TimeRel::Universal => "Z",
         };
+        let zone = match rel {
+            TimeRel::Universal => String::new(),
+            // Both apostrophes belong to the format: HH'mm'
+            _ => format!("{tz_hour:02}'{tz_minute:02}'"),
+        };
 
-        let s = format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}{o}{tz_hour:02}'{tz_minute:02}");
+        let s = format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}{o}{zone}");
         Ok(Date {
             string: PdfString { data: s.into() },
         })

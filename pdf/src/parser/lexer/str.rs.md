@@ -2,6 +2,9 @@
 
 Reviewed: 2026-11-01.
 
+Status: both mismatches below are **fixed** in this tree (commit "spec: fix wave 1");
+cases `c03_*`, `fixtures_unknown_escape`, `c04_*` in `pdf/tests/spec_cases.rs`.
+
 ## Mismatches
 
 - **Unknown escape emits NUL** (literal-string lexer, `next_lexeme`, `_ =>` arm). 7.3.4.2:

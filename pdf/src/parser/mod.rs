@@ -10,7 +10,7 @@ pub use self::parse_xref::*;
 
 use crate::error::*;
 use crate::primitive::StreamInner;
-use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString};
+use crate::primitive::{Primitive, Dictionary, PdfStream, PdfString, Name};
 use crate::object::{ObjNr, GenNr, PlainRef, Resolve};
 use crate::crypt::Decoder;
 use bitflags::bitflags;
@@ -71,15 +71,46 @@ pub fn parse_with_lexer(lexer: &mut Lexer, r: &impl Resolve, flags: ParseFlags) 
     parse_with_lexer_ctx(lexer, r, None, flags, MAX_DEPTH)
 }
 
+/// Decode the `#XX` escapes in a name body (the bytes after the leading `/`).
+///
+/// PDF 32000-1:2008 7.3.5: the `#`-escape applies to every name, so dictionary
+/// keys and values have to go through the same decoding.
+fn decode_name(rest: &[u8]) -> Result<SmallString> {
+    let mut rest: &[u8] = rest;
+    let s = if rest.contains(&b'#') {
+        let mut s = IBytes::new();
+        while let Some(idx) = rest.iter().position(|&b| b == b'#') {
+            use crate::enc::decode_nibble;
+            use std::convert::TryInto;
+            let [hi, lo]: [u8; 2] = rest.get(idx+1 .. idx+3).ok_or(PdfError::EOF)?.try_into().unwrap();
+            let byte = match (decode_nibble(lo), decode_nibble(hi)) {
+                (Some(low), Some(high)) => low | high << 4,
+                _ => return Err(PdfError::HexDecode { pos: idx, bytes: [hi, lo] }),
+            };
+            s.extend_from_slice(&rest[..idx]);
+            s.push(byte);
+            rest = &rest[idx+3..];
+        }
+        s.extend_from_slice(rest);
+        SmallBytes::from(s.as_slice())
+    } else {
+        SmallBytes::from(rest)
+    };
+    Ok(SmallString::from_utf8(s)?)
+}
+
 fn parse_dictionary_object(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Context>, max_depth: usize) -> Result<Dictionary> {
     let mut dict = Dictionary::default();
     loop {
         // Expect a Name (and Object) or the '>>' delimiter
         let token = t!(lexer.next());
         if token.starts_with(b"/") {
-            let key = token.reslice(1..).to_name()?;
+            let key: Name = t!(decode_name(&token.reslice(1..))).into();
             let obj = t!(parse_with_lexer_ctx(lexer, r, ctx, ParseFlags::ANY, max_depth));
-            dict.insert(key, obj);
+            // 7.3.9: an entry whose value is null shall be treated as absent.
+            if !matches!(obj, Primitive::Null) {
+                dict.insert(key, obj);
+            }
         } else if token.equals(b">>") {
             break;
         } else {
@@ -201,29 +232,8 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
     } else if first_lexeme.starts_with(b"/") {
         check(flags, ParseFlags::NAME)?;
         // Name
-
-        let mut rest: &[u8] = &first_lexeme.reslice(1..);
-        let s = if rest.contains(&b'#') {
-            let mut s = IBytes::new();
-            while let Some(idx) = rest.iter().position(|&b| b == b'#') {
-                use crate::enc::decode_nibble;
-                use std::convert::TryInto;
-                let [hi, lo]: [u8; 2] = rest.get(idx+1 .. idx+3).ok_or(PdfError::EOF)?.try_into().unwrap();
-                let byte = match (decode_nibble(lo), decode_nibble(hi)) {
-                    (Some(low), Some(high)) => low | high << 4,
-                    _ => return Err(PdfError::HexDecode { pos: idx, bytes: [hi, lo] }),
-                };
-                s.extend_from_slice(&rest[..idx]);
-                s.push(byte);
-                rest = &rest[idx+3..];
-            }
-            s.extend_from_slice(rest);
-            SmallBytes::from(s.as_slice())
-        } else {
-            SmallBytes::from(rest)
-        };
-
-        Primitive::Name(SmallString::from_utf8(s)?)
+        let rest: &[u8] = &first_lexeme.reslice(1..);
+        Primitive::Name(t!(decode_name(rest)))
     } else if first_lexeme.equals(b"[") {
         check(flags, ParseFlags::ARRAY)?;
         if max_depth == 0 {

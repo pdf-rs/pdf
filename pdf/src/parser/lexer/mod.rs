@@ -41,7 +41,9 @@ fn boundary(data: &[u8], pos: usize, condition: impl Fn(u8) -> bool) -> usize {
 
 #[inline]
 fn is_whitespace(b: u8) -> bool {
-    matches!(b, 0 | b' ' | b'\r' | b'\n' | b'\t')
+    // PDF 32000-1:2008 7.2.2 Table 1: NUL, HT, LF, FF, CR, SP (the form feed is
+    // the one that is easy to forget).
+    matches!(b, 0 | b'\t' | b'\n' | 0x0c | b'\r' | b' ')
 }
 #[inline]
 fn not<T>(f: impl Fn(T) -> bool) -> impl Fn(T) -> bool {
@@ -151,9 +153,20 @@ impl<'a> Lexer<'a> {
         }
         let mut pos = self.skip_whitespace(self.pos)?;
         while self.buf.get(pos) == Some(&b'%') {
+            // PDF 32000-1:2008 7.2.4: a comment ends at an end-of-line marker,
+            // i.e. at CR, LF or CRLF — not only at LF.
             pos += 1;
-            if let Some(off) = self.buf[pos..].iter().position(|&b| b == b'\n') {
-                pos += off+1;
+            match self.buf[pos..].iter().position(|&b| b == b'\n' || b == b'\r') {
+                Some(off) => {
+                    pos += off;
+                    if self.buf[pos] == b'\r' && self.buf.get(pos + 1) == Some(&b'\n') {
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                    }
+                }
+                // A comment running to EOF is fine: the caller sees EOF next.
+                None => pos = self.buf.len(),
             }
 
             // Move away from eventual whitespace

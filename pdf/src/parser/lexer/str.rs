@@ -76,8 +76,15 @@ impl<'a> StringLexer<'a> {
                     b'\\' => Some(b'\\'),
 
                     _ => {
+                        // PDF 32000-1:2008 7.3.4.2: only the characters in
+                        // Table 3 have a special meaning; for any other
+                        // character the REVERSE SOLIDUS is ignored and the
+                        // character itself is kept. An octal escape is 1-3
+                        // octal digits.
+                        if !(b'0'..=b'7').contains(&c) {
+                            return Ok(Some(c));
+                        }
                         self.back()?;
-                        let _start = self.get_offset();
                         let mut char_code: u16 = 0;
 
                         // A character code must follow. 1-3 numbers.
@@ -108,6 +115,16 @@ impl<'a> StringLexer<'a> {
                     Ok(Some(b')'))
                 }
             },
+
+            // PDF 32000-1:2008 7.3.4.2: an end-of-line marker inside a literal
+            // string is read as a single 0Ah, whichever marker was used.
+            b'\r' => {
+                if let Ok(b'\n') = self.peek_byte() {
+                    let _ = self.next_byte();
+                }
+                Ok(Some(b'\n'))
+            }
+            b'\n' => Ok(Some(b'\n')),
 
             c => Ok(Some(c))
 
