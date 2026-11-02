@@ -54,3 +54,31 @@ more; what remains are deliberate choices, listed at the end.
 - The version *number* is not range-checked (1.0…1.7, 2.0): the form is what 7.5.1
   prescribes, and a future `%PDF-2.1` should not be refused by a reader that can
   still parse it.
+
+## Write path: `Storage::rebuild` (2026-11-02)
+
+`rebuild()` used to write every object at the top level. That is valid, but a
+document whose ~94k dictionaries live inside object streams came out three times
+the input size. It now writes the way a producer does, and the relevant clauses
+were checked while doing it:
+
+- 7.5.7 object streams: non-stream objects are packed into `/Type /ObjStm`
+  containers with `/N` and `/First`, offsets relative to `/First`, each object
+  separated by a newline. Streams are never put inside one (7.5.7: "the
+  following objects shall not be in an object stream: … streams"), and the
+  members are written with generation 0, which is the only generation number an
+  object stream may hold. The cross-reference stream refers to them as type 2
+  entries (7.5.8.3).
+- 7.5.8.2: the new cross-reference stream is written last, its own entry is a
+  type 1 entry in its table, and `/Size` is the highest object number plus one.
+- 7.5.4 / 7.5.5: objects the caller names in `RebuildOptions::exclude` are not
+  written and become free entries (`/Prev` dropped, no stale offsets into the
+  old file). `Trailer::normalise` drops `/Prev` and `/ID`; an absent `/ID` is not
+  written as an empty array, because 7.5.5 Table 15 defines it as an array of two
+  byte strings (14.4).
+- 7.3.9: a reference to an object that was not written resolves to null, since
+  there is no entry for it any more.
+- What is *not* done: `/Length` of a stream that came from the input file is
+  asserted against the number of bytes read, not recomputed. Rewriting a stream
+  (`Storage::replace_with_stream`, backed by `PdfStream::new_memory`) sets it.
+
