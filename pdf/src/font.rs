@@ -212,10 +212,16 @@ pub struct Widths {
     values: Vec<f32>,
     default: f32,
     first_char: usize,
+    /// Last code `values` may cover, when the font declares one (`/LastChar`
+    /// of a simple font). `None` = unbounded, as for CID fonts, whose `/W`
+    /// ranges are explicit and have no counterpart.
+    last_char: Option<usize>,
 }
 impl Widths {
     pub fn get(&self, cid: usize) -> f32 {
-        if cid < self.first_char {
+        // 9.6.2.1: only FirstChar..LastChar is covered by /Widths; codes
+        // outside that range take /MissingWidth.
+        if cid < self.first_char || matches!(self.last_char, Some(l) if cid > l) {
             self.default
         } else {
             self.values
@@ -229,6 +235,7 @@ impl Widths {
             default,
             values: Vec::new(),
             first_char: 0,
+            last_char: None,
         }
     }
     fn ensure_cid(&mut self, cid: usize) {
@@ -336,6 +343,7 @@ impl Font {
             FontData::Type1(ref info) | FontData::TrueType(ref info) => match *info {
                 TFont {
                     first_char: Some(first),
+                    last_char,
                     ref widths,
                     ref font_descriptor,
                     ..
@@ -346,6 +354,7 @@ impl Font {
                         .as_ref()
                         .map_or(0.0, |d| d.missing_width),
                     first_char: first as usize,
+                    last_char: last_char.and_then(|l| usize::try_from(l).ok()),
                     values: widths.as_ref().cloned().unwrap_or_default(),
                 })),
                 _ => Ok(None),

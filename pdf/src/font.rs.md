@@ -2,11 +2,12 @@
 
 Reviewed: 2026-11-01.
 
-## Status (commits "fonts: honour /MissingWidth for simple fonts (9.6.2.1)" and
-"fonts: reject a Type 0 font without /DescendantFonts (9.7.4)")
+## Status (commits "fonts: honour /MissingWidth for simple fonts (9.6.2.1)",
+"fonts: reject a Type 0 font without /DescendantFonts (9.7.4)" and
+"fonts: bound simple-font widths by /LastChar (9.6.2.1)")
 
-The first two items below are fixed; cases `c27`, `c27b` and `c28`, `c28b` in
-`pdf/tests/spec_cases.rs` cover them and fail on the parent commit.
+The first three items below are fixed; cases `c27`, `c27b`, `c28`, `c28b`, `c29`, `c29b` in
+`pdf/tests/spec_cases.rs` cover them (`c27`, `c28`, `c29` fail on their parent commits).
 
 - `Font::widths` now takes `Widths::default` from `TFont::font_descriptor`'s `missing_width`
   (absent descriptor, or absent key → the `#[pdf(default = "0.")]` value, 0.0, as Table 122
@@ -25,9 +26,16 @@ The first two items below are fixed; cases `c27`, `c27b` and `c28`, `c28b` in
   `FirstChar … LastChar` — and every code when `/Widths` is absent — takes the glyph width from
   the font descriptor's `/MissingWidth`. Text using code 32 without an entry in `/Widths`
   therefore measured 0 instead of `MissingWidth`, shifting every following glyph.
-- **`/Widths` length is not checked against `/LastChar`**: 9.6.2.1 requires exactly
-  `LastChar - FirstChar + 1` entries; a short array silently truncates (codes past the end get
-  width 0), a long one is ignored beyond the end. Neither is reported.
+- ~~**`/Widths` length is not checked against `/LastChar`**~~ — **fixed** (see status above).
+  `Widths` now carries an optional `last_char`, set from `TFont::last_char` in the Type
+  1/TrueType arm, and `Widths::get` returns `default` (the descriptor's `/MissingWidth`) for any
+  code above it — previously the range was `FirstChar + values.len()`, so a surplus `/Widths`
+  entry was used for a code the font says it does not have. A `/Widths` array *shorter* than
+  `LastChar - FirstChar + 1` is still not reported (9.6.2.1 requires exactly that many entries);
+  the uncovered codes simply take `/MissingWidth`, which is what Table 122 prescribes for a code
+  "whose width is not specified in a font dictionary's Widths array". CID fonts keep the
+  unbounded behaviour (`last_char: None`): their `/W` ranges are explicit and have no
+  `/LastChar` counterpart.
 - ~~**`descendant_fonts[0]` panics**~~ — **fixed** (see status above). `Font::widths`, formerly
   line 327, indexed `[0]` into `Type0Font::descendant_fonts` and panicked when a Type 0 font had
   an empty or missing `/DescendantFonts`. 9.7.4 requires exactly one entry, so this is malformed
