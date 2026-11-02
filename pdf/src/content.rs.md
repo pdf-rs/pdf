@@ -2,14 +2,18 @@
 
 Reviewed: 2026-11-01.
 
+Status (commit "content: fail on an unknown operator in strict parsing (7.8.2)"):
+the first mismatch below is fixed; the rest are open.
+
 ## Mismatches
 
-- **Unknown operator is a hard error** (`OpBuilder::parse` → `bail!("invalid operator")` unless
-  `ParseOptions::allow_invalid_ops`, which is off by default; note it also *bails* on `EI` and
-  `ID` appearing out of sentence, which are then fatal). 7.8.2 allows a page to be processed with
-  partial-recovery semantics; any extension operator (`/Artifact` siblings, PDF 2.0 additions,
-  vendor operators) makes the page unreadable rather than being skipped. Inside `BX … EX` they
-  are correctly ignored.
+- ~~**Unknown operator is a hard error**~~ — **fixed**. `ParseOptions::strict()` now sets
+  `allow_invalid_ops = false` (it used to be `true` in both presets, so "strict" and
+  "tolerant" behaved identically); `tolerant()` keeps `true`. So the same stream is
+  reported by strict parsing and skipped by tolerant parsing, which is what 7.8.2's
+  partial-recovery rule allows. Inside `BX … EX` unknown operators are ignored either way.
+  (The other half of the old note still stands: the *lexer* bails on a stray `EI` / `ID`
+  out of sentence, independent of the flag.)
 - **`d0` / `d1` are parsed and dropped** (lines 325-326, no `Op` variant). 7.8.2 / Table A.1
   define them as Type 3 glyph-metric operators; dropping them loses the declared glyph advance
   for Type 3 fonts whose `/Widths` disagree.

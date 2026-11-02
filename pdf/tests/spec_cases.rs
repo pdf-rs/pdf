@@ -1406,3 +1406,62 @@ fn c32_open_refuses_oversized_files() {
     assert_eq!(file.num_pages(), 1);
 }
 
+/// Text drawn by `Tj` on page 0, parsed with the given options.
+fn page_text_with(bytes: &[u8], opts: ParseOptions) -> pdf::error::Result<String> {
+    use pdf::content::Op;
+
+    let file = pdf::file::FileOptions::uncached()
+        .parse_options(opts)
+        .load(bytes)?;
+    let resolver = file.resolver();
+    let page = file.get_page(0)?;
+    let mut text = String::new();
+    if let Some(content) = &page.contents {
+        for op in content.operations(&resolver)? {
+            if let Op::TextDraw { text: t } = op {
+                text.push_str(&String::from_utf8_lossy(&t.data));
+            }
+        }
+    }
+    Ok(text)
+}
+
+#[test]
+fn c33_unknown_operator_fails_in_strict_and_is_skipped_in_tolerant() {
+    // 7.8.2: an operator the consumer does not know (an extension, a vendor
+    // prefix) may be skipped by a consumer that recovers, but it is not
+    // conforming; `ParseOptions::strict()` used to tolerate it just like
+    // `tolerant()` did, so no caller could ask for the strict behaviour.
+    let content = b"BT /F1 12 Tf 72 120 Td (Hi) Tj ET\n0 vendorop\n";
+    let bytes = text_doc(content, "F1");
+    let path = write_case("c33-unknown-operator", &bytes);
+    assert!(path.exists());
+
+    match page_text_with(&bytes, ParseOptions::strict()) {
+        Ok(text) => panic!(
+            "c33: strict parsing must report `vendorop`, not skip it (got {:?})",
+            text
+        ),
+        Err(e) => println!("c33: strict error as expected: {}", e),
+    }
+
+    let tolerant = page_text_with(&bytes, ParseOptions::tolerant())
+        .unwrap_or_else(|e| panic!("c33: tolerant parsing must skip `vendorop`: {}", e));
+    assert_eq!(tolerant, "Hi", "c33: the text before the operator is kept");
+
+    // 7.8.1: inside BX ... EX (a compatibility section) unknown operators are
+    // ignored, so even strict parsing accepts the same stream.
+    let content = b"BT /F1 12 Tf 72 120 Td (Hi) Tj ET\nBX 0 vendorop EX\n";
+    let bytes = text_doc(content, "F1");
+    write_case("c33b-unknown-operator-in-bx", &bytes);
+    let text = page_text_with(&bytes, ParseOptions::strict())
+        .unwrap_or_else(|e| panic!("c33b: BX ... EX must guard unknown operators: {}", e));
+    assert_eq!(text, "Hi", "c33b: text is still drawn in the section");
+
+    // the fixture is a readable one-page document for an outside viewer
+    assert_eq!(
+        pdf_rs_read(&bytes, "c33b-unknown-operator-in-bx").text,
+        "Hi"
+    );
+}
+
