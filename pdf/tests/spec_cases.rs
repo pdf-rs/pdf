@@ -1233,3 +1233,49 @@ fn c28_type0_without_descendant_font() {
     }
 }
 
+#[test]
+fn c29_widths_do_not_extend_past_last_char() {
+    // 9.6.2.1 (Table 111, /Widths): the array holds exactly
+    // LastChar - FirstChar + 1 entries and only covers FirstChar..LastChar;
+    // "for character codes outside the range FirstChar to LastChar, the value
+    // of MissingWidth ... shall be used". pdf-rs bounded the range by
+    // FirstChar + /Widths length instead of /LastChar, so a surplus entry was
+    // used for a code above /LastChar.
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+                /FirstChar 65 /LastChar 66 /Widths [ 500 600 700 ] /FontDescriptor 6 0 R >>";
+    let bytes = font_doc(font, HELVETICA_DESCRIPTOR, b"BT /F1 12 Tf 72 120 Td (AH) Tj ET");
+    write_case("c29-widths-beyond-last-char", &bytes);
+
+    let r = pdf_rs_read(&bytes, "c29-widths-beyond-last-char");
+    assert_eq!(r.text, "AH", "the text must still be read, got {:?}", r);
+
+    // 65 'A', 66 'B' are in range; 67 is inside the array but past
+    // /LastChar, 32 is below /FirstChar.
+    let got = font_widths(&bytes, "c29-widths-beyond-last-char", &[65, 66, 67, 32]);
+    assert_eq!(
+        got,
+        vec![500.0, 600.0, 250.0, 250.0],
+        "only /FirstChar../LastChar indexes /Widths; the third entry is surplus"
+    );
+}
+
+#[test]
+fn c29b_short_widths_array_falls_back_to_missing_width() {
+    // A /Widths array shorter than LastChar - FirstChar + 1 is malformed, but
+    // the code it does not cover still has "its width not specified in a font
+    // dictionary's Widths array", so Table 122 /MissingWidth applies. This
+    // passes both before and after the /LastChar fix: it guards against the
+    // fix turning the short-array case into an error or a zero.
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+                /FirstChar 65 /LastChar 67 /Widths [ 500 600 ] /FontDescriptor 6 0 R >>";
+    let bytes = font_doc(font, HELVETICA_DESCRIPTOR, b"BT /F1 12 Tf 72 120 Td (AH) Tj ET");
+    write_case("c29b-short-widths-array", &bytes);
+
+    let got = font_widths(&bytes, "c29b-short-widths-array", &[65, 66, 67]);
+    assert_eq!(
+        got,
+        vec![500.0, 600.0, 250.0],
+        "a code the array does not cover takes /MissingWidth"
+    );
+}
+
