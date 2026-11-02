@@ -16,9 +16,10 @@ the name decoding now lives in one helper (`decode_name`) used for keys and valu
   entry whose value is null shall be treated in the same way as an entry that is not present".
   Typed readers therefore see `Some(Null)` where the spec says absent (`/Length null`,
   `/Type null`, `/DecodeParms [null]`).
-- **Strings are decrypted with the stream filter** (`Context::decrypt`, line 46 → resolves to
-  the single `crypt::Decoder` built from `/StmF`). See `crypt.rs.md`; the string path is here
-  because this is where every `PdfString` is decrypted (lines 259-261, 278-280).
+- ~~**Strings are decrypted with the stream filter**~~ — fixed (commit "crypt: honour /StrF,
+  /StmF and per-stream crypt filter /Name"): `Context::decrypt` (line 46) now reaches
+  `Decoder::decrypt`, which applies `/StrF` instead of `/StmF` (`crypt.rs.md`, cases
+  `c21_strings_identity_streams_encrypted`, `c25_strings_default_to_identity`).
 
 ## Deliberate deviations (tolerant reader)
 
