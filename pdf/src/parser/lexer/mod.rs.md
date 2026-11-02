@@ -2,6 +2,10 @@
 
 Reviewed: 2026-11-01, crate `pdf` 0.10.0 @ 256f06f.
 
+Status: both mismatches below are **fixed** in this tree (commit "spec: fix wave 1");
+cases `c01_*`/`fixtures_ff_whitespace` and `c02_*`/`fixtures_comment_cr` in
+`pdf/tests/spec_cases.rs` cover them and failed before the fix.
+
 ## Mismatches
 
 - **FF is not whitespace** (`is_whitespace`, ~line 41). 7.2.2 Table 1 lists NUL, HT, LF, FF,

@@ -2,6 +2,10 @@
 
 Reviewed: 2026-11-01.
 
+Status: the first two mismatches below are **fixed** in this tree (commit "spec: fix wave 1");
+the name decoding now lives in one helper (`decode_name`) used for keys and values. Cases:
+`c05_dict_key_is_hex_decoded`, `fixtures_escaped_font_key`, `c06_null_dict_value_counts_as_absent`.
+
 ## Mismatches
 
 - **Dictionary keys are not `#XX`-decoded** (`parse_dictionary_object`, ~line 144:
