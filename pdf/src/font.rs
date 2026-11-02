@@ -329,9 +329,14 @@ impl Font {
                 TFont {
                     first_char: Some(first),
                     ref widths,
+                    ref font_descriptor,
                     ..
                 } => Ok(Some(Widths {
-                    default: 0.0,
+                    // 9.6.2.1: codes outside FirstChar..LastChar (and every code
+                    // when /Widths is absent) take the descriptor's /MissingWidth
+                    default: font_descriptor
+                        .as_ref()
+                        .map_or(0.0, |d| d.missing_width),
                     first_char: first as usize,
                     values: widths.as_ref().cloned().unwrap_or_default(),
                 })),
