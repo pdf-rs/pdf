@@ -19,7 +19,7 @@ use std::fs;
 
 use pdf::object::NoResolve;
 use pdf::parser::{parse, ParseFlags};
-use pdf::primitive::{ParsedDate, Primitive, TimeRel};
+use pdf::primitive::{Name, ParsedDate, Primitive, TimeRel};
 
 fn parse_any(data: &[u8]) -> Primitive {
     parse(data, &NoResolve, ParseFlags::ANY).expect("parse failed")
@@ -1076,6 +1076,104 @@ fn c26_hybrid_xref_stream_entry_wins() {
         dict.contains_key("Nums"),
         "object 8 must be the number tree, got {:?}",
         dict
+    );
+}
+
+// ---------------------------------------------------------------- wave 6: fonts (§9.6.2.1)
+
+/// One page with a single font: object 5 is the font dictionary, object 6 its
+/// `/FontDescriptor`, both given as raw PDF syntax.
+fn font_doc(font: &str, descriptor: &str, content: &[u8]) -> Vec<u8> {
+    let contents = {
+        let mut v = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+        v.extend_from_slice(content);
+        v.extend_from_slice(b"\nendstream");
+        v
+    };
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] \
+          /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+            .to_vec(),
+        contents,
+        font.as_bytes().to_vec(),
+        descriptor.as_bytes().to_vec(),
+    ];
+    build_pdf(&objects, 1)
+}
+
+/// Widths pdf-rs reports for `codes` in the single font `/F1` of page 1.
+fn font_widths(bytes: &[u8], name: &str, codes: &[usize]) -> Vec<f32> {
+    let file = pdf::file::FileOptions::uncached()
+        .load(bytes)
+        .unwrap_or_else(|e| panic!("{}: pdf-rs cannot open the file: {}", name, e));
+    let resolver = file.resolver();
+    let page = file
+        .get_page(0)
+        .unwrap_or_else(|e| panic!("{}: page 0: {}", name, e));
+    let res = page
+        .resources()
+        .unwrap_or_else(|e| panic!("{}: resources: {}", name, e));
+    let lazy = res
+        .data()
+        .fonts
+        .get(&Name::from("F1"))
+        .unwrap_or_else(|| panic!("{}: /F1 missing from /Resources /Font", name));
+    let font = lazy
+        .load(&resolver)
+        .unwrap_or_else(|e| panic!("{}: font /F1: {}", name, e));
+    let widths = font
+        .data()
+        .widths(&resolver)
+        .unwrap_or_else(|e| panic!("{}: widths: {}", name, e));
+    let widths = widths.unwrap_or_else(|| panic!("{}: no widths at all", name));
+    codes.iter().map(|&c| widths.get(c)).collect()
+}
+
+const HELVETICA_DESCRIPTOR: &str = "<< /Type /FontDescriptor /FontName /Helvetica /Flags 32 \
+     /FontBBox [ -166 -225 1000 931 ] /ItalicAngle 0 /Ascent 718 /Descent -207 \
+     /CapHeight 718 /StemV 88 /MissingWidth 250 >>";
+
+#[test]
+fn c27_missing_width_outside_widths_range() {
+    // 9.6.2.1 Table 111 (/Widths): "For character codes outside the range
+    // FirstChar to LastChar, the value of MissingWidth from the FontDescriptor
+    // entry for this font shall be used."
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+                /FirstChar 65 /LastChar 65 /Widths [ 500 ] /FontDescriptor 6 0 R >>";
+    let bytes = font_doc(font, HELVETICA_DESCRIPTOR, b"BT /F1 12 Tf 72 120 Td (Helo) Tj ET");
+    write_case("c27-missing-width", &bytes);
+
+    let r = pdf_rs_read(&bytes, "c27-missing-width");
+    assert_eq!(r.text, "Helo", "the text must still be read, got {:?}", r);
+
+    // 'A' is inside FirstChar..LastChar, 'H' and ' ' (after the string) are not
+    let got = font_widths(&bytes, "c27-missing-width", &[65, 72, 32]);
+    assert_eq!(
+        got,
+        vec![500.0, 250.0, 250.0],
+        "codes outside /FirstChar../LastChar take /MissingWidth"
+    );
+}
+
+#[test]
+fn c27b_missing_width_without_widths_array() {
+    // same rule when /Widths is absent entirely: every code is "not specified
+    // in a font dictionary's Widths array" (Table 122 /MissingWidth)
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+                /FirstChar 65 /LastChar 65 /FontDescriptor 6 0 R >>";
+    let bytes = font_doc(font, HELVETICA_DESCRIPTOR, b"BT /F1 12 Tf 72 120 Td (Helo) Tj ET");
+    write_case("c27b-missing-width-no-widths", &bytes);
+
+    let r = pdf_rs_read(&bytes, "c27b-missing-width-no-widths");
+    assert_eq!(r.text, "Helo", "the text must still be read, got {:?}", r);
+
+    let got = font_widths(&bytes, "c27b-missing-width-no-widths", &[65, 32]);
+    assert_eq!(
+        got,
+        vec![250.0, 250.0],
+        "without /Widths every code takes /MissingWidth"
     );
 }
 

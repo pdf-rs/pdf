@@ -2,13 +2,24 @@
 
 Reviewed: 2026-11-01.
 
+## Status (commit "fonts: honour /MissingWidth for simple fonts (9.6.2.1)")
+
+The first item below is fixed; cases `c27`, `c27b` in `pdf/tests/spec_cases.rs` cover it and
+fail on the parent commit.
+
+- `Font::widths` now takes `Widths::default` from `TFont::font_descriptor`'s `missing_width`
+  (absent descriptor, or absent key → the `#[pdf(default = "0.")]` value, 0.0, as Table 122
+  requires). This covers both "code outside `/FirstChar`…`/LastChar`" and "no `/Widths` at all".
+  The `first_char: None` arm (no `/FirstChar`, standard-14 style metrics) still returns `None`.
+
 ## Mismatches
 
-- **`/MissingWidth` is ignored for simple fonts** (`Font::widths`, line 328): a `TFont` with
-  `/FirstChar`/`/Widths` produces `Widths { default: 0.0, .. }`. 9.6.2.1: a code outside
+- ~~**`/MissingWidth` is ignored for simple fonts**~~ — **fixed** (see status above).
+  `Font::widths`, formerly line 328, built `Widths { default: 0.0, .. }` for a `TFont` with
+  `/FirstChar`/`/Widths`. 9.6.2.1: a code outside
   `FirstChar … LastChar` — and every code when `/Widths` is absent — takes the glyph width from
   the font descriptor's `/MissingWidth`. Text using code 32 without an entry in `/Widths`
-  therefore measures 0 instead of `MissingWidth`, shifting every following glyph.
+  therefore measured 0 instead of `MissingWidth`, shifting every following glyph.
 - **`/Widths` length is not checked against `/LastChar`**: 9.6.2.1 requires exactly
   `LastChar - FirstChar + 1` entries; a short array silently truncates (codes past the end get
   width 0), a long one is ignored beyond the end. Neither is reported.
