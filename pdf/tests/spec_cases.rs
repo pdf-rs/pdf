@@ -17,7 +17,7 @@
 
 use std::fs;
 
-use pdf::object::NoResolve;
+use pdf::object::{NoResolve, ParseOptions};
 use pdf::parser::{parse, ParseFlags};
 use pdf::primitive::{Name, ParsedDate, Primitive, TimeRel};
 
@@ -1277,5 +1277,132 @@ fn c29b_short_widths_array_falls_back_to_missing_width() {
         vec![500.0, 600.0, 250.0],
         "a code the array does not cover takes /MissingWidth"
     );
+}
+
+// ------------------------------------------------- wave 7: file structure (§7.5.1, 7.5.5)
+
+/// One page with one line of text, as a complete file.
+fn small_doc() -> Vec<u8> {
+    text_doc(b"BT /F1 12 Tf 72 120 Td (Hi) Tj ET", "F1")
+}
+
+#[test]
+fn c30_header_version_is_validated() {
+    // 7.5.1: "The PDF file begins with a header containing a version number
+    // of the form %PDF-n.m". pdf-rs took whatever followed `%PDF-` as the
+    // version string, so a file whose version digits were damaged was read
+    // without complaint.
+    let good = small_doc();
+    let file = pdf::file::FileOptions::uncached()
+        .load(&good[..])
+        .expect("c30: the untouched document must open");
+    assert_eq!(
+        file.version().expect("c30: version of a conforming header"),
+        "PDF-1.7",
+        "the version string is the header without the leading %"
+    );
+
+    let mut bad = good.clone();
+    bad[..8].copy_from_slice(b"%PDF-#!?");
+    write_case("c30-header-version", &bad);
+
+    // strict parsing: the damage is reported, and as an error from `load`
+    match pdf::file::FileOptions::uncached().load(&bad[..]) {
+        Ok(_) => panic!("c30: a header that is not %PDF-n.m must be rejected"),
+        Err(e) => assert!(
+            e.to_string().contains("%PDF-n.m"),
+            "c30: the error should name the header, got {}",
+            e
+        ),
+    }
+
+    // tolerant parsing: recovery, Annex C — the page is still readable
+    let file = pdf::file::FileOptions::uncached()
+        .parse_options(ParseOptions::tolerant())
+        .load(&bad[..])
+        .expect("c30: a tolerant reader must still open a damaged header");
+    assert_eq!(file.num_pages(), 1);
+}
+
+#[test]
+fn c31_eof_marker_is_required() {
+    // 7.5.5: "The last line of the file shall contain only the end-of-file
+    // marker, %%EOF." Nothing checked it: a truncated file (no marker at all)
+    // and a file with junk after the marker both loaded as if complete.
+    let good = small_doc();
+    assert!(
+        good.ends_with(b"%%EOF\n"),
+        "c31: the fixture builder must end the file with %%EOF"
+    );
+    let mut truncated = good.clone();
+    truncated.truncate(good.len() - b"%%EOF\n".len());
+    let mut padded = good.clone();
+    padded.extend_from_slice(b"this is not part of the document\n");
+
+    for (name, bytes, why) in [
+        ("c31-eof-missing", truncated, "the file ends after startxref"),
+        ("c31b-eof-trailing-data", padded, "data follows the marker"),
+    ] {
+        write_case(name, &bytes);
+
+        match pdf::file::FileOptions::uncached().load(&bytes[..]) {
+            Ok(_) => panic!("{}: strict parsing must reject a file where {}", name, why),
+            Err(e) => assert!(
+                e.to_string().contains("%%EOF"),
+                "{}: the error should name the marker, got {}",
+                name,
+                e
+            ),
+        }
+
+        // recovery: a tolerant reader still gets the page back
+        let r = {
+            let file = pdf::file::FileOptions::uncached()
+                .parse_options(ParseOptions::tolerant())
+                .load(&bytes[..])
+                .unwrap_or_else(|e| panic!("{}: tolerant open failed: {}", name, e));
+            let resolver = file.resolver();
+            let page = file.get_page(0).expect("page 0");
+            let res = page.resources().expect("resources");
+            let content = page.contents.as_ref().expect("contents");
+            let mut text = String::new();
+            for op in content.operations(&resolver).expect("operations") {
+                if let pdf::content::Op::TextDraw { text: t } = op {
+                    text.push_str(&String::from_utf8_lossy(&t.data));
+                }
+            }
+            let _ = res;
+            text
+        };
+        assert_eq!(r, "Hi", "{}: the page must survive recovery", name);
+    }
+}
+
+#[test]
+fn c32_open_refuses_oversized_files() {
+    // `File::open` reads the whole file into memory with no ceiling. It now
+    // has one, and a caller can set it.
+    let bytes = small_doc();
+    let path = write_case("c32-open-size-limit", &bytes);
+
+    let err = match pdf::file::FileOptions::uncached()
+        .max_file_size(Some(64))
+        .open(&path)
+    {
+        Ok(_) => panic!("c32: a 64 byte limit must refuse a larger file"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string().contains("limit"),
+        "c32: the error should explain the limit, got {}",
+        err
+    );
+
+    // the limit is optional, and a big enough one opens the same file
+    let file = pdf::file::FileOptions::uncached()
+        .max_file_size(None)
+        .open(&path)
+        .expect("c32: without a limit the file opens");
+    assert_eq!(file.num_pages(), 1);
 }
 

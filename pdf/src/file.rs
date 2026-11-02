@@ -130,16 +130,36 @@ where
     pub fn into_inner(self) -> B {
         self.backend
     }
+    /// The version from the file header ("PDF-1.7" for a file starting with
+    /// `%PDF-1.7`). 7.5.1: the header shall be `%PDF-n.m`, so anything else is
+    /// an error instead of a slice of whatever bytes follow `%PDF-`.
     pub fn version(&self) -> Result<String> {
-        Ok(String::from_utf8(self.backend.read(self.start_offset+1..self.start_offset+8)?.to_owned())?)
+        let header = self.backend.read(self.start_offset + 1 .. self.start_offset + 8)?;
+        // "PDF-n.m": four literal characters, a digit, '.', a digit
+        let well_formed = header.len() == 7
+            && &header[..4] == b"PDF-"
+            && header[4].is_ascii_digit()
+            && header[5] == b'.'
+            && header[6].is_ascii_digit();
+        if !well_formed {
+            bail!(
+                "file header is not %PDF-n.m: {:?}",
+                String::from_utf8_lossy(header)
+            );
+        }
+        Ok(String::from_utf8(header.to_owned())?)
     }
     pub fn resolver(&self) -> impl Resolve + '_ {
         StorageResolver::new(self)
     }
     pub fn with_cache(backend: B, options: ParseOptions, object_cache: OC, stream_cache: SC, log: L) -> Result<Self> {
         let start_offset = backend.locate_start_offset()?;
+        // 7.5.1: a conforming file starts with a %PDF-n.m header. Tolerant
+        // parsing still reads files whose version bytes are damaged, but a
+        // strict caller gets the error instead of a nonsense version.
+        let strict = !options.allow_xref_error;
 
-        Ok(Storage {
+        let storage = Storage {
             start_offset,
             backend,
             refs: XRefTable::new(0),
@@ -150,7 +170,11 @@ where
             decoder: None,
             options,
             log
-        })
+        };
+        if strict {
+            t!(storage.version());
+        }
+        Ok(storage)
     }
     fn decode(&self, id: PlainRef, range: Range<usize>, filters: &[StreamFilter]) -> Result<Arc<[u8]>> {
         let data = self.backend.read(range)?;
@@ -184,6 +208,12 @@ where
     }
 
     pub fn load_storage_and_trailer_password(&mut self, password: &[u8]) -> Result<Dictionary> {
+        // 7.5.5: "The last line of the file shall contain only the
+        // end-of-file marker, %%EOF." Tolerant parsing recovers from a
+        // truncated or padded tail; a strict caller is told about it.
+        if !self.options.allow_xref_error {
+            t!(self.check_eof_marker());
+        }
 
         let resolver = StorageResolver::new(self);
         let (refs, trailer) = t!(self.backend.read_xref_table_and_trailer(self.start_offset, &resolver));
@@ -222,6 +252,23 @@ where
         }
         Ok(trailer)
     }
+    /// 7.5.5: the file shall end with the `%%EOF` marker, and nothing but
+    /// whitespace may follow it. Only the last kilobyte is inspected, which is
+    /// where `startxref` and the marker are expected to live.
+    fn check_eof_marker(&self) -> Result<()> {
+        let len = self.backend.len();
+        let from = std::cmp::max(self.start_offset, len.saturating_sub(1024));
+        let tail = self.backend.read(from .. len)?;
+        match tail.windows(5).rposition(|w| w == b"%%EOF") {
+            Some(pos) if tail[pos + 5 ..].iter().all(|b| b.is_ascii_whitespace()) => Ok(()),
+            Some(pos) => bail!(
+                "data follows the %%EOF marker: {:?}",
+                String::from_utf8_lossy(&tail[pos + 5 ..])
+            ),
+            None => bail!("the file does not end with a %%EOF marker"),
+        }
+    }
+
     pub fn scan(&self) -> impl Iterator<Item = Result<ScanItem>> + '_ {
         // `scan` walks the file body between the header and the cross-reference
         // section. A caller may do this on a damaged file, so a missing
@@ -301,7 +348,7 @@ where
                     parse(slice, resolve, flags)
                 }
                 XRef::Free {..} => err!(PdfError::FreeObject {obj_nr: r.id}),
-                XRef::Promised => unimplemented!(),
+                XRef::Promised => err!(PdfError::Other { msg: "object is only promised, never written".into() }),
                 XRef::Invalid => err!(PdfError::NullRef {obj_nr: r.id}),
             }
         }
@@ -730,12 +777,18 @@ where
 }
 
 
+/// Upper bound for `FileOptions::open` when the caller does not choose one.
+/// Opening a file reads all of it into memory, so the default is a limit on
+/// what one document may cost, not a statement about valid PDFs.
+pub const DEFAULT_MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024;
+
 pub struct FileOptions<'a, OC, SC, L> {
     oc: OC,
     sc: SC,
     log: L,
     password: &'a [u8],
     parse_options: ParseOptions,
+    max_file_size: Option<u64>,
 }
 impl FileOptions<'static, NoCache, NoCache, NoLog> {
     pub fn uncached() -> Self {
@@ -745,6 +798,7 @@ impl FileOptions<'static, NoCache, NoCache, NoLog> {
             password: b"",
             parse_options: ParseOptions::strict(),
             log: NoLog,
+            max_file_size: Some(DEFAULT_MAX_FILE_SIZE),
         }
     }
 }
@@ -757,7 +811,8 @@ impl FileOptions<'static, ObjectCache, StreamCache, NoLog> {
             sc: SyncCache::new(),
             password: b"",
             parse_options: ParseOptions::strict(),
-            log: NoLog
+            log: NoLog,
+            max_file_size: Some(DEFAULT_MAX_FILE_SIZE),
         }
     }
 }
@@ -774,31 +829,49 @@ where
         }
     }
     pub fn cache<O, S>(self, oc: O, sc: S) -> FileOptions<'a, O, S, L> {
-        let FileOptions { oc: _, sc: _, password, parse_options, log } = self;
+        let FileOptions { oc: _, sc: _, password, parse_options, log, max_file_size } = self;
         FileOptions {
             oc,
             sc,
             password,
             parse_options,
             log,
+            max_file_size,
         }
     }
     pub fn log<Log>(self, log: Log) -> FileOptions<'a, OC, SC, Log> {
-        let FileOptions { oc, sc, password, parse_options, .. } = self;
+        let FileOptions { oc, sc, password, parse_options, max_file_size, .. } = self;
         FileOptions {
             oc,
             sc,
             password,
             parse_options,
             log,
+            max_file_size,
         }
     }
     pub fn parse_options(self, parse_options: ParseOptions) -> Self {
         FileOptions { parse_options, .. self }
     }
 
+    /// Refuse to `open` a file larger than `limit` bytes (default:
+    /// `DEFAULT_MAX_FILE_SIZE`). `None` removes the limit; `load` with a
+    /// caller-provided backend is never limited.
+    pub fn max_file_size(self, limit: Option<u64>) -> Self {
+        FileOptions { max_file_size: limit, .. self }
+    }
+
     /// open a file
     pub fn open(self, path: impl AsRef<Path>) -> Result<File<Vec<u8>, OC, SC, L>> {
+        let path = path.as_ref();
+        // the whole file is read into memory, so an absurd input is refused
+        // before it can exhaust the address space
+        if let Some(limit) = self.max_file_size {
+            let size = std::fs::metadata(path)?.len();
+            if size > limit {
+                bail!("{} is {} bytes, over the {} byte limit", path.display(), size, limit);
+            }
+        }
         let data = std::fs::read(path)?;
         self.load(data)
     }
@@ -809,7 +882,7 @@ where
 
     /// load data from the given backend
     pub fn load<B: Backend>(self, backend: B) -> Result<File<B, OC, SC, L>> {
-        let FileOptions { oc, sc, password, parse_options, log } = self;
+        let FileOptions { oc, sc, password, parse_options, log, max_file_size: _ } = self;
         File::load_data(backend, password, parse_options, oc, sc, log)
     }
 }
