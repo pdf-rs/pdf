@@ -1,6 +1,7 @@
 # PR policy.
 
-If PRs are not written by yourself (code or PR text), or there is the suspicion thereof, the PR will be rejected.
+You may use AI tools to identify bugs and find solutions, but fully automated PRs will be rejected.
+Write the description yourself. It is better to create an issue than creating a PR with code bloat that will be rejected because it looks synthetic.
 
 Please create only one PR containing multiple commits. Merging multiple PRs can cause merge conflicts and usually friction that could be avoided.
 You may use AI in your own work, but code submitted to this repository needs to be writen by a human.
