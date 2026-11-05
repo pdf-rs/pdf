@@ -9,11 +9,11 @@
 //! FAIL on unpatched master (that is the point: they are the proof of the
 //! mismatch) and PASS once the corresponding fix is applied.
 //!
-//! `fixtures_*` tests write complete PDFs to `PDF_SPEC_CASES_DIR`
-//! (default `/home/hematite/report/pdf-cases`) so a second reader
-//! (PyMuPDF, via `pdf_to_markdown`) can be run on the very same bytes, then
-//! read them back with pdf-rs and check the *result*, not just that nothing
-//! errored.
+//! `fixtures_*` tests write complete PDFs to `$PDF_SPEC_CASES_DIR` if that is
+//! set (`/home/hematite/report/pdf-cases` for the author's own run), else to
+//! `$CARGO_TARGET_TMPDIR/pdf-spec-cases`, so a second reader (PyMuPDF, via
+//! `pdf_to_markdown`) can be run on the very same bytes, then read them back
+//! with pdf-rs and check the *result*, not just that nothing errored.
 
 use std::fs;
 
@@ -26,9 +26,14 @@ fn parse_any(data: &[u8]) -> Primitive {
 }
 
 fn cases_dir() -> std::path::PathBuf {
-    let dir = std::env::var("PDF_SPEC_CASES_DIR")
-        .unwrap_or_else(|_| "/home/hematite/report/pdf-cases".to_string());
-    let dir = std::path::PathBuf::from(dir);
+    let dir = match std::env::var_os("PDF_SPEC_CASES_DIR") {
+        Some(dir) => std::path::PathBuf::from(dir),
+        // Cargo's per-target scratch directory: writable everywhere, including
+        // CI, and cleaned by `cargo clean`. Never default to a fixed absolute
+        // path in $HOME: on a runner that path either does not exist or is not
+        // writable, and `create_dir_all` would panic the whole suite.
+        None => std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pdf-spec-cases"),
+    };
     fs::create_dir_all(&dir).unwrap();
     dir
 }
