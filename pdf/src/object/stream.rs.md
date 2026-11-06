@@ -4,19 +4,22 @@ Reviewed: 2026-11-01.
 
 ## Mismatches
 
-- **Object-stream header object numbers are ignored** (`ObjectStream::from_primitive`). Only the
-  offsets are kept; the `obj_nr offset` pairs' first element is parsed and discarded. 7.5.7: the
-  index from the xref stream addresses the *N*-th pair, which is what the crate does, so lookup
-  works — but a stream whose header numbers are inconsistent with the referring xref type-2 entry
-  is not detected (other readers return the object the xref names, this one returns position N).
-- **`/First` and the offsets are only partially validated**: `/N * 2 <= data.len()` bounds the
-  header (hardening added in the earlier audit), and the range of each entry is now checked
-  against the decoded length before it is handed out, so a bad offset is an error instead of a
-  slice panic. Offsets are still not required to be ascending, and a range that overlaps the
-  header (before `/First`) is still accepted.
-- **A stream nested inside an object stream is not rejected** — 7.5.7: "an object stream shall
-  not contain stream objects"; such an object is to be treated as null, here it parses into a
-  `Stream` with a bogus `/Length` or an error.
+- ~~**Object-stream header object numbers are ignored**~~ — **fixed**.
+  `ObjectStream::from_primitive` used to keep only the offsets and throw the `obj_nr offset`
+  pairs' first element away. 7.5.7 repeats the object number next to each offset precisely so a
+  reader can check that the xref type 2 entry and the stream agree. The numbers are now kept and
+  exposed (`object_nr`, `index_of`); `Storage::resolve_ref` prefers the xref index, falls back to
+  the header if the two disagree, and errors when the stream does not hold the object at all.
+  Test: `object::stream::tests::object_stream_keeps_the_header_numbers`.
+- ~~**`/First` and the offsets are only partially validated**~~ — **fixed**. `/N * 2 <= data.len()`
+  bounds the header, decreasing offsets are rejected (7.5.7 stores the objects one after the
+  other, so a backwards offset makes the previous entry's range negative), and the range of each
+  entry is checked against the decoded length before it is handed out.
+  Test: `object_stream_rejects_backwards_offsets`.
+- ~~**A stream nested inside an object stream is not rejected**~~ — **fixed**. 7.5.7: "an object
+  stream shall not contain stream objects"; `Storage::resolve_ref` now returns `null` for such an
+  entry (the `PrimitiveNotAllowed { found: STREAM }` the parser produces) instead of a `Stream`
+  with a bogus `/Length`.
 - ~~**`/DecodeParms` dropped / misplaced on write**~~ — **fixed**. `to_pdf_stream` collected a
   single dictionary in a loop over the filters and `assert!`ed that no second filter had
   parameters: a chain with two parameterised filters panicked on save, and with one it wrote
@@ -26,9 +29,13 @@ Reviewed: 2026-11-01.
   `regressions::decode_parms_stay_aligned_with_the_filters`.
 - ~~**`get_object_slice` can slice out of bounds**~~ — **fixed**. `/First` plus an entry offset
   can point past the decoded data or backwards; the range is validated before it is returned.
-- **`/FFilter` and `/FDecodeParms` length mismatch is silently tolerated** (missing params default
-  to an empty dictionary instead of the pair being invalid), 7.4.2 Table 5 — tolerant, but it
-  hides corrupt external-file definitions.
+- ~~**`/FFilter` and `/FDecodeParms` length mismatch is silently tolerated**~~ — **fixed**.
+  `StreamInfo::from_primitive` used to default missing external-file parameters to an empty
+  dictionary, hiding a corrupt file. It now rejects a `/Filter` `/DecodeParms` or `/FFilter`
+  `/FDecodeParms` length mismatch, accepts `null` holes in `/FDecodeParms` (they were parsed as
+  dictionaries, so `[/Flate]` with `[null]` failed), and rejects `/FFilter` without an `/F`
+  external file. Tests: `file_filters_and_their_params_must_line_up`,
+  `file_filters_need_an_external_file`.
 
 ## Checked, no mismatch
 

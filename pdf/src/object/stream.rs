@@ -300,9 +300,36 @@ impl<T: Object> Object for StreamInfo<T> {
             dict.remove("FFilter").unwrap_or(Primitive::Null),
             resolve)?;
 
-        let file_decode_params = Vec::<Dictionary>::from_primitive(
+        let file_decode_params = Vec::<Option<Dictionary>>::from_primitive(
             dict.remove("FDecodeParms").unwrap_or(Primitive::Null),
             resolve)?;
+
+        // 7.4.2 Table 5: /DecodeParms and /FDecodeParms are arrays parallel to
+        // /Filter and /FFilter. A length mismatch used to be papered over with
+        // empty parameter dictionaries, which quietly decodes with the wrong
+        // predictor or column width instead of telling the caller the file is
+        // corrupt.
+        if !filters.is_empty() && !decode_params.is_empty() && filters.len() != decode_params.len() {
+            bail!(
+                "/Filter has {} filters but /DecodeParms has {} entries",
+                filters.len(),
+                decode_params.len()
+            );
+        }
+        if !file_filters.is_empty() && !file_decode_params.is_empty()
+            && file_filters.len() != file_decode_params.len()
+        {
+            bail!(
+                "/FFilter has {} filters but /FDecodeParms has {} entries",
+                file_filters.len(),
+                file_decode_params.len()
+            );
+        }
+        // Parameters for an external file's filters are meaningless without the
+        // external file itself (7.4.2 Table 5).
+        if !file_filters.is_empty() && file.is_none() {
+            bail!("/FFilter is present but the stream names no /F external file");
+        }
 
 
         let mut new_filters = Vec::new();
@@ -317,8 +344,8 @@ impl<T: Object> Object for StreamInfo<T> {
         }
         for (i, filter) in file_filters.iter().enumerate() {
             let params = match file_decode_params.get(i) {
-                Some(params) => params.clone(),
-                None => Dictionary::default(),
+                Some(Some(params)) => params.clone(),
+                _ => Dictionary::default(),
             };
             new_file_filters.push(StreamFilter::from_kind_and_params(filter, params, resolve)?);
         }
@@ -352,8 +379,14 @@ pub struct ObjStmInfo {
 
 #[derive(DataSize)]
 pub struct ObjectStream {
-    /// Byte offset of each object. Index is the object number.
+    /// Byte offset of each object, relative to `/First`. The index is the
+    /// position in the stream's header, which is what an xref type 2 entry
+    /// names (7.5.7).
     offsets:    Vec<usize>,
+    /// The object numbers from the header, in header order. 7.5.7 repeats the
+    /// object number next to each offset so that a reader can tell whether the
+    /// xref and the stream agree about what lives at a position.
+    objects:    Vec<ObjNr>,
     /// The object number of this object.
     _id:         ObjNr,
 
@@ -365,6 +398,7 @@ impl Object for ObjectStream {
         let stream: Stream<ObjStmInfo> = Stream::from_primitive(p, resolve)?;
 
         let mut offsets = Vec::new();
+        let mut objects = Vec::new();
         {
             debug!("parsing stream");
             let data = stream.data(resolve)?;
@@ -380,14 +414,26 @@ impl Object for ObjectStream {
 
             let mut lexer = Lexer::new(&data);
             for _ in 0..(stream.info.num_objects as ObjNr) {
-                let _obj_nr = lexer.next()?.to::<ObjNr>()?;
+                let obj_nr = lexer.next()?.to::<ObjNr>()?;
                 let offset = lexer.next()?.to::<usize>()?;
+                // 7.5.7 stores the objects one after the other, so their offsets
+                // increase. A decreasing offset means the last object would be
+                // read with a negative length.
+                if let Some(&previous) = offsets.last() {
+                    if offset < previous {
+                        err!(PdfError::Other { msg: format!(
+                            "/ObjStm offsets go backwards: {} after {}", offset, previous
+                        )});
+                    }
+                }
                 offsets.push(offset);
+                objects.push(obj_nr);
             }
         }
 
         Ok(ObjectStream {
             offsets,
+            objects,
             _id: 0, // TODO
             inner: stream
         })
@@ -417,11 +463,111 @@ impl ObjectStream {
 
         Ok((data, start..end))
     }
+    /// The number the stream's header gives for the object at `index`.
+    pub fn object_nr(&self, index: usize) -> Option<ObjNr> {
+        self.objects.get(index).copied()
+    }
+    /// The position in the header of `obj_nr`, if the stream holds it.
+    pub fn index_of(&self, obj_nr: ObjNr) -> Option<usize> {
+        self.objects.iter().position(|&nr| nr == obj_nr)
+    }
     /// Returns the number of contained objects
     pub fn n_objects(&self) -> usize {
         self.offsets.len()
     }
     pub fn _data(&self, resolve: &impl Resolve) -> Result<Arc<[u8]>> {
         self.inner.data(resolve)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitive::{Dictionary, PdfStream, Primitive, StreamInner};
+
+    fn objstm_primitive(data: &[u8], n: i64, first: i64) -> Primitive {
+        let mut d = Dictionary::new();
+        d.insert("Type", Primitive::Name("ObjStm".into()));
+        d.insert("N", Primitive::Integer(n));
+        d.insert("First", Primitive::Integer(first));
+        d.insert("Length", Primitive::Integer(data.len() as i64));
+        Primitive::Stream(PdfStream {
+            info: d,
+            inner: StreamInner::Pending {
+                data: Arc::from(data),
+            },
+        })
+    }
+
+    fn objstm(data: &[u8], n: i64, first: i64) -> ObjectStream {
+        ObjectStream::from_primitive(objstm_primitive(data, n, first), &NoResolve).unwrap()
+    }
+
+    // 7.5.7: every header entry is an object number and an offset. The numbers
+    // used to be parsed and thrown away, so a stream whose header disagreed
+    // with the xref silently returned the wrong object.
+    #[test]
+    fn object_stream_keeps_the_header_numbers() {
+        // Header "7 0 9 5 " (8 bytes), then the two objects.
+        let stream = objstm(b"7 0 9 5 1111122", 2, 8);
+        assert_eq!(stream.n_objects(), 2);
+        assert_eq!(stream.object_nr(0), Some(7));
+        assert_eq!(stream.object_nr(1), Some(9));
+        assert_eq!(stream.object_nr(2), None);
+        assert_eq!(stream.index_of(9), Some(1));
+        assert_eq!(stream.index_of(8), None);
+
+        let (data, range) = stream.get_object_slice(0, &NoResolve).unwrap();
+        assert_eq!(&data[range], b"11111");
+        let (data, range) = stream.get_object_slice(1, &NoResolve).unwrap();
+        assert_eq!(&data[range], b"22");
+    }
+
+    // 7.5.7: the objects are stored one after the other, so the offsets
+    // increase. A backwards offset makes the previous entry's range negative.
+    #[test]
+    fn object_stream_rejects_backwards_offsets() {
+        let err = ObjectStream::from_primitive(objstm_primitive(b"7 5 9 0 11111", 2, 8), &NoResolve)
+            .err()
+            .expect("offsets 5 then 0 go backwards");
+        assert!(err.to_string().contains("backwards"), "{err}");
+    }
+
+    // 7.4.2 Table 5: /FFilter and /FDecodeParms are parallel arrays. A mismatch
+    // used to default the missing parameters to an empty dictionary, which
+    // decodes with the wrong predictor instead of reporting a corrupt file.
+    #[test]
+    fn file_filters_and_their_params_must_line_up() {
+        let mut d = Dictionary::new();
+        d.insert("Length", Primitive::Integer(0));
+        d.insert(
+            "FFilter",
+            Primitive::Array(vec![
+                Primitive::Name("FlateDecode".into()),
+                Primitive::Name("ASCIIHexDecode".into()),
+            ]),
+        );
+        d.insert(
+            "FDecodeParms",
+            Primitive::Array(vec![Primitive::Dictionary(Dictionary::new())]),
+        );
+        let err = StreamInfo::<()>::from_primitive(Primitive::Dictionary(d), &NoResolve)
+            .err()
+            .expect("two filters need two parameter entries");
+        assert!(err.to_string().contains("FDecodeParms"), "{err}");
+    }
+
+    #[test]
+    fn file_filters_need_an_external_file() {
+        let mut d = Dictionary::new();
+        d.insert("Length", Primitive::Integer(0));
+        d.insert(
+            "FFilter",
+            Primitive::Array(vec![Primitive::Name("FlateDecode".into())]),
+        );
+        let err = StreamInfo::<()>::from_primitive(Primitive::Dictionary(d), &NoResolve)
+            .err()
+            .expect("/FFilter without /F");
+        assert!(err.to_string().contains("/F"), "{err}");
     }
 }
