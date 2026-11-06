@@ -36,7 +36,30 @@ Reviewed: 2026-11-02 (was missing from the audit; the xref assembly lives here, 
 - `/Size` is capped at `MAX_ID` (1e6) before the table is allocated (7.5.8.2's `/Size` is
   attacker-controlled).
 
-## Not this file's business, but reached from it
+## Read backend: `Data` and `OpenMode` (2026-11-07)
 
-- The whole file is read into memory before `read_xref_table_and_trailer` (`file.rs`,
-  `FileOptions::open`); `/Size` and the subsection counts are capped here, the file length is not.
+The backend is not necessarily a `Vec<u8>` any more. Stages 1–2 of 7.5.2 only
+need bytes that can be indexed, so the file is presented as
+[`Data`] (`Owned(Vec<u8>)` or, with the `mmap` feature, `Mapped(Arc<Mmap>)`),
+which `Deref`s to `[u8]` and therefore gets the blanket `Backend` impl. There is
+no spec clause behind this; it is the answer to the audit item "the whole file is
+read into memory".
+
+- `FileOptions::open` builds a `Data`. `OpenMode::Auto` (the default) maps the
+  file when the `mmap` feature is on, `Read` is the old behaviour, `Mapped` asks
+  for a mapping and errors without the feature. `open_owned` is the old
+  signature, for callers that want `File<Vec<u8>>`.
+- A zero length file is never mapped (`mmap` refuses it) and a mapping that the
+  file system refuses falls back to reading: both are `Data::Owned`.
+- A mapping is read-only. `Data` implements `io::Write` by copying the bytes into
+  memory on the first write, so an incremental update (`Storage::save`) and
+  `File::save_to` work on a mapped document; `File::rebuild` never writes to the
+  backend at all.
+- What this does *not* change: the parser still needs a `&[u8]` of the whole
+  document, so a file that can not be mapped still has to fit in memory, and a
+  caller reading *untrusted* input should still cap the size
+  (`FileOptions::max_file_size`) and preferably use a separate process with an
+  address-space limit. `mmap` on an untrusted path adds one hazard of its own —
+  truncating the file while it is mapped is undefined behaviour (documented on
+  `Data::map_file`).
+

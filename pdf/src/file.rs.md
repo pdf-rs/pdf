@@ -25,12 +25,16 @@ more; what remains are deliberate choices, listed at the end.
   only whitespace after it; run when `allow_xref_error` is cleared. A truncated
   file and a file with junk after the marker are both errors in strict mode and
   still readable in tolerant mode. Cases `c31`, `c31b`.
-- ~~**Whole-file `std::fs::read` into memory**~~ — **bounded**. `FileOptions` has
-  `max_file_size` (default `DEFAULT_MAX_FILE_SIZE`, 1 GiB, `None` = unlimited,
-  builder `max_file_size(Option<u64>)`) and `open()` checks the metadata length
-  before reading. `load()` with a caller-provided backend is never limited — a
-  caller that maps or streams the file is responsible for its own ceiling.
-  Case `c32`. Not a spec clause; same class as the `/Length` fixes.
+- ~~**Whole-file `std::fs::read` into memory**~~ — **fixed by default**. `open`
+  now returns a `File<Data, …>`: with the `mmap` feature the file is mapped
+  (see `backend.rs.md`), otherwise read. `FileOptions::open_mode` picks between
+  them (`OpenMode::Auto` / `Read` / `Mapped`), `open_owned` is the old
+  `File<Vec<u8>, …>` entry point. `max_file_size` (default
+  `DEFAULT_MAX_FILE_SIZE`, 1 GiB, `None` = unlimited) still checks the metadata
+  length before anything is mapped or read. `load()` with a caller-provided
+  backend is never limited — a caller that maps or streams the file is
+  responsible for its own ceiling. Case `c32`. Not a spec clause; same class as
+  the `/Length` fixes.
 - Trailer `/ID`: only `ID[0]` is used (needed for the key); `ID[1]` is never
   compared. Checked against 7.5.5 Table 15: only informational, and the two
   entries legitimately differ after an incremental update, so there is nothing
