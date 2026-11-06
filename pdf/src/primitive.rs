@@ -332,9 +332,17 @@ impl PdfStream {
                 bail!("attempted to write already written stream");
             }
             StreamInner::Pending { ref data } => {
-                let info_len = self.info.get("Length").unwrap().as_usize().unwrap();
-                assert_eq!(info_len, data.len());
-                self.info.serialize(out)?;
+                // `/Length` is by definition the number of bytes between
+                // `stream` and `endstream` (7.3.8), so the data decides it. A
+                // stream whose dictionary says something else — a damaged file,
+                // or one built by hand — is written with the right value
+                // instead of aborting the save.
+                let mut info = self.info.clone();
+                let len = data.len() as i64;
+                if info.get("Length").and_then(|p| p.as_integer().ok()).map(i64::from) != Some(len) {
+                    info.insert("Length", Primitive::Integer(len));
+                }
+                info.serialize(out)?;
                 writeln!(out, "stream")?;
                 out.write_all(data)?;
                 writeln!(out, "\nendstream")?;

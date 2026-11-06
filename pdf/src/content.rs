@@ -173,7 +173,29 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
         ]
     ), resolve)).transpose()?;
     let decode = dict.get("Decode").map(|p| Object::from_primitive(p.clone(), resolve)).transpose()?;
-    let decode_parms = dict.get("DecodeParms").map(|p| p.clone().resolve(resolve)?.into_dictionary()).transpose()?.unwrap_or_default();
+    // 8.9.7: /DP is an array parallel to /F, exactly like 7.4.2's
+    // /DecodeParms, so `[/A85 /Fl]` with `[null << /Predictor 12 … >>]` must not
+    // apply the Flate parameters to the ASCII85 stage as well.
+    enum DecodeParams {
+        None,
+        One(Dictionary),
+        Each(Vec<Primitive>),
+    }
+    let decode_parms = match dict.get("DecodeParms").map(|p| p.clone().resolve(resolve)).transpose()? {
+        Some(Primitive::Array(parts)) => DecodeParams::Each(parts),
+        Some(p) => DecodeParams::One(p.into_dictionary()?),
+        None => DecodeParams::None,
+    };
+    let parms_at = |i: usize| -> Result<Dictionary> {
+        match &decode_parms {
+            DecodeParams::None => Ok(Dictionary::default()),
+            DecodeParams::One(dict) => Ok(dict.clone()),
+            DecodeParams::Each(parts) => match parts.get(i) {
+                None | Some(Primitive::Null) => Ok(Dictionary::default()),
+                Some(p) => Ok(p.clone().resolve(resolve)?.into_dictionary()?),
+            },
+        }
+    };
     let filter = dict.remove("Filter").map(|p| expand_abbr(p,
         &[
             ("AHx", "ASCIIHexDecode"),
@@ -186,10 +208,10 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
         ]
     ));
     let filters = match filter {
-        Some(Primitive::Array(parts)) => parts.into_iter()
-            .map(|p| p.as_name().and_then(|kind| StreamFilter::from_kind_and_params(kind, decode_parms.clone(), resolve)))
+        Some(Primitive::Array(parts)) => parts.into_iter().enumerate()
+            .map(|(i, p)| p.as_name().and_then(|kind| StreamFilter::from_kind_and_params(kind, parms_at(i)?, resolve)))
             .collect::<Result<_>>()?,
-        Some(Primitive::Name(kind)) => vec![StreamFilter::from_kind_and_params(&kind, decode_parms, resolve)?],
+        Some(Primitive::Name(kind)) => vec![StreamFilter::from_kind_and_params(&kind, parms_at(0)?, resolve)?],
         None => vec![],
         _ => bail!("invalid filter")
     };

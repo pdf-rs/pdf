@@ -254,9 +254,16 @@ impl Page {
     /// inheritable, so this falls back to the nearest ancestor `Pages` node and
     /// finally to `0` when nothing specifies it.
     pub fn rotate(&self) -> i32 {
-        self.rotate
+        let rotate = self.rotate
             .or_else(|| inherit(&self.parent, |pt| pt.rotate).ok().flatten())
-            .unwrap_or(0)
+            .unwrap_or(0);
+        // 7.7.3.3: /Rotate is "a multiple of 90"; any other value is undefined,
+        // so it is read as 0 rather than handed on as a bogus angle. Rotation is
+        // clockwise, so -90 is the same as 270.
+        if rotate % 90 != 0 {
+            return 0;
+        }
+        rotate.rem_euclid(360)
     }
 }
 impl SubType<PagesNode> for Page {}

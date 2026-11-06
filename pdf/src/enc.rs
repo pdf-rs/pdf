@@ -505,7 +505,7 @@ fn lzw_encode(data: &[u8], params: &LZWFlateParams) -> Result<Vec<u8>> {
     Ok(compressed)
 }
 
-pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>> {
+pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams, options: &ParseOptions) -> Result<Vec<u8>> {
     use fax::{Color, decoder::{pels, decode_g4}};
 
     if params.k < 0 {
@@ -515,19 +515,39 @@ pub fn fax_decode(data: &[u8], params: &CCITTFaxDecodeParams) -> Result<Vec<u8>>
             bail!("CCITTFaxDecode: Columns needs to be greater than zero");
         }
 
-        let height = if params.rows == 0 { None } else { Some(rows)};
-        let mut buf = Vec::with_capacity(columns as usize * rows as usize);
+        // `/Rows 0` means "as many as the encoded data holds" (7.4.5), so the
+        // height is decided by the decoder and the output cannot be sized from
+        // the file. It is capped like every other decoded stream instead; the
+        // decode is abandoned as soon as the cap is crossed.
+        let stride = columns as usize;
+        let rows_requested = if rows == 0 { None } else { Some(rows as usize) };
+        let limit = options.object_size_limit;
+        let mut buf: Vec<u8> = Vec::with_capacity(rows_requested.map_or(0, |r| stride.saturating_mul(r)).min(limit));
+        let mut over = None;
+        let height = rows_requested.map(|r| u16::try_from(r)).transpose()?;
+
         decode_g4(data.iter().cloned(), columns, height, |line| {
+            if over.is_some() {
+                return;
+            }
             buf.extend(pels(line, columns).map(|c| match c {
                 Color::Black => 0,
                 Color::White => 255
             }));
-            assert_eq!(buf.len() % columns as usize, 0, "len={}, columns={}", buf.len(), columns);
+            if buf.len() > limit {
+                over = Some(buf.len());
+            }
         }).ok_or(PdfError::Other { msg: "faxdecode failed".into() })?;
-        assert_eq!(buf.len() % columns as usize, 0, "len={}, columns={}", buf.len(), columns);
 
-        if rows != 0 && buf.len() != columns as usize * rows as usize {
-            bail!("decoded length does not match (expected {rows}∙{columns}, got {})", buf.len());
+        if let Some(requested) = over {
+            err!(PdfError::LimitsExeeded { requested });
+        }
+        if let Some(rows) = rows_requested {
+            if buf.len() != stride.saturating_mul(rows) {
+                bail!("decoded length does not match (expected {rows}∙{columns}, got {})", buf.len());
+            }
+        } else if buf.len() % stride != 0 {
+            bail!("decoded {} bytes, which is not a whole number of {columns} pixel rows", buf.len());
         }
         Ok(buf)
     } else {
@@ -607,7 +627,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter, options: &ParseOptions) -> Res
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params, options),
         StreamFilter::RunLengthDecode => run_length_decode(data, options),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params, options),
-        StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params),
+        StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params, options),
         StreamFilter::Crypt(ref params) => crypt_filter_decode(data, params),
 
         _ => bail!("unimplemented {filter:?}"),

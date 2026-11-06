@@ -123,7 +123,7 @@ impl ImageXObject {
                         params.columns
                     );
                 }
-                let mut data = fax_decode(&data, params)?;
+                let mut data = fax_decode(&data, params, resolve.options())?;
                 if params.rows == 0 {
                     // adjust size
                     data.truncate(self.inner.info.height as usize * self.inner.info.width as usize);
