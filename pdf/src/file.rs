@@ -991,22 +991,36 @@ where
 /// valid PDFs.
 pub const DEFAULT_MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024;
 
+/// Smallest file that `OpenMode::Auto` maps instead of reading.
+///
+/// Mapping costs a system call, a page-table entry per page touched and, on
+/// some platforms, a longer path through the reader; for a document of a few
+/// kilobytes a plain read is cheaper and gives the parser one contiguous slice
+/// with nothing else to go wrong. 64 KiB is the size below which a read is
+/// practically free. [`FileOptions::mmap_threshold`] changes it.
+pub const DEFAULT_MMAP_THRESHOLD: u64 = 64 * 1024;
+
 /// How [`FileOptions::open`] gets the bytes of the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenMode {
-    /// Map the file when the `mmap` feature is enabled, read it otherwise.
-    /// Empty files are always read (there is nothing to map). A file system
-    /// that refuses the mapping falls back to reading as well.
-    Auto,
-    /// Read the whole file into memory. Never fails for a file that exists.
+    /// Read the whole file into memory. **This is the default**: opening a
+    /// document does not map it unless the caller asks, because a mapping
+    /// hands the parser a view of a file that something else may rewrite
+    /// under it, and a document that fits in memory anyway gains nothing.
     Read,
+    /// Map the file when the `mmap` feature is enabled and the file is at
+    /// least [`FileOptions::mmap_threshold`] bytes (default
+    /// [`DEFAULT_MMAP_THRESHOLD`]); read it otherwise. Empty files are always
+    /// read (there is nothing to map). A file system that refuses the mapping
+    /// falls back to reading as well. Opt in for large documents.
+    Auto,
     /// Map the file. Errors if the build has no `mmap` feature, and for a
     /// zero length file.
     Mapped,
 }
 impl Default for OpenMode {
     fn default() -> Self {
-        OpenMode::Auto
+        OpenMode::Read
     }
 }
 
@@ -1017,6 +1031,7 @@ pub struct FileOptions<'a, OC, SC, L> {
     password: &'a [u8],
     parse_options: ParseOptions,
     max_file_size: Option<u64>,
+    mmap_threshold: u64,
     open_mode: OpenMode,
 }
 impl FileOptions<'static, NoCache, NoCache, NoLog> {
@@ -1028,6 +1043,7 @@ impl FileOptions<'static, NoCache, NoCache, NoLog> {
             parse_options: ParseOptions::strict(),
             log: NoLog,
             max_file_size: Some(DEFAULT_MAX_FILE_SIZE),
+            mmap_threshold: DEFAULT_MMAP_THRESHOLD,
             open_mode: OpenMode::default(),
         }
     }
@@ -1043,6 +1059,7 @@ impl FileOptions<'static, ObjectCache, StreamCache, NoLog> {
             parse_options: ParseOptions::strict(),
             log: NoLog,
             max_file_size: Some(DEFAULT_MAX_FILE_SIZE),
+            mmap_threshold: DEFAULT_MMAP_THRESHOLD,
             open_mode: OpenMode::default(),
         }
     }
@@ -1060,7 +1077,7 @@ where
         }
     }
     pub fn cache<O, S>(self, oc: O, sc: S) -> FileOptions<'a, O, S, L> {
-        let FileOptions { oc: _, sc: _, password, parse_options, log, max_file_size, open_mode } = self;
+        let FileOptions { oc: _, sc: _, password, parse_options, log, max_file_size, mmap_threshold, open_mode } = self;
         FileOptions {
             oc,
             sc,
@@ -1068,11 +1085,12 @@ where
             parse_options,
             log,
             max_file_size,
+            mmap_threshold,
             open_mode,
         }
     }
     pub fn log<Log>(self, log: Log) -> FileOptions<'a, OC, SC, Log> {
-        let FileOptions { oc, sc, password, parse_options, max_file_size, open_mode, .. } = self;
+        let FileOptions { oc, sc, password, parse_options, max_file_size, mmap_threshold, open_mode, .. } = self;
         FileOptions {
             oc,
             sc,
@@ -1080,6 +1098,7 @@ where
             parse_options,
             log,
             max_file_size,
+            mmap_threshold,
             open_mode,
         }
     }
@@ -1094,16 +1113,25 @@ where
         FileOptions { max_file_size: limit, .. self }
     }
 
-    /// Choose how `open` gets the bytes (default: `OpenMode::Auto`, i.e. map
-    /// the file when the `mmap` feature is enabled).
+    /// Choose how `open` gets the bytes. The default is `OpenMode::Read`;
+    /// `OpenMode::Auto` maps a file that is large enough instead, and
+    /// `OpenMode::Mapped` always maps.
     pub fn open_mode(self, mode: OpenMode) -> Self {
         FileOptions { open_mode: mode, .. self }
     }
 
-    /// Open a file. With the `mmap` feature the bytes are mapped rather than
-    /// read, so a large document does not have to fit in memory; the returned
-    /// [`Data`] says which happened (`is_mapped`). Reading and editing work
-    /// either way: the first write copies the bytes into memory.
+    /// Smallest file that `OpenMode::Auto` maps (default
+    /// [`DEFAULT_MMAP_THRESHOLD`], 64 KiB). Below it the file is read: mapping
+    /// a few kilobytes buys nothing. `0` maps every non-empty file.
+    pub fn mmap_threshold(self, bytes: u64) -> Self {
+        FileOptions { mmap_threshold: bytes, .. self }
+    }
+
+    /// Open a file. By default the bytes are read into memory; with
+    /// `open_mode(OpenMode::Auto)` (or `Mapped`) and the `mmap` feature a
+    /// large file is mapped instead, so it does not have to fit in memory. The
+    /// returned [`Data`] says which happened (`is_mapped`). Reading and
+    /// editing work either way: the first write copies the bytes.
     pub fn open(self, path: impl AsRef<Path>) -> Result<File<Data, OC, SC, L>> {
         let path = path.as_ref();
         // an absurd input is refused before it can cost anything: a mapping
@@ -1117,8 +1145,10 @@ where
         let data = match self.open_mode {
             OpenMode::Read => Data::Owned(std::fs::read(path)?),
             OpenMode::Mapped => t!(Data::map_file(path)),
-            OpenMode::Auto => if size == 0 {
-                Data::Owned(Vec::new())
+            // a small file is cheaper to read than to map; an empty one can
+            // not be mapped at all
+            OpenMode::Auto => if size < self.mmap_threshold.max(1) {
+                Data::Owned(std::fs::read(path)?)
             } else {
                 match Data::map_file(path) {
                     Ok(data) => data,
@@ -1154,7 +1184,7 @@ where
 
     /// load data from the given backend
     pub fn load<B: Backend>(self, backend: B) -> Result<File<B, OC, SC, L>> {
-        let FileOptions { oc, sc, password, parse_options, log, max_file_size: _, open_mode: _ } = self;
+        let FileOptions { oc, sc, password, parse_options, log, max_file_size: _, mmap_threshold: _, open_mode: _ } = self;
         File::load_data(backend, password, parse_options, oc, sc, log)
     }
 }

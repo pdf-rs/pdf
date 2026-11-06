@@ -317,14 +317,27 @@ fn decode_parms_stay_aligned_with_the_filters() {
 // ------------------------------------------------------------- opening a file
 
 #[test]
-fn open_maps_the_file_when_it_can() {
-    // `open` maps instead of reading when the `mmap` feature is enabled; the
-    // parsed document is the same either way.
+fn open_reads_by_default_and_maps_only_when_asked() {
+    // No mapping unless the caller asks: `open` on its own reads. `Auto` is
+    // the size-based choice (small files are read anyway), `Mapped` forces it.
     let path = tmp_pdf("open-mode.pdf", &build_pdf(&one_page_with_free_object_4("90")));
 
-    let auto = FileOptions::cached().open(&path).expect("open, auto");
+    let default = FileOptions::cached().open(&path).expect("open, default");
+    assert!(!default.storage.into_inner().is_mapped(), "the default is a plain read");
+
+    // the fixture is a few hundred bytes, far below DEFAULT_MMAP_THRESHOLD
+    let auto = FileOptions::cached().open_mode(OpenMode::Auto).open(&path).expect("open, auto");
+    assert_eq!(auto.num_pages(), 1);
+    assert!(!auto.storage.into_inner().is_mapped(), "a small file is not mapped");
+
+    // with the threshold lowered Auto maps exactly when the feature is in
+    let forced = FileOptions::cached()
+        .open_mode(OpenMode::Auto)
+        .mmap_threshold(0)
+        .open(&path)
+        .expect("open, auto, no threshold");
     assert_eq!(
-        auto.storage.into_inner().is_mapped(),
+        forced.storage.into_inner().is_mapped(),
         cfg!(feature = "mmap"),
         "auto should map exactly when the feature is built in",
     );
@@ -364,7 +377,7 @@ fn opening_an_empty_file_does_not_try_to_map_it() {
     // `mmap` refuses a zero length file; `Auto` reads it (and then fails to
     // find a header) rather than reporting an I/O error.
     let path = tmp_pdf("open-empty.pdf", b"");
-    let data = FileOptions::cached().open(&path);
+    let data = FileOptions::cached().open_mode(OpenMode::Auto).mmap_threshold(0).open(&path);
     let err = match data {
         Ok(_) => panic!("an empty file is not a PDF"),
         Err(e) => e.to_string(),

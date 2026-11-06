@@ -45,10 +45,12 @@ which `Deref`s to `[u8]` and therefore gets the blanket `Backend` impl. There is
 no spec clause behind this; it is the answer to the audit item "the whole file is
 read into memory".
 
-- `FileOptions::open` builds a `Data`. `OpenMode::Auto` (the default) maps the
-  file when the `mmap` feature is on, `Read` is the old behaviour, `Mapped` asks
-  for a mapping and errors without the feature. `open_owned` is the old
-  signature, for callers that want `File<Vec<u8>>`.
+- `FileOptions::open` builds a `Data`. The default is `OpenMode::Read`: no
+  document is mapped unless the caller asks for it. `OpenMode::Auto` maps only
+  a file of at least `mmap_threshold` bytes (default `DEFAULT_MMAP_THRESHOLD`,
+  64 KiB) — mapping a few kilobytes buys nothing — and `Mapped` asks for a
+  mapping and errors without the feature. `open_owned` is the old signature, for
+  callers that want `File<Vec<u8>>`; `mmap` itself stays an opt-in crate feature.
 - A zero length file is never mapped (`mmap` refuses it) and a mapping that the
   file system refuses falls back to reading: both are `Data::Owned`.
 - A mapping is read-only. `Data` implements `io::Write` by copying the bytes into
