@@ -280,28 +280,11 @@ impl Object for Function {
 }
 impl ObjectWrite for Function {
     fn to_primitive(&self, _update: &mut impl Updater) -> Result<Primitive> {
-        unimplemented!()
-        /*
-        let dict = match self {
-            Function::Interpolated(parts) => {
-                let first: &InterpolatedFunctionDim = try_opt!(parts.get(0));
-                let f2 = Function2 {
-                    c0: parts.iter().map(|p| p.c0).collect(),
-                    c1: parts.iter().map(|p| p.c0).collect(),
-                    exponent: first.exponent
-                };
-                let f = RawFunction {
-                    function_type: 2,
-                    domain: vec![first.input_range.0, first.input_range.1],
-                    range: parts.iter().flat_map(|p| [p.output_range.0, p.output_range.1]).collect(),
-                    decode: None,
-                    encode: None,
-                    order
-                };
-
-            }
-        }
-        */
+        // Not implemented: a function is kept as its evaluated form for
+        // shading, and writing one back would need the original /Range,
+        // /Domain and sample stream. Refusing is the behaviour a caller can
+        // handle; this used to be a panic in the middle of a save.
+        bail!("writing a function object back to a primitive is not implemented")
     }
 }
 impl DeepClone for Function {
@@ -394,7 +377,7 @@ impl SampledFunction {
                         }
                     }
                 }
-                _ => unimplemented!(),
+                Interpolation::Cubic => bail!("a sampled function with /Order 3 (cubic spline) is not supported"),
             },
             2 => match self.order {
                 Interpolation::Linear => {
@@ -419,7 +402,7 @@ impl SampledFunction {
                     add(i0, j1, g0 * f1);
                     add(j0, j1, f0 * f1);
                 }
-                _ => unimplemented!(),
+                Interpolation::Cubic => bail!("a sampled function with /Order 3 (cubic spline) is not supported"),
             },
             3 => match self.order {
                 Interpolation::Linear => {
@@ -450,7 +433,7 @@ impl SampledFunction {
                     add(i0, j1, j2, g0 * f1 * f2);
                     add(j0, j1, j2, f0 * f1 * f2);
                 }
-                _ => unimplemented!(),
+                Interpolation::Cubic => bail!("a sampled function with /Order 3 (cubic spline) is not supported"),
             },
             n => bail!("Order {}", n),
         }

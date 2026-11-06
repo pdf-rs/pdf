@@ -3,7 +3,7 @@
 
 use crate as pdf;
 use crate::error::*;
-use crate::object::{Object, ParseOptions, Resolve, Stream};
+use crate::object::{Object, ObjectWrite, ParseOptions, Resolve, Stream, Updater};
 use crate::primitive::{Primitive, Dictionary, Name};
 use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Write};
@@ -103,6 +103,43 @@ pub enum StreamFilter {
     RunLengthDecode
 }
 impl StreamFilter {
+    /// The filter's name, as written in `/Filter` (7.4.1, Table 6). Inline
+    /// images use the abbreviations of Table 94, which are handled by the
+    /// parser separately.
+    pub fn name(&self) -> &'static str {
+        match self {
+            StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
+            StreamFilter::ASCII85Decode => "ASCII85Decode",
+            StreamFilter::LZWDecode(ref _p) => "LZWDecode",
+            StreamFilter::FlateDecode(ref _p) => "FlateDecode",
+            StreamFilter::JPXDecode => "JPXDecode",
+            StreamFilter::DCTDecode(ref _p) => "DCTDecode",
+            StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
+            StreamFilter::JBIG2Decode(ref _p) => "JBIG2Decode",
+            StreamFilter::Crypt(_) => "Crypt",
+            StreamFilter::RunLengthDecode => "RunLengthDecode",
+        }
+    }
+
+    /// The filter's entry in `/DecodeParms` (7.4.1, Table 5), or `None` for the
+    /// filters that take no parameters. A filter with parameters in a chain of
+    /// more than one is written as a `null` where it has none, because the
+    /// array runs parallel to `/Filter`.
+    pub fn params_to_primitive(&self, update: &mut impl Updater) -> Result<Option<Primitive>> {
+        Ok(match self {
+            StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::CCITTFaxDecode(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::JBIG2Decode(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::Crypt(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::ASCIIHexDecode
+            | StreamFilter::ASCII85Decode
+            | StreamFilter::JPXDecode
+            | StreamFilter::RunLengthDecode => None,
+        })
+    }
+
     pub fn from_kind_and_params(kind: &str, params: Dictionary, r: &impl Resolve) -> Result<StreamFilter> {
        let params = Primitive::Dictionary (params);
        Ok(

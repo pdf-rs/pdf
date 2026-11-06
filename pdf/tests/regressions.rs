@@ -7,10 +7,15 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
+use pdf::content::{parse_ops, serialize_ops, Op};
+use pdf::enc::{LZWFlateParams, StreamFilter};
 use pdf::file::{CachedFile, FileOptions, UpdateOptions};
-use pdf::object::{NameTree, Object, PlainRef, Updater};
-use pdf::primitive::Primitive;
+use pdf::object::{
+    ImageDict, ImageXObject, NameTree, NameTreeNode, NoResolve, Object, PlainRef, Stream, Updater,
+};
+use pdf::primitive::{PdfString, Primitive};
 
 // ------------------------------------------------------------------ helper
 
@@ -199,4 +204,112 @@ fn well_formed_name_tree_walks() {
     objects.push(s("<< /Names [(a) 1 (b) 2] >>"));
     objects.push(s("<< /Names [(c) 3] >>"));
     assert_eq!(walk_names(&objects).unwrap(), 3);
+}
+
+// ------------------------------------------------- 7.9.6 building a tree
+
+fn build_tree_of(n: i64) -> NameTree<Primitive> {
+    let mut storage = FileOptions::cached().storage();
+    let entries: Vec<(PdfString, Primitive)> = (0..n)
+        .map(|i| (PdfString::from(format!("k{i:03}")), Primitive::Integer(i)))
+        .collect();
+    NameTree::build_tree(entries, &mut storage).expect("build a name tree")
+}
+
+#[test]
+fn name_tree_build_tree_makes_leaves_and_keeps_every_entry_once() {
+    // 7.9.6: a name tree with more entries than fit in one node needs
+    // intermediate nodes. Building one used to be `unimplemented!()`, i.e. a
+    // panic for any input that needs a tree at all.
+    let root = build_tree_of(100);
+    let kids = match &root.node {
+        NameTreeNode::Intermediate(kids) => kids,
+        NameTreeNode::Leaf(_) => panic!("100 entries do not fit in one leaf"),
+    };
+    assert_eq!(kids.len(), 6, "100 entries at 17 per leaf");
+    let ids: std::collections::HashSet<_> = kids.iter().map(|kid| kid.get_inner().id).collect();
+    assert_eq!(ids.len(), 6, "every leaf is a distinct object, created once");
+    // 7.9.6: the root itself carries no /Limits.
+    assert!(root.limits.is_none());
+}
+
+#[test]
+fn name_tree_build_tree_of_few_entries_is_a_single_leaf() {
+    let root = build_tree_of(3);
+    match &root.node {
+        NameTreeNode::Leaf(items) => {
+            let keys: Vec<_> = items.iter().map(|(k, _)| k.as_bytes().to_vec()).collect();
+            assert_eq!(keys, vec![b"k000".to_vec(), b"k001".to_vec(), b"k002".to_vec()]);
+        }
+        NameTreeNode::Intermediate(_) => panic!("three entries are one leaf"),
+    }
+}
+
+// -------------------------------------------- 8.9.7 writing inline images
+
+fn inline_image_data(ops: &[Op]) -> Vec<u8> {
+    ops.iter()
+        .find_map(|op| match op {
+            Op::InlineImage { image } => Some(Vec::from(&*image.inner.data(&NoResolve).expect("image data"))),
+            _ => None,
+        })
+        .expect("an inline image")
+}
+
+#[test]
+fn inline_image_survives_a_rewrite() {
+    // 8.9.7: an inline image has no /Length; its data ends at `EI`. The writer
+    // used to `unimplemented!()` here, so no page with an inline image on it
+    // could be copied. The sample pair `45 49` spells `EI` once decoded, which
+    // is exactly the case the hex encoding has to keep safe.
+    let content = b"q\nBI /W 2 /H 1 /CS /DeviceGray /BPC 8 /F /AHx ID 4549\nEI\nQ\n";
+    let ops = parse_ops(content, &NoResolve).expect("parse");
+    assert_eq!(inline_image_data(&ops), vec![0x45, 0x49]);
+
+    let out = serialize_ops(&ops).expect("serialize");
+    let again = parse_ops(&out, &NoResolve).expect("re-parse our own output");
+    assert_eq!(inline_image_data(&again), inline_image_data(&ops));
+
+    // The two characters that would end the image early appear only at the
+    // end, where the parser expects them.
+    let text = String::from_utf8_lossy(&out);
+    let id_at = text.find("ID ").expect("ID marker");
+    assert_eq!(text[id_at..].matches("EI").count(), 1, "{}", text);
+}
+
+#[test]
+fn inline_image_data_that_spells_ei_is_escaped() {
+    // Uncompressed samples can contain `EI` themselves. Written raw, the image
+    // would end in the middle of its own data.
+    let dict = ImageDict { width: 2, height: 1, bits_per_component: Some(8), ..Default::default() };
+    let image = ImageXObject { inner: Stream::from_compressed(dict, Arc::<[u8]>::from(&b"EI"[..]), Vec::new()) };
+    let out = serialize_ops(&[Op::InlineImage { image: Arc::new(image) }]).expect("serialize");
+    let ops = parse_ops(&out, &NoResolve).expect("re-parse");
+    assert_eq!(inline_image_data(&ops), b"EI");
+}
+
+// ------------------------------------------- 7.4.1 writing /DecodeParms
+
+#[test]
+fn decode_parms_stay_aligned_with_the_filters() {
+    // 7.4.1, Table 5: /DecodeParms runs parallel to /Filter. Writing a stream
+    // with parameters on the second of two filters used to hit an `assert!`
+    // (two filters with parameters) or attach the parameters to the wrong
+    // filter (one).
+    let params = LZWFlateParams { predictor: 12, columns: 4, ..Default::default() };
+    let stream: Stream<()> = Stream::from_compressed(
+        (),
+        Arc::<[u8]>::from(&b"GK#GI"[..]),
+        vec![StreamFilter::ASCII85Decode, StreamFilter::FlateDecode(params)],
+    );
+    let mut storage = FileOptions::cached().storage();
+    let ps = stream.to_pdf_stream(&mut storage).expect("to_pdf_stream");
+
+    let filters = ps.info.get("Filter").and_then(|p| p.as_array().ok()).expect("/Filter array");
+    assert_eq!(filters.len(), 2);
+    let parms = ps.info.get("DecodeParms").and_then(|p| p.as_array().ok()).expect("/DecodeParms array");
+    assert_eq!(parms.len(), 2, "/DecodeParms has one entry per filter");
+    assert!(parms[0].is_null(), "ASCII85Decode has no parameters");
+    let dict = parms[1].as_dict().expect("the Flate parameters");
+    assert_eq!(dict.get("Predictor").and_then(|p| p.as_integer().ok()), Some(12));
 }

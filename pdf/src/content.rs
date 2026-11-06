@@ -10,7 +10,7 @@ use crate::error::*;
 use crate::object::*;
 use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
 use crate::primitive::*;
-use crate::enc::StreamFilter;
+use crate::enc::{StreamFilter, encode_hex};
 use crate as pdf;
 
 /// Represents a PDF content stream - a `Vec` of `Operator`s
@@ -588,6 +588,78 @@ impl ObjectWrite for FormXObject {
     }
 }
 
+/// Write one inline image: `BI … ID … EI` (8.9.7).
+///
+/// An inline image is the one stream with no `/Length` in front of its data:
+/// the data ends at the first `EI` that follows whitespace. Its own bytes can
+/// spell those two characters, so the data is written hex-encoded under
+/// `ASCIIHexDecode` whenever that is a risk. The dictionary is written with
+/// full key names, which 8.9.7 allows in place of the abbreviations of
+/// Table 94. This used to be `unimplemented!()`, which aborted the rewrite of
+/// any page that has an inline image on it.
+fn serialize_inline_image<W: std::io::Write>(image: &ImageXObject, f: &mut W) -> Result<()> {
+    let mut stream = image.inner.to_pdf_stream(&mut NoUpdate)?;
+    let data = stream.raw_data(&NoResolve)?;
+
+    let existing_filter = stream.info.remove("Filter");
+    let existing_parms = stream.info.remove("DecodeParms");
+    // 8.9.7: an inline image's dictionary holds the image's own entries; it
+    // can not refer to another object, and the stream keys are implied. The
+    // type and subtype are implied too.
+    for key in ["Length", "Type", "Subtype", "F", "FFilter", "FDecodeParms", "SMask", "StructParent"] {
+        stream.info.remove(key);
+    }
+    let mut dict = Dictionary::new();
+    for (key, value) in stream.info.iter() {
+        // anything indirect has no meaning inside the content stream
+        if !matches!(value, Primitive::Stream(_) | Primitive::Reference(_)) {
+            dict.insert(key.clone(), value.clone());
+        }
+    }
+
+    let hex = existing_filter.is_some() || data.windows(2).any(|w| w == b"EI");
+    let data = if hex {
+        let mut filters = vec![Primitive::Name("AHx".into())];
+        match existing_filter {
+            Some(Primitive::Array(items)) => filters.extend(items),
+            Some(p) => filters.push(p),
+            None => {}
+        }
+        let mut parms = vec![Primitive::Null];
+        match existing_parms {
+            Some(Primitive::Array(items)) => parms.extend(items),
+            Some(Primitive::Null) | None => {}
+            Some(p) => parms.push(p),
+        }
+        parms.resize(filters.len(), Primitive::Null);
+        dict.insert("Filter", Primitive::Array(filters));
+        if parms.iter().any(|p| !p.is_null()) {
+            dict.insert("DecodeParms", Primitive::Array(parms));
+        }
+        encode_hex(&data)
+    } else {
+        Vec::from(&*data)
+    };
+
+    write!(f, "BI\n")?;
+    for (key, value) in dict.iter() {
+        if matches!(value, Primitive::Null) {
+            continue;
+        }
+        serialize_name(key.as_str(), f)?;
+        write!(f, " ")?;
+        value.serialize(f)?;
+        write!(f, "\n")?;
+    }
+    write!(f, "ID ")?;
+    f.write_all(&data)?;
+    if hex {
+        write!(f, ">")?;
+    }
+    writeln!(f, "\nEI")?;
+    Ok(())
+}
+
 #[allow(clippy::float_cmp)]  // TODO
 pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
     use std::io::Write;
@@ -776,7 +848,7 @@ pub fn serialize_ops(mut ops: &[Op]) -> Result<Vec<u8>> {
                 f, "{} {} {} {} {} {} d1",
                 wx, wy, bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height
             )?,
-            Op::InlineImage { image: _ } => unimplemented!(),
+            Op::InlineImage { ref image } => serialize_inline_image(image, f)?,
             Op::XObject { ref name } => {
                 serialize_name(name, f)?;
                 writeln!(f, " Do")?;
