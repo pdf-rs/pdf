@@ -381,7 +381,7 @@ fn c12_ccitt_k0_is_an_error_not_a_panic() {
         black_is_1: false,
         damaged_rows_before_error: 0,
     };
-    let r = pdf::enc::fax_decode(&[0u8; 8], &params);
+    let r = pdf::enc::fax_decode(&[0u8; 8], &params, &ParseOptions::strict());
     assert!(r.is_err(), "K = 0 must yield an error, got {:?}", r);
 }
 

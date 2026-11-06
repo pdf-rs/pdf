@@ -1,6 +1,10 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use super::prelude::*;
+
+/// A `/Kids` chain deeper than this is treated as broken: 64 levels is far
+/// beyond what any writer produces, and it bounds the recursion.
+const MAX_NAME_TREE_DEPTH: usize = 64;
 
 /// A page-label numbering style (`/S` in a `PageLabel` dictionary).
 ///
@@ -37,6 +41,24 @@ pub struct NameTree<T> {
 }
 impl<T: Object + DataSize> NameTree<T> {
     pub fn walk(&self, r: &impl Resolve, callback: &mut dyn FnMut(&PdfString, &T)) -> Result<()> {
+        // A name tree is a tree in a well-formed file, but `/Kids` may point
+        // back at a node that is already being visited. Without a guard that is
+        // an endless walk (and a stack overflow once the depth is reached), and
+        // with a wide node it is exponential, so a depth limit alone is not
+        // enough: remember every node that has been entered.
+        let mut seen = HashSet::new();
+        self.walk_limited(r, callback, &mut seen, MAX_NAME_TREE_DEPTH)
+    }
+    fn walk_limited(
+        &self,
+        r: &impl Resolve,
+        callback: &mut dyn FnMut(&PdfString, &T),
+        seen: &mut HashSet<ObjNr>,
+        depth: usize,
+    ) -> Result<()> {
+        if depth == 0 {
+            bail!("name tree: /Kids chain is deeper than {MAX_NAME_TREE_DEPTH}");
+        }
         match self.node {
             NameTreeNode::Leaf(ref items) => {
                 for (name, val) in items {
@@ -45,8 +67,11 @@ impl<T: Object + DataSize> NameTree<T> {
             }
             NameTreeNode::Intermediate(ref items) => {
                 for &tree_ref in items {
+                    if !seen.insert(tree_ref.get_inner().id) {
+                        bail!("name tree: /Kids contains object {} more than once", tree_ref.get_inner().id);
+                    }
                     let tree = r.get(tree_ref)?;
-                    tree.walk(r, callback)?;
+                    tree.walk_limited(r, callback, seen, depth - 1)?;
                 }
             }
         }

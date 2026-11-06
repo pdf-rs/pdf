@@ -479,11 +479,14 @@ where
         use std::collections::hash_map::Entry;
 
         let r = match self.refs.get(old.id)? {
-            XRef::Free { .. } => panic!(),
+            // A free or null object has no generation to keep and no slot to
+            // write into (7.5.4); that is a caller error, not a reason to abort
+            // the process.
+            XRef::Free { .. } => err!(other!("object {} is free and can not be updated", old.id)),
             XRef::Raw { gen_nr, .. } => PlainRef { id: old.id, gen: gen_nr },
             XRef::Stream { .. } => return self.create(obj),
             XRef::Promised => PlainRef { id: old.id, gen: 0 },
-            XRef::Invalid => panic!()
+            XRef::Invalid => err!(PdfError::NullRef { obj_nr: old.id }),
         };
         let primitive = obj.to_primitive(self)?;
         match self.changes.entry(old.id) {
