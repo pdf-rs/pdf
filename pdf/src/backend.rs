@@ -299,3 +299,98 @@ impl IndexRange for Range<usize> {
     #[inline]
     fn end(&self) -> Option<usize> { Some(self.end) }
 }
+
+/// The bytes of a document: either read into memory, or mapped from the file.
+///
+/// [`FileOptions::open`](crate::file::FileOptions::open) returns this and, with
+/// the `mmap` feature, maps the file: opening a large document then costs
+/// address space but no resident memory until the parser touches a page. A
+/// mapping is read-only; writing to it (an incremental update, see
+/// [`Storage::save`](crate::file::Storage::save)) copies the bytes into memory
+/// first, so a mapped file is never modified in place.
+#[derive(Clone)]
+pub enum Data {
+    /// The whole file, read into memory.
+    Owned(Vec<u8>),
+    /// A read-only mapping of the file.
+    #[cfg(feature = "mmap")]
+    Mapped(std::sync::Arc<memmap2::Mmap>),
+}
+
+impl Data {
+    /// `true` if the bytes come straight from a mapped file.
+    pub fn is_mapped(&self) -> bool {
+        match self {
+            Data::Owned(_) => false,
+            #[cfg(feature = "mmap")]
+            Data::Mapped(_) => true,
+        }
+    }
+
+    /// The bytes, as one slice.
+    pub fn as_slice(&self) -> &[u8] {
+        match self {
+            Data::Owned(v) => v.as_slice(),
+            #[cfg(feature = "mmap")]
+            Data::Mapped(map) => map,
+        }
+    }
+
+    /// Replace a mapping by a copy of it, so that the bytes can be written to.
+    fn make_writable(&mut self) {
+        if !matches!(self, Data::Owned(_)) {
+            let copy = self.as_slice().to_vec();
+            *self = Data::Owned(copy);
+        }
+    }
+
+    /// Map `path` read-only. An empty file is not mapped (`mmap` refuses a
+    /// zero length), the caller gets `Owned(vec![])` instead.
+    ///
+    /// Note that the mapping is only consistent as long as nothing else
+    /// truncates or rewrites the file: `open` is for reading a document that
+    /// is not being changed underneath the reader, which a caller that handles
+    /// untrusted *paths* rather than untrusted *bytes* is in a position to
+    /// guarantee.
+    #[cfg(feature = "mmap")]
+    pub fn map_file(path: &std::path::Path) -> Result<Self> {
+        let file = std::fs::File::open(path)?;
+        if file.metadata()?.len() == 0 {
+            return Ok(Data::Owned(Vec::new()));
+        }
+        // SAFETY: memmap2 makes `map` unsafe because the mapping is undefined
+        // behaviour if the file is truncated or written while it is mapped.
+        // Nothing here writes to the file; see the note above on the caller's
+        // side of that promise.
+        let map = unsafe { memmap2::Mmap::map(&file)? };
+        Ok(Data::Mapped(std::sync::Arc::new(map)))
+    }
+
+    /// There is no mapping without the `mmap` feature.
+    #[cfg(not(feature = "mmap"))]
+    pub fn map_file(_path: &std::path::Path) -> Result<Self> {
+        bail!("this build has no `mmap` feature")
+    }
+}
+
+impl std::ops::Deref for Data {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl std::io::Write for Data {
+    /// Writing appends: a mapping is copied into memory first.
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.make_writable();
+        match self {
+            Data::Owned(v) => std::io::Write::write(v, buf),
+            #[cfg(feature = "mmap")]
+            Data::Mapped(_) => unreachable!("make_writable replaced the mapping"),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}

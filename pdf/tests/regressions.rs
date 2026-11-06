@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use pdf::content::{parse_ops, serialize_ops, Op};
 use pdf::enc::{LZWFlateParams, StreamFilter};
-use pdf::file::{CachedFile, FileOptions, UpdateOptions};
+use pdf::file::{CachedFile, FileOptions, OpenMode, UpdateOptions};
 use pdf::object::{
     ImageDict, ImageXObject, NameTree, NameTreeNode, NoResolve, Object, PlainRef, Stream, Updater,
 };
@@ -68,7 +68,7 @@ fn load(objects: &[Option<String>]) -> CachedFile<Vec<u8>> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let name = format!("regress-{}.pdf", NEXT.fetch_add(1, Ordering::SeqCst));
     let path = tmp_pdf(&name, &build_pdf(objects));
-    FileOptions::cached().open(path).expect("load")
+    FileOptions::cached().open_owned(path).expect("load")
 }
 
 fn s(v: &str) -> Option<String> {
@@ -312,4 +312,62 @@ fn decode_parms_stay_aligned_with_the_filters() {
     assert!(parms[0].is_null(), "ASCII85Decode has no parameters");
     let dict = parms[1].as_dict().expect("the Flate parameters");
     assert_eq!(dict.get("Predictor").and_then(|p| p.as_integer().ok()), Some(12));
+}
+
+// ------------------------------------------------------------- opening a file
+
+#[test]
+fn open_maps_the_file_when_it_can() {
+    // `open` maps instead of reading when the `mmap` feature is enabled; the
+    // parsed document is the same either way.
+    let path = tmp_pdf("open-mode.pdf", &build_pdf(&one_page_with_free_object_4("90")));
+
+    let auto = FileOptions::cached().open(&path).expect("open, auto");
+    assert_eq!(
+        auto.storage.into_inner().is_mapped(),
+        cfg!(feature = "mmap"),
+        "auto should map exactly when the feature is built in",
+    );
+
+    let read = FileOptions::cached().open_mode(OpenMode::Read).open(&path).expect("open, read");
+    assert_eq!(read.num_pages(), 1);
+    assert!(!read.storage.into_inner().is_mapped());
+
+    let owned = FileOptions::cached().open_owned(&path).expect("open_owned");
+    assert_eq!(owned.get_page(0).expect("page").rotate(), 90);
+}
+
+#[test]
+fn a_mapped_document_can_be_edited_and_written() {
+    // A mapping is read-only. Writing to the backend (an incremental update)
+    // has to copy the bytes into memory first instead of failing or, worse,
+    // writing through the mapping.
+    let path = tmp_pdf("open-edit.pdf", &build_pdf(&one_page_with_free_object_4("180")));
+    let out = path.with_extension("out.pdf");
+
+    let mut file = FileOptions::cached().open(&path).expect("open");
+    file.save_to(&out).expect("save_to after a mapped open");
+
+    let reloaded = FileOptions::cached().open(&out).expect("reload");
+    assert_eq!(reloaded.num_pages(), 1);
+    assert_eq!(reloaded.get_page(0).expect("page").rotate(), 180);
+
+    // A full rewrite reads the same mapping and never touches the backend.
+    let mut again = FileOptions::cached().open(&path).expect("open again");
+    let bytes = again.rebuild().expect("rebuild");
+    let rebuilt = FileOptions::cached().load(bytes).expect("load the rebuild");
+    assert_eq!(rebuilt.get_page(0).expect("page").rotate(), 180);
+}
+
+#[test]
+fn opening_an_empty_file_does_not_try_to_map_it() {
+    // `mmap` refuses a zero length file; `Auto` reads it (and then fails to
+    // find a header) rather than reporting an I/O error.
+    let path = tmp_pdf("open-empty.pdf", b"");
+    let data = FileOptions::cached().open(&path);
+    let err = match data {
+        Ok(_) => panic!("an empty file is not a PDF"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("header"), "expected a header error, got: {err}");
 }

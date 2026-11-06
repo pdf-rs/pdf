@@ -38,7 +38,7 @@ fn open_file() {
     #[cfg(all(feature = "mmap", feature = "cache"))]
     let _ = run!({
         use memmap2::Mmap;
-        let file = std::fs::File::open(file_path!("example.pdf")).expect("can't open file");
+        let file = std::fs::File::open(file_path("example.pdf")).expect("can't open file");
         let mmap = unsafe { Mmap::map(&file).expect("can't mmap file") };
         FileOptions::cached().load(mmap)
     });

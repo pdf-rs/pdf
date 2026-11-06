@@ -10,7 +10,7 @@ use crate as pdf;
 use crate::error::*;
 use crate::object::*;
 use crate::primitive::{Dictionary, PdfStream, PdfString, Primitive, StreamInner};
-use crate::backend::{Backend, BackendAppend};
+use crate::backend::{Backend, BackendAppend, Data};
 use crate::any::*;
 use crate::parser::{Lexer, parse_with_lexer};
 use crate::parser::{parse_indirect_object, parse, ParseFlags};
@@ -965,15 +965,17 @@ where
         .map_err(|e| e.into())
     }
 }
-impl<OC, SC, L> File<Vec<u8>, OC, SC, L>
+impl<B, OC, SC, L> File<B, OC, SC, L>
 where
+    B: BackendAppend,
     OC: Cache<Result<AnySync, Arc<PdfError>>>,
     SC: Cache<Result<Arc<[u8]>, Arc<PdfError>>>,
     L: Log,
 {
     pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<()> {
         self.storage.save(&mut self.trailer)?;
-        std::fs::write(path, &self.storage.backend)?;
+        let bytes = self.storage.backend.read(..)?;
+        std::fs::write(path, bytes)?;
         Ok(())
     }
     pub fn rebuild(&mut self) -> Result<Vec<u8>> {
@@ -984,9 +986,29 @@ where
 
 
 /// Upper bound for `FileOptions::open` when the caller does not choose one.
-/// Opening a file reads all of it into memory, so the default is a limit on
-/// what one document may cost, not a statement about valid PDFs.
+/// A document that is opened is either read into memory or mapped, so the
+/// default is a limit on what one document may cost, not a statement about
+/// valid PDFs.
 pub const DEFAULT_MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024;
+
+/// How [`FileOptions::open`] gets the bytes of the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenMode {
+    /// Map the file when the `mmap` feature is enabled, read it otherwise.
+    /// Empty files are always read (there is nothing to map). A file system
+    /// that refuses the mapping falls back to reading as well.
+    Auto,
+    /// Read the whole file into memory. Never fails for a file that exists.
+    Read,
+    /// Map the file. Errors if the build has no `mmap` feature, and for a
+    /// zero length file.
+    Mapped,
+}
+impl Default for OpenMode {
+    fn default() -> Self {
+        OpenMode::Auto
+    }
+}
 
 pub struct FileOptions<'a, OC, SC, L> {
     oc: OC,
@@ -995,6 +1017,7 @@ pub struct FileOptions<'a, OC, SC, L> {
     password: &'a [u8],
     parse_options: ParseOptions,
     max_file_size: Option<u64>,
+    open_mode: OpenMode,
 }
 impl FileOptions<'static, NoCache, NoCache, NoLog> {
     pub fn uncached() -> Self {
@@ -1005,6 +1028,7 @@ impl FileOptions<'static, NoCache, NoCache, NoLog> {
             parse_options: ParseOptions::strict(),
             log: NoLog,
             max_file_size: Some(DEFAULT_MAX_FILE_SIZE),
+            open_mode: OpenMode::default(),
         }
     }
 }
@@ -1019,6 +1043,7 @@ impl FileOptions<'static, ObjectCache, StreamCache, NoLog> {
             parse_options: ParseOptions::strict(),
             log: NoLog,
             max_file_size: Some(DEFAULT_MAX_FILE_SIZE),
+            open_mode: OpenMode::default(),
         }
     }
 }
@@ -1035,7 +1060,7 @@ where
         }
     }
     pub fn cache<O, S>(self, oc: O, sc: S) -> FileOptions<'a, O, S, L> {
-        let FileOptions { oc: _, sc: _, password, parse_options, log, max_file_size } = self;
+        let FileOptions { oc: _, sc: _, password, parse_options, log, max_file_size, open_mode } = self;
         FileOptions {
             oc,
             sc,
@@ -1043,10 +1068,11 @@ where
             parse_options,
             log,
             max_file_size,
+            open_mode,
         }
     }
     pub fn log<Log>(self, log: Log) -> FileOptions<'a, OC, SC, Log> {
-        let FileOptions { oc, sc, password, parse_options, max_file_size, .. } = self;
+        let FileOptions { oc, sc, password, parse_options, max_file_size, open_mode, .. } = self;
         FileOptions {
             oc,
             sc,
@@ -1054,6 +1080,7 @@ where
             parse_options,
             log,
             max_file_size,
+            open_mode,
         }
     }
     pub fn parse_options(self, parse_options: ParseOptions) -> Self {
@@ -1067,11 +1094,49 @@ where
         FileOptions { max_file_size: limit, .. self }
     }
 
-    /// open a file
-    pub fn open(self, path: impl AsRef<Path>) -> Result<File<Vec<u8>, OC, SC, L>> {
+    /// Choose how `open` gets the bytes (default: `OpenMode::Auto`, i.e. map
+    /// the file when the `mmap` feature is enabled).
+    pub fn open_mode(self, mode: OpenMode) -> Self {
+        FileOptions { open_mode: mode, .. self }
+    }
+
+    /// Open a file. With the `mmap` feature the bytes are mapped rather than
+    /// read, so a large document does not have to fit in memory; the returned
+    /// [`Data`] says which happened (`is_mapped`). Reading and editing work
+    /// either way: the first write copies the bytes into memory.
+    pub fn open(self, path: impl AsRef<Path>) -> Result<File<Data, OC, SC, L>> {
         let path = path.as_ref();
-        // the whole file is read into memory, so an absurd input is refused
-        // before it can exhaust the address space
+        // an absurd input is refused before it can cost anything: a mapping
+        // reserves address space, a read allocates memory
+        let size = std::fs::metadata(path)?.len();
+        if let Some(limit) = self.max_file_size {
+            if size > limit {
+                bail!("{} is {} bytes, over the {} byte limit", path.display(), size, limit);
+            }
+        }
+        let data = match self.open_mode {
+            OpenMode::Read => Data::Owned(std::fs::read(path)?),
+            OpenMode::Mapped => t!(Data::map_file(path)),
+            OpenMode::Auto => if size == 0 {
+                Data::Owned(Vec::new())
+            } else {
+                match Data::map_file(path) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        // no `mmap` feature, or a file system that can not map:
+                        // reading is always possible
+                        debug!("{}: {}; reading it into memory", path.display(), e);
+                        Data::Owned(std::fs::read(path)?)
+                    }
+                }
+            },
+        };
+        self.load(data)
+    }
+
+    /// `open`, but the file is always read into memory.
+    pub fn open_owned(self, path: impl AsRef<Path>) -> Result<File<Vec<u8>, OC, SC, L>> {
+        let path = path.as_ref();
         if let Some(limit) = self.max_file_size {
             let size = std::fs::metadata(path)?.len();
             if size > limit {
@@ -1081,6 +1146,7 @@ where
         let data = std::fs::read(path)?;
         self.load(data)
     }
+
     pub fn storage(self) -> Storage<Vec<u8>, OC, SC, L> {
         let FileOptions { oc, sc, log, .. } = self;
         Storage::empty(oc, sc, log)
@@ -1088,7 +1154,7 @@ where
 
     /// load data from the given backend
     pub fn load<B: Backend>(self, backend: B) -> Result<File<B, OC, SC, L>> {
-        let FileOptions { oc, sc, password, parse_options, log, max_file_size: _ } = self;
+        let FileOptions { oc, sc, password, parse_options, log, max_file_size: _, open_mode: _ } = self;
         File::load_data(backend, password, parse_options, oc, sc, log)
     }
 }
