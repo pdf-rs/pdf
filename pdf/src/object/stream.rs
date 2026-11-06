@@ -137,32 +137,23 @@ impl<I: ObjectWrite> Stream<I> {
         };
         let mut params = None;
         if self.info.filters.len() > 0 {
-            for f in self.info.filters.iter() {
-                if let Some(para) = match f {
-                    StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
-                    StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
-                    StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
-                    StreamFilter::CCITTFaxDecode(ref p) => Some(p.to_primitive(update)?),
-                    StreamFilter::JBIG2Decode(ref p) => Some(p.to_primitive(update)?),
-                    _ => None
-                } {
-                    assert!(params.is_none());
-                    params = Some(para);
-                }
+            // 7.4.1, Table 5: `/DecodeParms` runs parallel to `/Filter`. An
+            // earlier version collected a single dictionary and asserted that
+            // no second filter had parameters, which both panicked on a file
+            // that has two and attached the parameters of the *last* such
+            // filter to the *first* filter of the chain when it did not.
+            let mut all_params: Vec<Primitive> = Vec::with_capacity(self.info.filters.len());
+            let mut any_params = false;
+            for filter in self.info.filters.iter() {
+                let para = filter.params_to_primitive(update)?;
+                any_params |= para.is_some();
+                all_params.push(para.unwrap_or(Primitive::Null));
             }
-            let mut filters = self.info.filters.iter().map(|filter| match filter {
-                StreamFilter::ASCIIHexDecode => "ASCIIHexDecode",
-                StreamFilter::ASCII85Decode => "ASCII85Decode",
-                StreamFilter::LZWDecode(ref _p) => "LZWDecode",
-                StreamFilter::FlateDecode(ref _p) => "FlateDecode",
-                StreamFilter::JPXDecode => "JPXDecode",
-                StreamFilter::DCTDecode(ref _p) => "DCTDecode",
-                StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
-                StreamFilter::JBIG2Decode(ref _p) => "JBIG2Decode",
-                StreamFilter::Crypt(_) => "Crypt",
-                StreamFilter::RunLengthDecode => "RunLengthDecode",
-            })
-            .map(|s| Primitive::Name(s.into()));
+            let mut filters = self
+                .info
+                .filters
+                .iter()
+                .map(|filter| Primitive::Name(filter.name().into()));
             match self.info.filters.len() {
                 0 => {},
                 1 => {
@@ -171,6 +162,14 @@ impl<I: ObjectWrite> Stream<I> {
                 _ => {
                     info.insert("Filter", Primitive::array::<Primitive, _, _, _>(filters, update)?);
                 }
+            }
+            if any_params {
+                params = Some(match all_params.len() {
+                    // A lone filter takes its dictionary directly; a chain
+                    // needs the array form to keep the positions.
+                    1 => all_params.pop().unwrap(),
+                    _ => Primitive::Array(all_params),
+                });
             }
         }
         if let Some(para) = params {
@@ -407,6 +406,14 @@ impl ObjectStream {
         } else {
             try_opt!(self.inner.info.first.checked_add(self.offsets[index + 1]), "overflow")
         };
+        // `/First` and the offsets come from the file, so the range can run past
+        // the decoded data or backwards. The caller slices `data[start .. end]`
+        // with it, which would panic (7.5.7).
+        if start > end || end > data.len() {
+            err!(PdfError::Other { msg: format!(
+                "/ObjStm entry {index} covers {start}..{end}, outside the {} decoded bytes", data.len()
+            )});
+        }
 
         Ok((data, start..end))
     }

@@ -113,13 +113,16 @@ fn serialize_list(arr: &[Primitive], out: &mut impl io::Write) -> Result<()> {
 
 pub fn serialize_name(s: &str, out: &mut impl io::Write) -> Result<()> {
     write!(out, "/")?;
-    for b in s.chars() {
+    // 7.3.5: a name is a sequence of bytes; the delimiters, the number sign and
+    // anything outside the printable ASCII range are written as `#` followed by
+    // two hex digits. This used to panic! on the first non-ASCII byte, which a
+    // name taken from a document (a resource name, a `#` inside one) can be.
+    for &b in s.as_bytes() {
         match b {
-            '\\' | '(' | ')' => write!(out, r"\")?,
-            c if c > '~' => panic!("only ASCII"),
-            _ => (),
+            b'#' | b'(' | b')' | b'/' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'%'
+            | 0 ..= 32 | 127 ..= 255 => write!(out, "#{:02X}", b)?,
+            _ => out.write_all(&[b])?,
         }
-        write!(out, "{}", b)?;
     }
     Ok(())
 }

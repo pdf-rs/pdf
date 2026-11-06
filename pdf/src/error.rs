@@ -362,6 +362,9 @@ macro_rules! bail {
         err!($crate::PdfError::Other { msg: format!($($t)*) })
     }
 }
+// Kept for future use: a panic in the middle of a save is not an option, so
+// this crate's `unimplemented!()` returns an error instead.
+#[allow(unused_macros)]
 macro_rules! unimplemented {
     () => {
         bail!("Unimplemented @ {}:{}", file!(), line!())

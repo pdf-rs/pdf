@@ -22,11 +22,17 @@ serialising.
   advance is no longer lost for Type 3 fonts whose `/Widths` disagree.
 - ~~**`d1` is parsed and dropped**~~ — **fixed**. Same table: `d1` also carries the
   glyph bounding box; it is now `Op::GlyphWidthAndBBox { wx, wy, bbox }` (`c35`).
-- **`Op::InlineImage` cannot be written** (`unimplemented!()` in the writer path, ~line 743):
-  any content stream containing an inline image panics on `to_string`/save. 8.9.7 round-trip.
-- **Inline image `/DP` is reused for every entry of `/F`** (`inline_image`, `decode_parms.clone()`),
-  so `/F [/A85 /Fl] /DP [null << /Predictor 12 … >>]` applies the Flate params to the ASCII85
-  stage too. 8.9.7 makes `/DP` parallel to `/F` like 7.4.2.
+- ~~**`Op::InlineImage` cannot be written**~~ — **fixed**. `serialize_inline_image` writes
+  `BI … ID … EI` (8.9.7) with the dictionary entries un-bracketed and full key names, which
+  the parser accepts in place of Table 94's abbreviations. The data has no `/Length`, so the
+  bytes are hex-encoded under `ASCIIHexDecode` whenever a filtered source or a literal `EI`
+  in the samples would otherwise end the image early; a raw unfiltered image without `EI` is
+  written as it is. Entries that cannot be inline (`/Length`, stream keys, indirect values)
+  are dropped. Used to be `unimplemented!()`: any page with an inline image on it aborted the
+  rewrite. Test: `regressions::inline_image_survives_a_rewrite`,
+  `inline_image_data_that_spells_ei_is_escaped`.
+- ~~**Inline image `/DP` is reused for every entry of `/F`**~~ — **fixed**. `/DP` is read as
+  parallel to `/F`, `null` holes included, like 7.4.2's `/DecodeParms`.
 - **`Do0` accepted** (line 327) — not an operator in any edition; harmless but non-standard.
 - Shading/clip state: `W`/`W*` emit a `Clip` op but the path is not marked as a clipping path
   before the next painting operator (8.5.4); an op consumer cannot tell "clip and fill" from

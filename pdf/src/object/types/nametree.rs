@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use super::prelude::*;
 
@@ -173,19 +173,73 @@ impl<T> NameTree<T> {
         let node = NameTreeNode::Leaf(entries);
         NameTree { limits: None, node }
     }
-    pub fn build_tree(mut entries: Vec<(PdfString, T)>) -> Result<Self> {
-        const IDEAL_LEVEL_SIZE: f32 = 17.;
-        let len = entries.len();
-        if len < 20 {
-            return Ok(Self::build_flat(entries));
-        }
-        let levels = (len as f32).log2() / IDEAL_LEVEL_SIZE.log2();
-        let root_levels_ln2 = levels.fract();
-        let root_levels = IDEAL_LEVEL_SIZE.powf(root_levels_ln2).ceil() as usize;
-        entries.sort_unstable_by(|a, b| a.0.data.as_slice().cmp(b.0.data.as_slice()));
-        let mut entries = VecDeque::from(entries);
+}
 
-        unimplemented!()
+impl<T: ObjectWrite> NameTree<T> {
+    /// A leaf holds at most this many entries. 7.9.6 caps a node at 64; a
+    /// smaller one keeps a lookup to a level or two and is what writers emit.
+    const LEAF_SIZE: usize = 17;
+    /// Intermediate nodes hold at most this many `/Kids`.
+    const KIDS_PER_NODE: usize = 17;
+
+    /// Build a balanced name tree over `entries` (7.9.6): sorted leaves with
+    /// `/Limits`, grouped under intermediate nodes that are created in
+    /// `update`. The returned node is the root, which the caller owns and
+    /// creates itself.
+    ///
+    /// This used to be `unimplemented!()` for twenty entries or more, which is
+    /// to say for every input that needs a tree at all.
+    pub fn build_tree(entries: Vec<(PdfString, T)>, update: &mut impl Updater) -> Result<Self> {
+        let mut entries = entries;
+        entries.sort_unstable_by(|a, b| a.0.data.as_slice().cmp(b.0.data.as_slice()));
+
+        // A level is (node, smallest key below it, largest key below it); the
+        // keys are tracked here because `/Kids` holds references, which say
+        // nothing about their own `/Limits`.
+        let mut level: Vec<(Self, PdfString, PdfString)> = Vec::new();
+        let mut rest = entries;
+        while !rest.is_empty() {
+            let tail = rest.split_off(std::cmp::min(Self::LEAF_SIZE, rest.len()));
+            let first = rest.first().map(|(key, _)| key.clone());
+            let last = rest.last().map(|(key, _)| key.clone());
+            if let (Some(first), Some(last)) = (first, last) {
+                let limits = Some((first.clone(), last.clone()));
+                level.push((NameTree { limits, node: NameTreeNode::Leaf(rest) }, first, last));
+            }
+            rest = tail;
+        }
+
+        while level.len() > 1 {
+            let mut parents = Vec::with_capacity((level.len() + Self::KIDS_PER_NODE - 1) / Self::KIDS_PER_NODE);
+            let mut rest = std::mem::take(&mut level);
+            while !rest.is_empty() {
+                let tail = rest.split_off(std::cmp::min(Self::KIDS_PER_NODE, rest.len()));
+                let min = rest[0].1.clone();
+                let max = rest[rest.len() - 1].2.clone();
+                let kids = rest
+                    .into_iter()
+                    .map(|(node, _, _)| update.create(node).map(|rc| rc.get_ref()))
+                    .collect::<Result<Vec<_>>>()?;
+                parents.push((
+                    NameTree { limits: Some((min.clone(), max.clone())), node: NameTreeNode::Intermediate(kids) },
+                    min,
+                    max,
+                ));
+                rest = tail;
+            }
+            level = parents;
+        }
+
+        match level.pop() {
+            // 7.9.6: the root of a name tree has no `/Limits` — it is the one
+            // node that describes nothing above itself.
+            Some((mut root, _, _)) => {
+                root.limits = None;
+                Ok(root)
+            }
+            // No entries at all: an empty leaf, which is a valid name tree.
+            None => Ok(NameTree { limits: None, node: NameTreeNode::Leaf(Vec::new()) }),
+        }
     }
 }
 

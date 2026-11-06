@@ -9,15 +9,23 @@ Reviewed: 2026-11-01.
   index from the xref stream addresses the *N*-th pair, which is what the crate does, so lookup
   works — but a stream whose header numbers are inconsistent with the referring xref type-2 entry
   is not detected (other readers return the object the xref names, this one returns position N).
-- **`/First` and the offsets are not validated**: offsets are not required to be ascending, are
-  not checked against `/First`, and only `/N * 2 <= data.len()` is enforced (hardening added in
-  the earlier audit). `get_object_slice` computes `first + offset`, which can land past the end
-  or overlap the header; the slice then either fails in the lexer or yields a partial object.
-  A `/First` beyond the decoded length gives `start > data.len()` and a panic in
-  `Lexer::new(&data[..])` style slicing on some paths.
+- **`/First` and the offsets are only partially validated**: `/N * 2 <= data.len()` bounds the
+  header (hardening added in the earlier audit), and the range of each entry is now checked
+  against the decoded length before it is handed out, so a bad offset is an error instead of a
+  slice panic. Offsets are still not required to be ascending, and a range that overlaps the
+  header (before `/First`) is still accepted.
 - **A stream nested inside an object stream is not rejected** — 7.5.7: "an object stream shall
   not contain stream objects"; such an object is to be treated as null, here it parses into a
   `Stream` with a bogus `/Length` or an error.
+- ~~**`/DecodeParms` dropped / misplaced on write**~~ — **fixed**. `to_pdf_stream` collected a
+  single dictionary in a loop over the filters and `assert!`ed that no second filter had
+  parameters: a chain with two parameterised filters panicked on save, and with one it wrote
+  that dictionary for filter 0 whatever the filter order was. `/DecodeParms` is now built per
+  filter, `null` for the ones without parameters, as an array parallel to `/Filter` (7.4.2
+  Table 5); a lone filter keeps the direct dictionary form. Test:
+  `regressions::decode_parms_stay_aligned_with_the_filters`.
+- ~~**`get_object_slice` can slice out of bounds**~~ — **fixed**. `/First` plus an entry offset
+  can point past the decoded data or backwards; the range is validated before it is returned.
 - **`/FFilter` and `/FDecodeParms` length mismatch is silently tolerated** (missing params default
   to an empty dictionary instead of the pair being invalid), 7.4.2 Table 5 — tolerant, but it
   hides corrupt external-file definitions.
