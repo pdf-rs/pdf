@@ -25,11 +25,12 @@ more; what remains are deliberate choices, listed at the end.
   only whitespace after it; run when `allow_xref_error` is cleared. A truncated
   file and a file with junk after the marker are both errors in strict mode and
   still readable in tolerant mode. Cases `c31`, `c31b`.
-- ~~**Whole-file `std::fs::read` into memory**~~ — **fixed by default**. `open`
-  now returns a `File<Data, …>`: with the `mmap` feature the file is mapped
-  (see `backend.rs.md`), otherwise read. `FileOptions::open_mode` picks between
-  them (`OpenMode::Auto` / `Read` / `Mapped`), `open_owned` is the old
-  `File<Vec<u8>, …>` entry point. `max_file_size` (default
+- ~~**Whole-file `std::fs::read` into memory**~~ — **fixed**, opt-in mapping.
+  `open` now returns a `File<Data, …>`; the default is still a plain read
+  (`OpenMode::Read`), and `FileOptions::open_mode` chooses otherwise
+  (`OpenMode::Auto` = map only a file of at least `mmap_threshold` bytes,
+  default 64 KiB; `Mapped` = always). `open_owned` is the old `File<Vec<u8>, …>`
+  entry point; `mmap` is an opt-in crate feature. `max_file_size` (default
   `DEFAULT_MAX_FILE_SIZE`, 1 GiB, `None` = unlimited) still checks the metadata
   length before anything is mapped or read. `load()` with a caller-provided
   backend is never limited — a caller that maps or streams the file is
