@@ -21,19 +21,141 @@ pub struct Content {
 }
 
 impl Content {
+    /// Parse the content stream into a `Vec<Op>`.
+    ///
+    /// Prefer [`ops`](Content::ops) when the operators are consumed one by
+    /// one: a page's operators are much larger in memory than the content
+    /// stream they came from.
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
-        let mut data = vec![];
-        for part in self.parts.iter() {
-            data.extend_from_slice(&t!(part.data(resolve)));
+        self.ops(resolve).collect()
+    }
+
+    /// Parse the content stream lazily, one operator at a time.
+    ///
+    /// The parts are not concatenated first: each part's data is fetched when
+    /// the parse reaches it, and the compiler's cache is not disturbed by a
+    /// copy of the whole stream.
+    pub fn ops<'a, R: Resolve>(&'a self, resolve: &'a R) -> Ops<'a, R> {
+        Ops::new(Source::Parts(self.parts.iter()), resolve)
+    }
+}
+
+/// Where an [`Ops`] iterator gets its data from: the parts of a content
+/// stream, or the single stream of a form XObject.
+enum Source<'a> {
+    Parts(std::slice::Iter<'a, RcRef<Stream<()>>>),
+    Single(Option<&'a Stream<FormDict>>),
+}
+
+/// Lazily parsed content stream operators; see [`Content::ops`] and
+/// [`FormXObject::ops`].
+pub struct Ops<'a, R: Resolve> {
+    source: Source<'a>,
+    resolve: &'a R,
+    data: Option<Arc<[u8]>>,
+    pos: usize,
+    builder: OpBuilder,
+    done: bool,
+}
+
+impl<'a, R: Resolve> Ops<'a, R> {
+    fn new(source: Source<'a>, resolve: &'a R) -> Self {
+        Ops {
+            source,
+            resolve,
+            data: None,
+            pos: 0,
+            builder: OpBuilder::new(),
+            done: false,
         }
-        parse_ops(&data, resolve)
+    }
+    /// The next part's data, or `None` when there are no more parts.
+    fn next_data(&mut self) -> Option<Result<Arc<[u8]>>> {
+        match &mut self.source {
+            Source::Parts(parts) => parts.next().map(|part| part.data(self.resolve)),
+            Source::Single(one) => one.take().map(|stream| stream.data(self.resolve)),
+        }
+    }
+}
+
+impl<R: Resolve> Iterator for Ops<'_, R> {
+    type Item = Result<Op>;
+
+    fn next(&mut self) -> Option<Result<Op>> {
+        loop {
+            if self.done {
+                return None;
+            }
+            if self.data.is_none() {
+                match self.next_data() {
+                    Some(Ok(data)) => {
+                        self.data = Some(data);
+                        self.pos = 0;
+                    }
+                    Some(Err(e)) => {
+                        self.done = true;
+                        return Some(Err(e));
+                    }
+                    None => {
+                        self.done = true;
+                        return None;
+                    }
+                }
+            }
+            let data: &[u8] = self.data.as_deref().unwrap();
+            if self.pos >= data.len() {
+                self.data = None;
+                continue;
+            }
+            let (op, used) = match self.builder.next_op(&data[self.pos..], self.resolve) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    self.done = true;
+                    return Some(Err(e));
+                }
+            };
+            self.pos += used;
+            match op {
+                Some(op) => return Some(Ok(op)),
+                None => {
+                    self.data = None;
+                    self.pos = 0;
+                }
+            }
+        }
     }
 }
 
 pub fn parse_ops(data: &[u8], resolve: &impl Resolve) -> Result<Vec<Op>> {
-    let mut ops = OpBuilder::new();
-    ops.parse(data, resolve)?;
-    Ok(ops.ops)
+    parse_ops_iter(data, resolve).collect()
+}
+
+/// Parse a content stream lazily, one operator at a time.
+pub fn parse_ops_iter<'a, R: Resolve>(data: &'a [u8], resolve: &'a R) -> impl Iterator<Item = Result<Op>> + 'a {
+    let mut builder = OpBuilder::new();
+    let mut pos = 0;
+    let mut done = false;
+    std::iter::from_fn(move || {
+        if done || pos >= data.len() {
+            done = true;
+            return None;
+        }
+        match builder.next_op(&data[pos..], resolve) {
+            Ok((Some(op), used)) => {
+                pos += used;
+                Some(Ok(op))
+            }
+            Ok((None, used)) => {
+                pos += used;
+                done = true;
+                None
+            }
+            Err(e) => {
+                done = true;
+                Some(Err(e))
+            }
+        }
+    })
 }
 
 macro_rules! names {
@@ -253,29 +375,45 @@ fn starts_operand(first: &[u8]) -> bool {
 struct OpBuilder {
     last: Point,
     compability_section: bool,
-    ops: Vec<Op>
+    /// Operators that the last operator produced but that have not been handed
+    /// out yet. `"` produces four (`Tw`, `Tc`, `T*`, `Tj`), `b`, `b*`, `s` and
+    /// `TD` produce two.
+    pending: Vec<Op>,
+    /// Operands of the operator being read. Reused from operator to operator,
+    /// so the operands of a page cost no allocation once this has grown.
+    buffer: Vec<Primitive>,
 }
 impl OpBuilder {
     fn new() -> Self {
         OpBuilder {
             last: Point { x: 0., y: 0. },
             compability_section: false,
-            ops: Vec::new()
+            pending: Vec::with_capacity(4),
+            buffer: Vec::with_capacity(5),
         }
     }
-    fn parse(&mut self, data: &[u8], resolve: &impl Resolve) -> Result<()> {
+    /// Parse one operator, with its operands, out of `data`.
+    ///
+    /// Returns the operator and the number of bytes consumed; `None` means the
+    /// data ended between operators. A content stream is walked with this
+    /// rather than collected into a `Vec<Op>` first: a page of the spec has
+    /// 27 000 operators, and the `Vec` holding them is bigger than the stream
+    /// they were parsed from.
+    fn next_op(&mut self, data: &[u8], resolve: &impl Resolve) -> Result<(Option<Op>, usize)> {
+        if !self.pending.is_empty() {
+            return Ok((Some(self.pending.remove(0)), 0));
+        }
         let mut lexer = Lexer::new(data);
-        let mut buffer = Vec::with_capacity(5);
 
         loop {
             let backup_pos = lexer.get_pos();
             let lexeme = match lexer.next() {
                 Ok(lexeme) => lexeme,
-                Err(e) if e.is_eof() => break,
+                Err(e) if e.is_eof() => return Ok((None, lexer.get_pos())),
                 Err(e) => return Err(e),
             };
             if lexeme.as_slice().is_empty() {
-                break;
+                return Ok((None, lexer.get_pos()));
             }
             if starts_operand(lexeme.as_slice()) {
                 // The lexeme is already consumed; hand it to the object parser
@@ -283,16 +421,16 @@ impl OpBuilder {
                 match parse_with_lexer_from(&mut lexer, lexeme, resolve, ParseFlags::ANY) {
                     Ok(obj) => {
                         // Operand
-                        buffer.push(obj)
+                        self.buffer.push(obj)
                     }
                     Err(e) => {
                         if e.is_eof() {
-                            break;
+                            return Ok((None, lexer.get_pos()));
                         }
                         // It's not an object/operand - treat it as an operator.
                         lexer.set_pos(backup_pos);
                         let op = t!(lexer.next());
-                        self.operator(op, &mut buffer, &mut lexer, resolve)?;
+                        self.operator(op, &mut lexer, resolve)?;
                     }
                 }
             } else {
@@ -301,19 +439,25 @@ impl OpBuilder {
                 // that built a `PdfError::UnknownType` (two heap `String`s
                 // holding the lexeme and the next 50 bytes) per operator, only
                 // to throw it away and start over at the saved position.
-                self.operator(lexeme, &mut buffer, &mut lexer, resolve)?;
+                self.operator(lexeme, &mut lexer, resolve)?;
+            }
+            if !self.pending.is_empty() {
+                return Ok((Some(self.pending.remove(0)), lexer.get_pos()));
             }
             match lexer.get_pos().cmp(&data.len()) {
                 Ordering::Greater => err!(PdfError::ContentReadPastBoundary),
                 Ordering::Less => (),
-                Ordering::Equal => break
+                Ordering::Equal => return Ok((None, lexer.get_pos()))
             }
         }
-        Ok(())
     }
-    fn operator(&mut self, op: Substr, buffer: &mut Vec<Primitive>, lexer: &mut Lexer, resolve: &impl Resolve) -> Result<()> {
+    fn operator(&mut self, op: Substr, lexer: &mut Lexer, resolve: &impl Resolve) -> Result<()> {
         let operator = t!(op.as_str(), op);
-        match self.add(operator, buffer.drain(..), lexer, resolve) {
+        let mut buffer = std::mem::take(&mut self.buffer);
+        let result = self.add(operator, buffer.drain(..), lexer, resolve);
+        buffer.clear();
+        self.buffer = buffer;
+        match result {
             Ok(()) => Ok(()),
             Err(e) if resolve.options().allow_invalid_ops => {
                 warn!("OP Err: {:?}", e);
@@ -325,8 +469,9 @@ impl OpBuilder {
     fn add(&mut self, op: &str, mut args: impl Iterator<Item=Primitive>, lexer: &mut Lexer, resolve: &impl Resolve) -> Result<()> {
         use Winding::*;
 
-        let ops = &mut self.ops;
-        let mut push = move |op| ops.push(op);
+        self.pending.clear();
+        let pending = &mut self.pending;
+        let mut push = move |op| pending.push(op);
 
         match op {
             "b"   => {
@@ -480,9 +625,13 @@ impl OpBuilder {
             "Tf"  => push(Op::TextFont { name: name(&mut args)?, size: number(&mut args)? }),
             "Tj"  => push(Op::TextDraw { text: string(&mut args)? }),
             "TJ"  => {
-                let mut result = Vec::<TextDrawAdjusted>::new();
+                let array = array(&mut args)?;
+                // The items are one per array element: reserve once rather than
+                // growing, which is what a `collect` over a `Vec<Primitive>`
+                // does (a ten-item TJ array used to copy its items four times).
+                let mut result = Vec::with_capacity(array.len());
 
-                for spacing_or_text in array(&mut args)?.into_iter() {
+                for spacing_or_text in array.into_iter() {
                     let spacing_or_text = match spacing_or_text {
                         Primitive::Integer(i) => TextDrawAdjusted::Spacing(i as f32),
                         Primitive::Number(f) => TextDrawAdjusted::Spacing(f),
@@ -594,10 +743,11 @@ impl FormXObject {
         &self.stream.info.info
     }
     pub fn operations(&self, resolve: &impl Resolve) -> Result<Vec<Op>> {
-        let mut ops = OpBuilder::new();
-        let data = self.stream.data(resolve)?;
-        t!(ops.parse(&data, resolve));
-        Ok(ops.ops)
+        parse_ops(&self.stream.data(resolve)?, resolve)
+    }
+    /// Parse the form's content lazily; see [`Content::ops`].
+    pub fn ops<'a, R: Resolve>(&'a self, resolve: &'a R) -> Ops<'a, R> {
+        Ops::new(Source::Single(Some(&self.stream)), resolve)
     }
 }
 impl Object for FormXObject {

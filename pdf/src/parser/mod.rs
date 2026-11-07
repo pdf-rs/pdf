@@ -286,8 +286,10 @@ fn parse_lexeme<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Re
         };
         // Advance to end of string
         lexer.offset_pos(bytes_traversed);
-        // decrypt it
-        if let Some(ctx) = ctx {
+        // Decrypt it, but only when the file is encrypted: `decrypt` hands the
+        // bytes straight back in the plain case, and turning that slice into a
+        // fresh `IBytes` allocated and copied every string of the file.
+        if let Some(ctx) = ctx.filter(|ctx| ctx.decoder.is_some()) {
             string = t!(ctx.decrypt(&mut string)).into();
         }
         Primitive::String (PdfString::new(string))
@@ -305,8 +307,8 @@ fn parse_lexeme<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Re
         // Advance to end of string
         lexer.offset_pos(bytes_traversed);
 
-        // decrypt it
-        if let Some(ctx) = ctx {
+        // decrypt it, if the file is encrypted (see above)
+        if let Some(ctx) = ctx.filter(|ctx| ctx.decoder.is_some()) {
             string = t!(ctx.decrypt(&mut string)).into();
         }
         Primitive::String (PdfString::new(string))
