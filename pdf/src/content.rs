@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::error::*;
 use crate::object::*;
-use crate::parser::{Lexer, parse_with_lexer, ParseFlags};
+use crate::parser::{Lexer, Substr, parse_with_lexer, parse_with_lexer_from, ParseFlags};
 use crate::primitive::*;
 use crate::enc::{StreamFilter, encode_hex};
 use crate as pdf;
@@ -243,6 +243,13 @@ fn inline_image(lexer: &mut Lexer, resolve: &impl Resolve) -> Result<Arc<ImageXO
     Ok(Arc::new(ImageXObject { inner: Stream::from_compressed(image_dict, data, filters) }))
 }
 
+/// Can a lexeme starting with `first` be an operand? Numbers, names, strings
+/// and arrays begin with a digit, a sign, a dot or one of `/ ( < [`; anything
+/// else is an operator.
+fn starts_operand(first: &[u8]) -> bool {
+    matches!(first[0], b'0'..=b'9' | b'+' | b'-' | b'.' | b'/' | b'(' | b'<' | b'[')
+}
+
 struct OpBuilder {
     last: Point,
     compability_section: bool,
@@ -262,28 +269,39 @@ impl OpBuilder {
 
         loop {
             let backup_pos = lexer.get_pos();
-            let obj = parse_with_lexer(&mut lexer, resolve, ParseFlags::ANY);
-            match obj {
-                Ok(obj) => {
-                    // Operand
-                    buffer.push(obj)
-                }
-                Err(e) => {
-                    if e.is_eof() {
-                        break;
+            let lexeme = match lexer.next() {
+                Ok(lexeme) => lexeme,
+                Err(e) if e.is_eof() => break,
+                Err(e) => return Err(e),
+            };
+            if lexeme.as_slice().is_empty() {
+                break;
+            }
+            if starts_operand(lexeme.as_slice()) {
+                // The lexeme is already consumed; hand it to the object parser
+                // rather than reading the same token twice.
+                match parse_with_lexer_from(&mut lexer, lexeme, resolve, ParseFlags::ANY) {
+                    Ok(obj) => {
+                        // Operand
+                        buffer.push(obj)
                     }
-                    // It's not an object/operand - treat it as an operator.
-                    lexer.set_pos(backup_pos);
-                    let op = t!(lexer.next());
-                    let operator = t!(op.as_str(), op);
-                    match self.add(operator, buffer.drain(..), &mut lexer, resolve) {
-                        Ok(()) => {},
-                        Err(e) if resolve.options().allow_invalid_ops => {
-                            warn!("OP Err: {:?}", e);
-                        },
-                        Err(e) => return Err(e),
+                    Err(e) => {
+                        if e.is_eof() {
+                            break;
+                        }
+                        // It's not an object/operand - treat it as an operator.
+                        lexer.set_pos(backup_pos);
+                        let op = t!(lexer.next());
+                        self.operator(op, &mut buffer, &mut lexer, resolve)?;
                     }
                 }
+            } else {
+                // Operators are about half of the tokens in a content stream,
+                // and every one of them used to be parsed as an operand first:
+                // that built a `PdfError::UnknownType` (two heap `String`s
+                // holding the lexeme and the next 50 bytes) per operator, only
+                // to throw it away and start over at the saved position.
+                self.operator(lexeme, &mut buffer, &mut lexer, resolve)?;
             }
             match lexer.get_pos().cmp(&data.len()) {
                 Ordering::Greater => err!(PdfError::ContentReadPastBoundary),
@@ -292,6 +310,17 @@ impl OpBuilder {
             }
         }
         Ok(())
+    }
+    fn operator(&mut self, op: Substr, buffer: &mut Vec<Primitive>, lexer: &mut Lexer, resolve: &impl Resolve) -> Result<()> {
+        let operator = t!(op.as_str(), op);
+        match self.add(operator, buffer.drain(..), lexer, resolve) {
+            Ok(()) => Ok(()),
+            Err(e) if resolve.options().allow_invalid_ops => {
+                warn!("OP Err: {:?}", e);
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
     }
     fn add(&mut self, op: &str, mut args: impl Iterator<Item=Primitive>, lexer: &mut Lexer, resolve: &impl Resolve) -> Result<()> {
         use Winding::*;

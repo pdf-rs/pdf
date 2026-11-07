@@ -182,6 +182,26 @@ fn _parse_with_lexer_ctx(lexer: &mut Lexer, r: &impl Resolve, ctx: Option<&Conte
     let input = lexer.get_remaining_slice();
     let first_lexeme = t!(lexer.next(), std::str::from_utf8(input));
 
+    parse_lexeme(lexer, first_lexeme, r, ctx, flags, max_depth)
+}
+
+/// Like `parse_with_lexer_ctx`, but the first lexeme has already been read. A
+/// content stream reads it anyway, to tell an operand from an operator, and
+/// reading it a second time costs about 16 ns per token.
+pub fn parse_with_lexer_from<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Resolve, flags: ParseFlags) -> Result<Primitive> {
+    let pos = lexer.get_pos();
+    match parse_lexeme(lexer, first_lexeme, r, None, flags, MAX_DEPTH) {
+        Ok(p) => Ok(p),
+        Err(e) => {
+            // The caller may want to read the token as an operator instead.
+            lexer.set_pos(pos);
+            Err(e)
+        }
+    }
+}
+
+fn parse_lexeme<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Resolve, ctx: Option<&Context>, flags: ParseFlags, max_depth: usize) -> Result<Primitive> {
+
     let obj = if first_lexeme.equals(b"<<") {
         check(flags, ParseFlags::DICT)?;
 

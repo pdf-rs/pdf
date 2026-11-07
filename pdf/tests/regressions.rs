@@ -389,6 +389,41 @@ fn opening_an_empty_file_does_not_try_to_map_it() {
 // -------------------------------------------- 8.6.3 copying a page's resources
 
 #[test]
+fn operators_are_recognised_without_being_parsed_as_operands() {
+    // The content loop reads a token once and decides from its first byte
+    // whether it can be an operand (`/ ( < [`, a digit, a sign or a dot);
+    // anything else is an operator. Before, every operator was first run
+    // through the object parser, which built a `PdfError::UnknownType` (two
+    // heap `String`s) and threw it away. Delimiters let an operator follow an
+    // operand with no space, and a stream may end with an operator and no
+    // trailing whitespace.
+    let ops = parse_ops(
+        b"1 2 Td/GS0 gs q 0 0 m 10 10 l S Q BT/F1 12 Tf(EI)Tj ET BT/F1 9 Tf[(a)-2(b)]TJ ET",
+        &NoResolve,
+    )
+    .expect("parse");
+
+    let shows: Vec<_> = ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::TextDraw { text } => Some(text.data.to_vec()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shows, vec![b"EI".to_vec()], "operands must keep their values");
+    assert!(
+        matches!(ops.last(), Some(Op::EndText)),
+        "the stream ends with an operator: {:?}",
+        ops.last()
+    );
+
+    // Read, write and read again: the operator/operand split has to survive.
+    let out = serialize_ops(&ops).expect("serialize");
+    let again = parse_ops(&out, &NoResolve).expect("re-parse our own output");
+    assert_eq!(again.len(), ops.len());
+}
+
+#[test]
 fn clone_page_keeps_color_spaces_and_patterns() {
     // A page's colour space and pattern live in its /Resources and are
     // referred to by *name* from the content stream (`/CS0 cs`, `/P0 scn`).
