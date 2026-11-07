@@ -9,7 +9,7 @@ use crate::error::*;
 use crate::primitive::Name;
 
 mod str;
-pub use self::str::{StringLexer, HexStringLexer};
+pub use self::str::{StringLexer, HexStringLexer, plain_literal_len};
 
 
 /// `Lexer` has functionality to jump around and traverse the PDF lexemes of a string in any direction.

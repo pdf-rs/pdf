@@ -273,6 +273,28 @@ impl<'a, 'b> Iterator for HexStringLexerIter<'a, 'b> {
     }
 }
 
+/// If the body of a literal string needs no unescaping, its length.
+///
+/// `buf` starts right after the opening parenthesis. A body is plain when it
+/// contains no reverse solidus, no nested parenthesis and no end-of-line
+/// marker: then its bytes are exactly the slice up to the closing parenthesis
+/// and can be copied out in one go. Returns `None` when the lexer's slow path
+/// has to run (including for an unterminated string, so that the error comes
+/// from the lexer as before).
+pub fn plain_literal_len(buf: &[u8]) -> Option<usize> {
+    // The interesting bytes are all below 0x20 or in "(\\", so a plain scan
+    // is already close to memchr's speed for the short strings found in
+    // content streams.
+    for (i, &b) in buf.iter().enumerate() {
+        match b {
+            b')' => return Some(i),
+            b'\\' | b'(' | b'\r' | b'\n' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use crate::error::Result;

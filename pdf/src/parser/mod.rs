@@ -277,13 +277,26 @@ fn parse_lexeme<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Re
         check(flags, ParseFlags::STRING)?;
         let mut string = IBytes::new();
 
+        // A string without escapes or line breaks is a contiguous slice: copy
+        // it out once instead of pushing it byte by byte (which costs a call
+        // and a length check per byte, in `IBytes::push`).
+        let plain_len = plain_literal_len(lexer.get_remaining_slice());
         let bytes_traversed = {
-            let mut string_lexer = StringLexer::new(lexer.get_remaining_slice());
-            for character in string_lexer.iter() {
-                string.push(t!(character));
+            match plain_len {
+                Some(len) => {
+                    string.extend_from_slice(&lexer.get_remaining_slice()[..len]);
+                    len + 1 // and the closing parenthesis
+                }
+                None => {
+                    let mut string_lexer = StringLexer::new(lexer.get_remaining_slice());
+                    for character in string_lexer.iter() {
+                        string.push(t!(character));
+                    }
+                    string_lexer.get_offset()
+                }
             }
-            string_lexer.get_offset()
         };
+
         // Advance to end of string
         lexer.offset_pos(bytes_traversed);
         // Decrypt it, but only when the file is encrypted: `decrypt` hands the

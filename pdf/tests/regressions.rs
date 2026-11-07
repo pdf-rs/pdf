@@ -424,6 +424,64 @@ fn operators_are_recognised_without_being_parsed_as_operands() {
 }
 
 #[test]
+fn a_literal_string_without_escapes_reads_the_same_as_one_with() {
+    // The parser copies a string body that needs no unescaping straight out of
+    // the buffer (`plain_literal_len`); a body with a reverse solidus, a nested
+    // parenthesis or a line break goes through `StringLexer` byte by byte. Both
+    // paths have to produce the same bytes, and the buffer position after the
+    // string has to be the same, or the operator after it would be read wrong.
+    let cases: &[(&[u8], &[u8])] = &[
+        (b"(plain) Tj", b"plain"),
+        (b"(pl\\ain) Tj", b"plain"),
+        (b"(tab\\there) Tj", b"tab\there"),
+        (b"(octal \\101\\102) Tj", b"octal AB"),
+        (b"(nested (one)) Tj", b"nested (one)"),
+        (b"(closing \\) paren) Tj", b"closing ) paren"),
+        (b"(split \\\nline) Tj", b"split line"),
+        (b"(crlf \r\nis one) Tj", b"crlf \nis one"),
+        (b"() Tj", b""),
+        (b"(\\() Tj", b"("),
+    ];
+    for (input, expected) in cases {
+        let ops = parse_ops(input, &NoResolve).expect("parse");
+        let mut shows = vec![];
+        for op in &ops {
+            if let Op::TextDraw { text } = op {
+                shows.push(text.data.to_vec());
+            }
+        }
+        assert_eq!(
+            shows,
+            vec![expected.to_vec()],
+            "{:?} must read as {:?}",
+            String::from_utf8_lossy(input),
+            String::from_utf8_lossy(expected)
+        );
+        // `Tj` follows with no separator; if the string had consumed one byte
+        // too few or too many, it would not be an operator any more.
+        assert_eq!(ops.len(), 1, "one string and one operator expected for {:?}", String::from_utf8_lossy(input));
+        assert!(
+            matches!(ops.first(), Some(Op::TextDraw { .. })),
+            "the operator after the string must still be found in {:?}: {:?}",
+            String::from_utf8_lossy(input),
+            ops.first()
+        );
+    }
+
+    // A long body does not fit into `IBytes` inline capacity: the copy must
+    // still be exact at the heap boundary.
+    for len in [22usize, 23, 24, 200, 4096] {
+        let body: String = std::iter::repeat('x').take(len).collect();
+        let input = format!("({}) Tj", body);
+        let ops = parse_ops(input.as_bytes(), &NoResolve).expect("parse");
+        match ops.first() {
+            Some(Op::TextDraw { text }) => assert_eq!(text.data.as_slice(), body.as_bytes(), "{len} bytes"),
+            other => panic!("{len} bytes: {:?}", other),
+        }
+    }
+}
+
+#[test]
 fn the_lazy_parser_yields_the_same_operators_as_the_eager_one() {
     // `parse_ops_iter` hands out one operator per call, and `"` alone produces
     // four of them (`Tw`, `Tc`, `T*`, `Tj`), so the queue of operators the
