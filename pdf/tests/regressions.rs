@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use pdf::build::{Importer, PageBuilder, PdfBuilder};
 use pdf::content::{parse_ops, serialize_ops, Op};
 use pdf::enc::{LZWFlateParams, StreamFilter};
 use pdf::file::{CachedFile, FileOptions, OpenMode, UpdateOptions};
@@ -383,4 +384,52 @@ fn opening_an_empty_file_does_not_try_to_map_it() {
         Err(e) => e.to_string(),
     };
     assert!(err.contains("header"), "expected a header error, got: {err}");
+}
+
+// -------------------------------------------- 8.6.3 copying a page's resources
+
+#[test]
+fn clone_page_keeps_color_spaces_and_patterns() {
+    // A page's colour space and pattern live in its /Resources and are
+    // referred to by *name* from the content stream (`/CS0 cs`, `/P0 scn`).
+    // `deep_clone_op` used to copy fonts, XObjects and graphics states only,
+    // so a copied page lost every fill colour (`color space "CS0" not
+    // present`) and every pattern.
+    let objects = vec![
+        s("<< /Type /Catalog /Pages 2 0 R >>"),
+        s("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        s(concat!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] ",
+            "/Resources 6 0 R /Contents 4 0 R >>"
+        )),
+        s("<< /Length 34 >>\nstream\n/CS0 cs 0 scn /Pattern cs /P0 scn\nendstream"),
+        s(concat!(
+            "<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 ",
+            "/BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources 7 0 R /Length 0 >>\n",
+            "stream\n\nendstream"
+        )),
+        s(concat!(
+            "<< /ColorSpace << /CS0 [/Indexed /DeviceRGB 1 <000000FFFFFF>] >> ",
+            "/Pattern << /P0 5 0 R >> >>"
+        )),
+        s("<< >>"),
+    ];
+    let file = load(&objects);
+    let page = file.get_page(0).expect("page");
+
+    let mut builder = PdfBuilder::new(FileOptions::cached());
+    let mut importer = Importer::new(file.resolver(), &mut builder.storage);
+    let copy = PageBuilder::clone_page(&page, &mut importer).expect("clone the page");
+    importer.finish();
+
+    assert!(
+        copy.resources.color_spaces.contains_key("CS0"),
+        "the copied page needs /CS0, has: {:?}",
+        copy.resources.color_spaces.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        copy.resources.pattern.contains_key("P0"),
+        "the copied page needs /P0, has: {:?}",
+        copy.resources.pattern.keys().collect::<Vec<_>>()
+    );
 }

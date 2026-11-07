@@ -1295,7 +1295,31 @@ pub fn deep_clone_op(op: &Op, cloner: &mut impl Cloner, old_resources: &Resource
             }
             Ok(Op::XObject { name: name.clone() })
         }
-        ref op => Ok(op.clone())
+        Op::FillColorSpace { ref name } | Op::StrokeColorSpace { ref name } => {
+            // The color space a colour is interpreted in lives in the page
+            // resources; without it the copied page loses every fill colour
+            // ("color space CS0 not present") and fails to render.
+            if !resources.color_spaces.contains_key(name) {
+                if let Some(cs) = old_resources.color_spaces.get(name) {
+                    resources.color_spaces.insert(name.clone(), cs.deep_clone(cloner)?);
+                }
+            }
+            Ok(op.clone())
+        }
+        Op::FillColor { ref color } | Op::StrokeColor { ref color } => {
+            // A pattern is named by the last operand of `scn`/`SCN`.
+            if let Color::Other(ref args) = *color {
+                if let Some(name) = args.last().and_then(|p| p.as_name().ok()) {
+                    if !resources.pattern.contains_key(name) {
+                        if let Some(pat) = old_resources.pattern.get(name) {
+                            resources.pattern.insert(Name::from(name), pat.deep_clone(cloner)?);
+                        }
+                    }
+                }
+            }
+            Ok(op.clone())
+        }
+        ref op => Ok(op.clone()),
     }
 }
 
