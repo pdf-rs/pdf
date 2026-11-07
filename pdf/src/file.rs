@@ -103,6 +103,12 @@ pub struct Storage<B, OC, SC, L> {
 
 const PDF_HEADER: &[u8] = b"%PDF-1.7\n";
 
+/// How far past an object's known end a bounded read may go when the object
+/// does not end where the cross-reference table says it should. Small enough
+/// that a range client can afford to ask for it without being asked, large
+/// enough for the delimiter and a generous object header.
+const XREF_WIDEN: usize = 4096;
+
 impl<OC, SC, L> Storage<Vec<u8>, OC, SC, L>
 where
     OC: Cache<Result<AnySync, Arc<PdfError>>>,
@@ -235,9 +241,34 @@ where
                     debug!("object at {} runs past the bytes we have", start);
                     return Err(e);
                 }
-                warn!("object at {} runs past the next object in the xref table, reading to the end", start);
-                let mut lexer = Lexer::with_offset(self.backend.read(start ..)?, start);
-                parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)
+                // The object is longer than the table says. Widen the window
+                // by a little, not to the end of the document: an object whose
+                // last token sits on the offset of the next one looks exactly
+                // like this, and a client that fetches by range must not be
+                // asked for megabytes because of a delimiter. The read comes
+                // first so that a missing margin is *recorded* as a miss.
+                let stop = stop.unwrap();
+                let end = (stop + XREF_WIDEN).min(self.backend.len());
+                let bytes = self.backend.read(start .. end)?;
+                if self.backend.is_incomplete(start .. end) {
+                    debug!("object at {} needs the next {} bytes", start, end - start);
+                    return Err(e);
+                }
+                match parse_indirect_object(
+                    &mut Lexer::with_offset(bytes, start),
+                    resolve,
+                    self.decoder.as_ref(),
+                    flags,
+                ) {
+                    Ok(parsed) => Ok(parsed),
+                    Err(_) => {
+                        // Genuinely longer than the table and the margin: the
+                        // last resort is the rest of the file.
+                        warn!("object at {} runs past the next object in the xref table, reading to the end", start);
+                        let mut lexer = Lexer::with_offset(self.backend.read(start ..)?, start);
+                        parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)
+                    }
+                }
             }
             Err(e) => Err(e),
         }
