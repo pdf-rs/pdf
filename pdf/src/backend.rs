@@ -23,6 +23,25 @@ pub trait Backend: Sized {
         self.len() == 0
     }
 
+    /// Whether `range` could not be answered in full because those bytes are
+    /// not here — a reader that fetches ranges on demand, holding only the
+    /// part of the document some earlier pass asked for.
+    ///
+    /// `read` still returns what it does have (see `File`), so a parse of an
+    /// object that is only partly here fails at the point the bytes stop.
+    /// That failure says nothing about the document; the caller is going to
+    /// fetch `range` and try again. [`crate::file::Storage::resolve_ref`]
+    /// asks this question when a parse fails, and answers `null` for the
+    /// object instead of an error, so the rest of a pass keeps going and
+    /// finds the *other* ranges it needs in the same round.
+    ///
+    /// The default is `false`: a backend over a complete buffer never lies
+    /// about what it has.
+    fn is_incomplete(&self, range: Range<usize>) -> bool {
+        let _ = range;
+        false
+    }
+
     /// Returns the offset of the beginning of the file, i.e., where the `%PDF-1.5` header is.
     /// (currently only used internally!)
     fn locate_start_offset(&self) -> Result<usize> {
@@ -160,6 +179,12 @@ pub trait Backend: Sized {
             match read_xref_and_trailer_at(&mut lexer, resolve) {
                 Ok(read) => return Ok(read),
                 Err(e) if e.is_eof() => {
+                    // A section that ends before the hint is wrong; a section
+                    // that ends because its bytes are not here yet is not, and
+                    // reading on would ask for the rest of the document.
+                    if self.is_incomplete(pos .. stop) {
+                        return Err(e);
+                    }
                     debug!("xref section at {} runs past {}, reading to the end", pos, stop);
                 }
                 Err(e) => return Err(e),

@@ -183,17 +183,40 @@ where
         }
     }
 
+    /// The absolute byte range the indirect object at `pos` may occupy: from
+    /// where the cross-reference table places it up to the next object that
+    /// table places, clamped to the file, or `None` when the table gives no
+    /// usable answer.
+    fn object_range(&self, pos: usize) -> Option<Range<usize>> {
+        let start = self.start_offset.checked_add(pos)?;
+        if start >= self.backend.len() {
+            return None;
+        }
+        let stop = match self.next_object_offset(pos) {
+            usize::MAX => self.backend.len(),
+            next => self.start_offset.checked_add(next)?,
+        };
+        let end = stop.min(self.backend.len());
+        (end > start).then(|| start .. end)
+    }
+
+    /// Whether the object `id` lives in bytes this backend does not have yet.
+    fn ref_is_incomplete(&self, id: ObjNr) -> bool {
+        match self.refs.get(id) {
+            Ok(XRef::Raw { pos, .. }) => self
+                .object_range(pos)
+                .map_or(false, |r| self.backend.is_incomplete(r)),
+            _ => false,
+        }
+    }
+
     /// The indirect object at `pos`, parsed from the bytes up to the next
     /// object in the cross-reference table instead of from `pos` to the end of
     /// the file. A file whose objects overlap, or whose table is wrong, falls
     /// back to the open-ended read when the bounded parse reaches its end.
     fn parse_object_at(&self, pos: usize, resolve: &impl Resolve, flags: ParseFlags) -> Result<(PlainRef, Primitive)> {
         let start = t!(self.start_offset.checked_add(pos).ok_or(PdfError::Invalid));
-        let stop = match self.next_object_offset(pos) {
-            usize::MAX => None,
-            next => Some(t!(self.start_offset.checked_add(next).ok_or(PdfError::Invalid))),
-        }
-        .filter(|&stop| stop > start && stop <= self.backend.len());
+        let stop = self.object_range(pos).map(|r| r.end);
 
         let mut lexer = match stop {
             Some(stop) => Lexer::with_offset(self.backend.read(start .. stop)?, start),
@@ -201,7 +224,17 @@ where
         };
         match parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags) {
             Ok(parsed) => Ok(parsed),
+            // Running out of bytes in a *bounded* read means one of two
+            // things, and they could not be more different. If the object is
+            // longer than the table says, reading on finds it. If the object
+            // is longer than what the backend has, reading on asks for the
+            // whole rest of the document — so ask which one it is first.
             Err(e) if e.is_eof() && stop.is_some() => {
+                let range = start .. stop.unwrap();
+                if self.backend.is_incomplete(range) {
+                    debug!("object at {} runs past the bytes we have", start);
+                    return Err(e);
+                }
                 warn!("object at {} runs past the next object in the xref table, reading to the end", start);
                 let mut lexer = Lexer::with_offset(self.backend.read(start ..)?, start);
                 parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)
@@ -395,15 +428,44 @@ where
             Some((_, p, _)) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let p = t!(self.parse_object_at(pos, resolve, flags), r).1;
-                    Ok(p)
+                    match self.parse_object_at(pos, resolve, flags) {
+                        Ok((_, p)) => Ok(p),
+                        Err(e) => match self.object_range(pos) {
+                            // 7.3.9: a reference to an object that is not
+                            // there is null. A parse that stopped at the end
+                            // of the bytes we have has not shown the object to
+                            // be broken — it has shown it to be absent. Say
+                            // null and keep going, so one pass discovers every
+                            // range the page needs rather than one per round;
+                            // the pass is thrown away and rerun from the top
+                            // once the bytes have been fetched.
+                            Some(range) if self.backend.is_incomplete(range.clone()) => {
+                                debug!(
+                                    "object {:?} at {:?} is not in the bytes we have; treating it as null",
+                                    r, range
+                                );
+                                Ok(Primitive::Null)
+                            }
+                            _ => Err(e),
+                        },
+                    }
                 }
                 XRef::Stream {stream_id, index} => {
                     if !flags.contains(ParseFlags::STREAM) {
                         return Err(PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, allowed: flags });
                     }
                     // use get to cache the object stream
-                    let obj_stream = resolve.get::<ObjectStream>(Ref::from_id(stream_id))?;
+                    let obj_stream = match resolve.get::<ObjectStream>(Ref::from_id(stream_id)) {
+                        Ok(s) => s,
+                        Err(_e) if self.ref_is_incomplete(stream_id) => {
+                            debug!(
+                                "object {:?} lives in object stream {}, which is not in the bytes we have; treating it as null",
+                                r, stream_id
+                            );
+                            return Ok(Primitive::Null);
+                        }
+                        Err(e) => return Err(e),
+                    };
 
                     // 7.5.7: the type 2 entry gives a position in the stream, and
                     // the stream's header repeats the object number at that
@@ -1401,6 +1463,9 @@ mod bounded_reads {
         for (id, body) in [
             (1, "<< /Type /Catalog /Pages 2 0 R >>"),
             (2, "<< /Type /Pages /Kids [] /Count 0 >>"),
+            // Nothing refers to this one: it is here so that a test can hide
+            // an object the document does not need to load.
+            (3, "<< /Unused true >>"),
         ] {
             offsets.push(out.len());
             out.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
@@ -1434,6 +1499,33 @@ mod bounded_reads {
         );
     }
 
+    /// A backend that has the whole file except one window: a fetch that has
+    /// not happened yet. A read that touches the window is answered with the
+    /// bytes before it, and `is_incomplete` says so.
+    struct Hiding<'a> {
+        data: &'a [u8],
+        hole: Range<usize>,
+    }
+    impl<'a> Backend for Hiding<'a> {
+        fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
+            let r = range.to_range(self.data.len())?;
+            let stop = if r.start < self.hole.start && r.end > self.hole.start {
+                self.hole.start
+            } else if r.start >= self.hole.start && r.start < self.hole.end {
+                r.start
+            } else {
+                r.end
+            };
+            Ok(&self.data[r.start..stop])
+        }
+        fn len(&self) -> usize {
+            self.data.len()
+        }
+        fn is_incomplete(&self, range: Range<usize>) -> bool {
+            range.start < self.hole.end && range.end > self.hole.start
+        }
+    }
+
     #[test]
     fn the_startxref_offset_is_looked_for_in_the_tail() {
         let (data, _) = document();
@@ -1444,5 +1536,27 @@ mod bounded_reads {
             !reads.iter().any(|r| r.start == 0 && r.end == data.len()),
             "nothing may read the whole file: {:?}", *reads
         );
+    }
+
+    #[test]
+    fn an_object_whose_bytes_are_not_here_is_null_not_an_error() {
+        let (data, offsets) = document();
+        // The unreferenced third object is inside the window that has not
+        // been fetched.
+        let hole = offsets[2] .. offsets[2] + 8;
+        let backend = Hiding { data: &data, hole };
+        let file = FileOptions::uncached().load(backend).expect("the fixture must load");
+        let resolver = StorageResolver::new(&file.storage);
+
+        // 7.3.9: a reference to an object that is not there is null. One
+        // missing object must not cost the rest of the pass.
+        let missing = file.storage.resolve_ref(PlainRef { id: 3, gen: 0 }, ParseFlags::ANY, &resolver);
+        assert!(matches!(missing, Ok(Primitive::Null)), "{:?}", missing);
+
+        // The objects next to it are here and still resolve.
+        let here = file.storage.resolve_ref(PlainRef { id: 1, gen: 0 }, ParseFlags::ANY, &resolver);
+        assert!(matches!(here, Ok(Primitive::Dictionary(_))), "{:?}", here);
+        let pages = file.storage.resolve_ref(PlainRef { id: 2, gen: 0 }, ParseFlags::ANY, &resolver);
+        assert!(matches!(pages, Ok(Primitive::Dictionary(_))), "{:?}", pages);
     }
 }
