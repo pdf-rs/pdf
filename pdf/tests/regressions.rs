@@ -424,6 +424,62 @@ fn operators_are_recognised_without_being_parsed_as_operands() {
 }
 
 #[test]
+fn the_lazy_parser_yields_the_same_operators_as_the_eager_one() {
+    // `parse_ops_iter` hands out one operator per call, and `"` alone produces
+    // four of them (`Tw`, `Tc`, `T*`, `Tj`), so the queue of operators the
+    // builder holds until they are handed out has to be drained exactly like
+    // the eager version pushed them.
+    use pdf::content::{parse_ops, parse_ops_iter};
+    use pdf::object::NoResolve;
+
+    let data = b"1 2 Td/GS0 gs q 0 0 m 10 10 l S Q BT/F1 12 Tf(EI)Tj ET \
+                 BT/F1 9 Tf[(a)-2(b)]TJ ET 1 0 0 1 5 5 cm 3 w [3 3] 0 d \
+                 0 0 0 0 re b s 12 Tw 14 Tc (x)' 0 0 5 5 re B* 100 200 300 400 re f*";
+
+    let eager = parse_ops(data, &NoResolve).expect("eager parse");
+    let lazy: Vec<_> = parse_ops_iter(data, &NoResolve)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("lazy parse");
+
+    let eager: Vec<String> = eager.iter().map(|op| format!("{:?}", op)).collect();
+    let lazy: Vec<String> = lazy.iter().map(|op| format!("{:?}", op)).collect();
+    assert_eq!(eager, lazy);
+    assert!(eager.len() > 20, "not enough operators: {}", eager.len());
+}
+
+#[test]
+fn a_page_split_over_several_content_streams_gives_all_its_operators() {
+    // A page's /Contents may be an array of streams; each is a separate part,
+    // and the operators have to come out in order, not just from the first.
+    use pdf::content::Op;
+
+    let objects = vec![
+        Some("<< /Type /Catalog /Pages 2 0 R >>".to_string()),
+        Some("<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+        Some(concat!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] ",
+            "/Resources << >> /Contents [4 0 R 5 0 R] >>"
+        ).to_string()),
+        Some("<< /Length 6 >>\nstream\n0 0 m\nendstream".to_string()),
+        Some("<< /Length 9 >>\nstream\n10 10 l S\nendstream".to_string()),
+    ];
+    let file = load(&objects);
+    let page = file.get_page(0).expect("page");
+    let ops: Vec<Op> = page
+        .contents
+        .as_ref()
+        .expect("contents")
+        .ops(&file.resolver())
+        .collect::<Result<Vec<_>, _>>()
+        .expect("operators");
+
+    assert_eq!(ops.len(), 3, "expected MoveTo, LineTo, Stroke; got {:?}", ops);
+    assert!(matches!(ops[0], Op::MoveTo { .. }), "{:?}", ops[0]);
+    assert!(matches!(ops[1], Op::LineTo { .. }), "{:?}", ops[1]);
+    assert!(matches!(ops[2], Op::Stroke), "{:?}", ops[2]);
+}
+
+#[test]
 fn clone_page_keeps_color_spaces_and_patterns() {
     // A page's colour space and pattern live in its /Resources and are
     // referred to by *name* from the content stream (`/CS0 cs`, `/P0 scn`).
