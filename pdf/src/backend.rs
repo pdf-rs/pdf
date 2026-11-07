@@ -42,17 +42,40 @@ pub trait Backend: Sized {
         // locate the xref offset at the end of the file
         // `\nPOS\n%%EOF` where POS is the position encoded as base 10 integer.
         // u64::MAX has 20 digits + \n\n(2) + %%EOF(5) = 27 bytes max.
-
-        let mut lexer = Lexer::new(t!(self.read(..)));
-        lexer.set_pos_from_end(0);
-        t!(lexer.seek_substr_back(b"startxref"));
-        t!(lexer.next()).to::<usize>()
+        //
+        // Only a tail window is read: the same kilobyte `check_eof_marker`
+        // inspects, grown fourfold while the marker is not in it (a file that
+        // ends in padding, or one whose `startxref` sits under a big %%EOF
+        // comment). A reader that fetches ranges by offset then asks for one
+        // small chunk instead of the whole document.
+        let len = self.len();
+        let mut window = 1024.min(len);
+        loop {
+            let mut lexer = Lexer::new(t!(self.read(len - window .. len)));
+            lexer.set_pos_from_end(0);
+            if lexer.seek_substr_back(b"startxref").is_ok() {
+                if let Ok(word) = lexer.next() {
+                    if let Ok(pos) = word.to::<usize>() {
+                        return Ok(pos);
+                    }
+                }
+            }
+            if window == len {
+                bail!("the file does not end with a startxref offset");
+            }
+            window = window.saturating_mul(4).min(len);
+        }
     }
 
     /// Used internally by File, but could also be useful for applications that want to look at the raw PDF objects.
     fn read_xref_table_and_trailer(&self, start_offset: usize, resolve: &impl Resolve) -> Result<(XRefTable, Dictionary)> {
         let xref_offset = t!(self.locate_xref_offset());
-        let (xref_sections, trailer) = t!(self.read_xref_section_at(start_offset, xref_offset, resolve));
+        // Every section offset read or being read, header-relative. A section
+        // ends where the section that supersedes it begins, so this list is
+        // what bounds the reads below: only the final section runs to the end
+        // of the file.
+        let mut seen = vec![xref_offset];
+        let (xref_sections, trailer) = t!(self.read_xref_section_at(start_offset, xref_offset, None, resolve));
 
         let size = t!(trailer.get("Size")
             .ok_or_else(|| PdfError::MissingEntry {field: "Size".into(), typ: "XRefTable"})?
@@ -71,7 +94,7 @@ pub trait Backend: Sized {
         // generation 65535. Those sections are merged below, so remember what
         // the stream claimed and let nothing replace it.
         let mut from_xref_stream = vec![false; refs.len()];
-        t!(self.add_xrefstm_entries(start_offset, &trailer, resolve, &mut refs, &mut from_xref_stream));
+        t!(self.add_xrefstm_entries(start_offset, &trailer, resolve, &mut refs, &mut from_xref_stream, &seen));
 
         let mut prev_trailer = {
             match trailer.get("Prev") {
@@ -80,19 +103,22 @@ pub trait Backend: Sized {
             }
         };
         trace!("READ XREF AND TABLE");
-        let mut seen = vec![];
         while let Some(prev_xref_offset) = prev_trailer {
             if seen.contains(&prev_xref_offset) {
                 bail!("xref offsets loop");
             }
-            seen.push(prev_xref_offset);
 
-            let (xref_sections, trailer) = t!(self.read_xref_section_at(start_offset, prev_xref_offset, resolve));
+            // `/Prev` names a section earlier in the file than the one that
+            // named it, and the earliest section already seen is where this
+            // one stops.
+            let end = seen.iter().copied().filter(|&p| p > prev_xref_offset).min();
+            let (xref_sections, trailer) = t!(self.read_xref_section_at(start_offset, prev_xref_offset, end, resolve));
+            seen.push(prev_xref_offset);
 
             for section in xref_sections {
                 refs.add_entries_from_skipping(section, &from_xref_stream)?;
             }
-            t!(self.add_xrefstm_entries(start_offset, &trailer, resolve, &mut refs, &mut from_xref_stream));
+            t!(self.add_xrefstm_entries(start_offset, &trailer, resolve, &mut refs, &mut from_xref_stream, &seen));
 
             prev_trailer = {
                 match trailer.get("Prev") {
@@ -111,10 +137,33 @@ pub trait Backend: Sized {
 
     /// Read the cross-reference section (table or stream) that starts `offset`
     /// bytes after the beginning of the file, i.e. after the `%PDF-` header.
-    fn read_xref_section_at(&self, start_offset: usize, offset: usize, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
+    ///
+    /// `end` bounds the read: a section never extends past the section that
+    /// supersedes it, so when the update chain has already named a later one,
+    /// the bytes up to it are all this section can occupy. `start_offset` +
+    /// `end` is clamped to the file length, and a section that turns out to
+    /// run past the hint is read again from `pos` to the end of the file, so a
+    /// wrong hint in a damaged file costs a second read instead of data.
+    /// `None` means "to the end of the file", which is what the section named
+    /// by the final `startxref` gets, since nothing follows it.
+    fn read_xref_section_at(&self, start_offset: usize, offset: usize, end: Option<usize>, resolve: &impl Resolve) -> Result<(Vec<XRefSection>, Dictionary)> {
         let pos = t!(start_offset.checked_add(offset).ok_or(PdfError::Invalid));
         if pos >= self.len() {
             bail!("XRef offset outside file bounds");
+        }
+        let bounded_end = match end {
+            Some(end) if end > offset => Some(t!(start_offset.checked_add(end).ok_or(PdfError::Invalid)).min(self.len())),
+            _ => None,
+        };
+        if let Some(stop) = bounded_end {
+            let mut lexer = Lexer::with_offset(t!(self.read(pos .. stop)), pos);
+            match read_xref_and_trailer_at(&mut lexer, resolve) {
+                Ok(read) => return Ok(read),
+                Err(e) if e.is_eof() => {
+                    debug!("xref section at {} runs past {}, reading to the end", pos, stop);
+                }
+                Err(e) => return Err(e),
+            }
         }
         let mut lexer = Lexer::with_offset(t!(self.read(pos ..)), pos);
         read_xref_and_trailer_at(&mut lexer, resolve)
@@ -137,12 +186,16 @@ pub trait Backend: Sized {
         resolve: &impl Resolve,
         refs: &mut XRefTable,
         from_xref_stream: &mut Vec<bool>,
+        seen: &[usize],
     ) -> Result<()> {
         let offset = match trailer.get("XRefStm") {
             Some(p) => t!(p.as_usize()),
             None => return Ok(()),
         };
-        let (sections, stream_trailer) = match self.read_xref_section_at(start_offset, offset, resolve) {
+        // The stream belongs to the same update section as the table that
+        // names it, so it stops where the next section seen so far begins.
+        let end = seen.iter().copied().filter(|&p| p > offset).min();
+        let (sections, stream_trailer) = match self.read_xref_section_at(start_offset, offset, end, resolve) {
             Ok(read) => read,
             Err(e) => {
                 // The stream only duplicates information: every object it

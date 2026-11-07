@@ -85,6 +85,11 @@ pub struct Storage<B, OC, SC, L> {
 
     refs:       XRefTable,
 
+    // Offsets (header-relative) of every in-use object, sorted, so that the
+    // bytes of an object can be bounded by the next one without walking the
+    // cross-reference table on every read.
+    object_offsets: Vec<usize>,
+
     decoder:    Option<Decoder>,
     options:    ParseOptions,
 
@@ -111,6 +116,7 @@ where
             changes: HashMap::new(),
             promises: HashMap::new(),
             refs: XRefTable::new(0),
+            object_offsets: Vec::new(),
             decoder: None,
             options: ParseOptions::strict(),
             backend: Vec::from(PDF_HEADER),
@@ -149,6 +155,61 @@ where
         }
         Ok(String::from_utf8(header.to_owned())?)
     }
+
+    /// Collect the offsets of the in-use objects from the cross-reference
+    /// table, sorted, so that [`Storage::next_object_offset`] can answer in
+    /// logarithmic time instead of walking the table on every object read.
+    fn rebuild_object_offsets(&mut self) {
+        self.object_offsets = self.refs.entries()
+            .filter_map(|(_, entry)| match entry {
+                XRef::Raw { pos, .. } => Some(*pos),
+                _ => None,
+            })
+            .collect();
+        self.object_offsets.sort_unstable();
+        self.object_offsets.dedup();
+    }
+
+    /// Where the object at `pos` is known to stop: the next object the
+    /// cross-reference table places after it, header-relative, or `usize::MAX`
+    /// when nothing is known to follow. Objects do not overlap, so the bytes
+    /// from `pos` up to that offset are all the object can occupy — a reader
+    /// that fetches ranges asks for exactly that much, and never for the rest
+    /// of the document.
+    fn next_object_offset(&self, pos: usize) -> usize {
+        match self.object_offsets.binary_search(&pos) {
+            Ok(i) => self.object_offsets.get(i + 1).copied().unwrap_or(usize::MAX),
+            Err(i) => self.object_offsets.get(i).copied().unwrap_or(usize::MAX),
+        }
+    }
+
+    /// The indirect object at `pos`, parsed from the bytes up to the next
+    /// object in the cross-reference table instead of from `pos` to the end of
+    /// the file. A file whose objects overlap, or whose table is wrong, falls
+    /// back to the open-ended read when the bounded parse reaches its end.
+    fn parse_object_at(&self, pos: usize, resolve: &impl Resolve, flags: ParseFlags) -> Result<(PlainRef, Primitive)> {
+        let start = t!(self.start_offset.checked_add(pos).ok_or(PdfError::Invalid));
+        let stop = match self.next_object_offset(pos) {
+            usize::MAX => None,
+            next => Some(t!(self.start_offset.checked_add(next).ok_or(PdfError::Invalid))),
+        }
+        .filter(|&stop| stop > start && stop <= self.backend.len());
+
+        let mut lexer = match stop {
+            Some(stop) => Lexer::with_offset(self.backend.read(start .. stop)?, start),
+            None => Lexer::with_offset(self.backend.read(start ..)?, start),
+        };
+        match parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags) {
+            Ok(parsed) => Ok(parsed),
+            Err(e) if e.is_eof() && stop.is_some() => {
+                warn!("object at {} runs past the next object in the xref table, reading to the end", start);
+                let mut lexer = Lexer::with_offset(self.backend.read(start ..)?, start);
+                parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn resolver(&self) -> impl Resolve + '_ {
         StorageResolver::new(self)
     }
@@ -163,6 +224,7 @@ where
             start_offset,
             backend,
             refs: XRefTable::new(0),
+            object_offsets: Vec::new(),
             cache: object_cache,
             stream_cache,
             changes: HashMap::new(),
@@ -218,6 +280,7 @@ where
         let resolver = StorageResolver::new(self);
         let (refs, trailer) = t!(self.backend.read_xref_table_and_trailer(self.start_offset, &resolver));
         self.refs = refs;
+        self.rebuild_object_offsets();
 
         if let Some(crypt) = trailer.get("Encrypt") {
             let key = trailer
@@ -332,8 +395,7 @@ where
             Some((_, p, _)) => Ok((*p).clone()),
             None => match t!(self.refs.get(r.id)) {
                 XRef::Raw {pos, ..} => {
-                    let mut lexer = Lexer::with_offset(t!(self.backend.read(self.start_offset + pos ..), r), self.start_offset + pos);
-                    let p = t!(parse_indirect_object(&mut lexer, resolve, self.decoder.as_ref(), flags), r).1;
+                    let p = t!(self.parse_object_at(pos, resolve, flags), r).1;
                     Ok(p)
                 }
                 XRef::Stream {stream_id, index} => {
@@ -1308,3 +1370,79 @@ impl Object for XRefStream {
     }
 }
 */
+
+#[cfg(test)]
+mod bounded_reads {
+    use super::*;
+    use crate::backend::IndexRange;
+    use std::cell::RefCell;
+
+    /// A backend that remembers every range it was asked for.
+    struct Recording<'a> {
+        data: &'a [u8],
+        reads: RefCell<Vec<Range<usize>>>,
+    }
+    impl<'a> Backend for Recording<'a> {
+        fn read<R: IndexRange>(&self, range: R) -> Result<&[u8]> {
+            let r = range.to_range(self.data.len())?;
+            self.reads.borrow_mut().push(r.clone());
+            Ok(&self.data[r])
+        }
+        fn len(&self) -> usize {
+            self.data.len()
+        }
+    }
+
+    /// Header, two objects, a comment for padding, table, trailer.
+    fn document() -> (Vec<u8>, Vec<usize>) {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"%PDF-1.7\n");
+        let mut offsets = Vec::new();
+        for (id, body) in [
+            (1, "<< /Type /Catalog /Pages 2 0 R >>"),
+            (2, "<< /Type /Pages /Kids [] /Count 0 >>"),
+        ] {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        // Long enough that the last kilobyte is not the whole file.
+        out.extend_from_slice(b"%");
+        out.extend(std::iter::repeat(b'x').take(8192));
+        out.extend_from_slice(b"\n");
+        let xref_at = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+        for offset in &offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n",
+            offsets.len() + 1
+        ).as_bytes());
+        (out, offsets)
+    }
+
+    #[test]
+    fn an_object_is_read_up_to_the_next_object() {
+        let (data, offsets) = document();
+        let backend = Recording { data: &data, reads: RefCell::new(Vec::new()) };
+        let file = FileOptions::uncached().load(backend).expect("the fixture must load");
+        assert_eq!(file.num_pages(), 0);
+        let reads = file.storage.backend.reads.borrow();
+        assert!(
+            reads.iter().any(|r| r.start == offsets[0] && r.end == offsets[1]),
+            "the first object should be read up to the second one, not to the end: {:?}", *reads
+        );
+    }
+
+    #[test]
+    fn the_startxref_offset_is_looked_for_in_the_tail() {
+        let (data, _) = document();
+        let backend = Recording { data: &data, reads: RefCell::new(Vec::new()) };
+        let file = FileOptions::uncached().load(backend).expect("the fixture must load");
+        let reads = file.storage.backend.reads.borrow();
+        assert!(
+            !reads.iter().any(|r| r.start == 0 && r.end == data.len()),
+            "nothing may read the whole file: {:?}", *reads
+        );
+    }
+}

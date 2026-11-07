@@ -65,3 +65,43 @@ read into memory".
   truncating the file while it is mapped is undefined behaviour (documented on
   `Data::map_file`).
 
+## Every read, and what bounds it (2026-11-07)
+
+`Backend::read` takes an `IndexRange`, and `RangeFrom` (`pos..`) means "to the
+end of the file". A caller that has the file in memory does not care; a caller
+that fetches ranges over a network does, because it would have to download the
+rest of the document to answer one object. So each open-ended read is now
+bounded by something the file itself says:
+
+| site | reads | bounded by |
+| --- | --- | --- |
+| `locate_start_offset` | `0 .. 1024` | already, per implementation note 13 |
+| `locate_xref_offset` | the tail | 1 KiB, grown ×4 while `startxref` is not in it |
+| `read_xref_section_at` | a section | the next section offset already seen (`/Prev`, `/XRefStm`, `startxref`); only the final section runs to EOF |
+| `resolve_ref` (`XRef::Raw`) | one object | the next in-use offset in the xref table (`Storage::next_object_offset`) |
+| stream data (`Storage::decode`) | `/Length` bytes | already exact; a short `/Length` is an EOF error, not a shorter read |
+| inline images | between `ID` and `EI` | the content stream they sit in |
+| `File::scan` | `start_offset .. xref_offset` | already bounded |
+| `check_eof_marker` | last 1 KiB | already |
+
+Objects do not overlap, so "the bytes from this object's offset up to the next
+object's offset" is everything the object can be. The offsets are collected once
+(`Storage::rebuild_object_offsets`, sorted, deduplicated) and looked up by binary
+search, so a bounded read costs `O(log n)`. If a file's objects *do* overlap, or
+its table points at the wrong place, the bounded parse hits EOF and the read is
+repeated open-ended with a `warn!`: a damaged file reads as before, a conforming
+one never asks for the rest of the document.
+
+Two reads stay open-ended on purpose:
+
+- `Storage::save_to` copies the whole file, because that is what writing a file
+  out means.
+- `repair::build_xref_table` scans the whole body, because the cross-reference
+  table it would use to bound the scan is the thing that is broken. A range
+  client that cannot afford the download should not enter repair mode.
+
+The bound is an upper limit, not a promise about how much of it is needed: a
+caller with a partial file (see `pdf_render::rangecache`) gets the prefix it has
+and asks for the rest, one batch per round.
+
+
