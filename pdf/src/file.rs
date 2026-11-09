@@ -522,6 +522,30 @@ where
                         }
                     };
 
+                    // 7.5.7: the type 2 entry gives a position in the stream, and
+                    // the stream's header repeats the object number at that
+                    // position. When the two disagree one of them is wrong; the
+                    // header is the more specific statement, so trust it before
+                    // giving up.
+                    let index = match obj_stream.object_nr(index) {
+                        Some(nr) if nr == r.id => index,
+                        Some(nr) => match obj_stream.index_of(r.id) {
+                            Some(found) => found,
+                            None => {
+                                return Err(PdfError::Other { msg: format!(
+                                    "object {} is not in object stream {} (position {} holds object {})",
+                                    r.id, stream_id, index, nr
+                                )})
+                            }
+                        },
+                        None => {
+                            return Err(PdfError::ObjStmOutOfBounds {
+                                index,
+                                max: obj_stream.n_objects(),
+                            })
+                        }
+                    };
+
                     let (data, range) = t!(obj_stream.get_object_slice(index, resolve));
                     let slice = data.get(range.clone()).ok_or_else(|| other!("invalid range {:?}, but only have {} bytes", range, data.len()))?;
                     // 7.5.7: "an object stream shall not contain stream
