@@ -101,6 +101,7 @@ impl ImageXObject {
                     | [StreamFilter::CCITTFaxDecode(_)]
                     | [StreamFilter::JPXDecode]
                     | [StreamFilter::FlateDecode(_)]
+                    | [StreamFilter::BrotliDecode(_)]
                     | [StreamFilter::JBIG2Decode(_)] => Ok((data, Some(&image_filters[0]))),
                     _ => bail!("??? filters={:?}", image_filters),
                 }
@@ -137,6 +138,7 @@ impl ImageXObject {
                 jbig2_decode(&data, global_data.as_deref().unwrap_or_default())?
             }
             StreamFilter::FlateDecode(ref p) => flate_decode(&data, p, resolve.options())?,
+            StreamFilter::BrotliDecode(ref p) => brotli_decode(&data, p, resolve.options())?,
             _ => unreachable!(),
         };
         if let Some(ref decode) = self.decode {

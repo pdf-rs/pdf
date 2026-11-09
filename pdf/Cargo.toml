@@ -21,6 +21,9 @@ cache = ["globalcache"]
 default = ["sync", "cache"]
 
 [dependencies]
+# `/BrotliDecode` is not an ISO 32000 filter; it is a de-facto extension that
+# some producers write, and pdf.js reads. Pure Rust, no C dependency.
+brotli-decompressor = "5.0"
 pdf_derive = { version = "0.3.0", path = "../pdf_derive" }
 snafu = "0.8.3"
 libflate = "2.0.0"

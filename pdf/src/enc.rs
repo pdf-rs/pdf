@@ -95,6 +95,7 @@ pub enum StreamFilter {
     ASCII85Decode,
     LZWDecode (LZWFlateParams),
     FlateDecode (LZWFlateParams),
+    BrotliDecode (LZWFlateParams),
     JPXDecode, //Jpeg2k
     DCTDecode (DCTDecodeParams),
     CCITTFaxDecode (CCITTFaxDecodeParams),
@@ -112,6 +113,7 @@ impl StreamFilter {
             StreamFilter::ASCII85Decode => "ASCII85Decode",
             StreamFilter::LZWDecode(ref _p) => "LZWDecode",
             StreamFilter::FlateDecode(ref _p) => "FlateDecode",
+            StreamFilter::BrotliDecode(ref _p) => "BrotliDecode",
             StreamFilter::JPXDecode => "JPXDecode",
             StreamFilter::DCTDecode(ref _p) => "DCTDecode",
             StreamFilter::CCITTFaxDecode(ref _p) => "CCITTFaxDecode",
@@ -129,6 +131,7 @@ impl StreamFilter {
         Ok(match self {
             StreamFilter::LZWDecode(ref p) => Some(p.to_primitive(update)?),
             StreamFilter::FlateDecode(ref p) => Some(p.to_primitive(update)?),
+            StreamFilter::BrotliDecode(ref p) => Some(p.to_primitive(update)?),
             StreamFilter::DCTDecode(ref p) => Some(p.to_primitive(update)?),
             StreamFilter::CCITTFaxDecode(ref p) => Some(p.to_primitive(update)?),
             StreamFilter::JBIG2Decode(ref p) => Some(p.to_primitive(update)?),
@@ -148,6 +151,7 @@ impl StreamFilter {
            "ASCII85Decode" => StreamFilter::ASCII85Decode,
            "LZWDecode" => StreamFilter::LZWDecode (LZWFlateParams::from_primitive(params, r)?),
            "FlateDecode" => StreamFilter::FlateDecode (LZWFlateParams::from_primitive(params, r)?),
+           "BrotliDecode" => StreamFilter::BrotliDecode (LZWFlateParams::from_primitive(params, r)?),
            "JPXDecode" => StreamFilter::JPXDecode,
            "DCTDecode" => StreamFilter::DCTDecode (DCTDecodeParams::from_primitive(params, r)?),
            "CCITTFaxDecode" => StreamFilter::CCITTFaxDecode (CCITTFaxDecodeParams::from_primitive(params, r)?),
@@ -330,6 +334,26 @@ fn inflate_bytes(data: &[u8], limit: usize) -> Result<Vec<u8>> {
 }
 
 pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions) -> Result<Vec<u8>> {
+    decode_with_predictor(data, params, options, |data| {
+        if let Ok(decoded) = inflate_bytes_zlib(data, options.object_size_limit) {
+            Ok(decoded)
+        } else if let Ok(decoded) = inflate_bytes(data, options.object_size_limit) {
+            Ok(decoded)
+        } else {
+            dump_data(data);
+            bail!("can't inflate");
+        }
+    })
+}
+
+pub fn brotli_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions) -> Result<Vec<u8>> {
+    decode_with_predictor(data, params, options, |data| {
+        // This reader accepts raw and large-window Brotli, with no external dictionary or framing.
+        read_limited(brotli_decompressor::Decompressor::new(data, 4096), options.object_size_limit)
+    })
+}
+
+fn decode_with_predictor(data: &[u8], params: &LZWFlateParams, options: &ParseOptions, decoder: impl FnOnce(&[u8]) -> Result<Vec<u8>>) -> Result<Vec<u8>> {
     if !(0..1024).contains(&params.n_components) {
         bail!("n_components out of range");
     }
@@ -356,17 +380,7 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions
     let bpp = ((n_components * bpc) + 7) / 8;
 
 
-    // First flate decode
-    let decoded = {
-        if let Ok(data) = inflate_bytes_zlib(data, options.object_size_limit) {
-            data
-        } else if let Ok(data) = inflate_bytes(data, options.object_size_limit) {
-            data
-        } else {
-            dump_data(data);
-            bail!("can't inflate");
-        }
-    };
+    let decoded = decoder(data)?;
     // Then unfilter (PNG or TIFF)
     // For this, take the old out as input, and write output to out
 
@@ -412,7 +426,7 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions
         2 => {
             let mut buf = decoded;
             check_limits!(buf.len(), options.object_size_limit);
-            tiff_unpredict(&mut buf, stride, n_components, bpc)?;
+            tiff_unpredict(&mut buf, stride, columns, n_components, bpc)?;
             Ok(buf)
         }
         1 => Ok(decoded),
@@ -423,8 +437,8 @@ pub fn flate_decode(data: &[u8], params: &LZWFlateParams, options: &ParseOptions
 /// Inverse of the TIFF predictor 2 (horizontal differencing, 7.4.4.4): every
 /// sample is stored as the difference to the sample `Colors` positions before
 /// it in the same row.
-fn tiff_unpredict(data: &mut [u8], stride: usize, n_components: usize, bpc: usize) -> Result<()> {
-    if n_components == 0 || stride < n_components {
+fn tiff_unpredict(data: &mut [u8], stride: usize, columns: usize, n_components: usize, bpc: usize) -> Result<()> {
+    if n_components == 0 || stride == 0 {
         bail!("predictor needs Columns and Colors greater than zero");
     }
     match bpc {
@@ -445,6 +459,21 @@ fn tiff_unpredict(data: &mut [u8], stride: usize, n_components: usize, bpc: usiz
                     let prev = u16::from_be_bytes([row[prev_at], row[prev_at + 1]]);
                     let cur = u16::from_be_bytes([row[at], row[at + 1]]);
                     row[at .. at + 2].copy_from_slice(&cur.wrapping_add(prev).to_be_bytes());
+                }
+            }
+        }
+        1 | 2 | 4 => {
+            let mask = (1_u8 << bpc) - 1;
+            for row in data.chunks_mut(stride) {
+                if row.len() != stride { bail!("incomplete TIFF predictor row"); }
+                for sample in n_components..columns * n_components {
+                    let bit = sample * bpc;
+                    let prev_bit = (sample - n_components) * bpc;
+                    let shift = 8 - bpc - bit % 8;
+                    let value = (row[bit / 8] >> shift) & mask;
+                    let previous = (row[prev_bit / 8] >> (8 - bpc - prev_bit % 8)) & mask;
+                    row[bit / 8] = (row[bit / 8] & !(mask << shift))
+                        | (((value + previous) & mask) << shift);
                 }
             }
         }
@@ -662,6 +691,7 @@ pub fn decode(data: &[u8], filter: &StreamFilter, options: &ParseOptions) -> Res
         StreamFilter::ASCII85Decode => decode_85(data),
         StreamFilter::LZWDecode(ref params) => lzw_decode(data, params, options),
         StreamFilter::FlateDecode(ref params) => flate_decode(data, params, options),
+        StreamFilter::BrotliDecode(ref params) => brotli_decode(data, params, options),
         StreamFilter::RunLengthDecode => run_length_decode(data, options),
         StreamFilter::DCTDecode(ref params) => dct_decode(data, params, options),
         StreamFilter::CCITTFaxDecode(ref params) => fax_decode(data, params, options),

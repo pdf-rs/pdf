@@ -31,7 +31,8 @@ are regression guards, not evidence of a bug.
   change the *last byte* of a decoded stream, so it cannot be shown with a rendered page — the
   case is unit-level, checked against the clause.
 - **TIFF predictor 2 was not implemented** (`flate_decode` only handled `predictor > 10`).
-  7.4.4.4 also defines 2; fixed for `BitsPerComponent` 8 and 16, other widths report an error.
+  7.4.4.4 also defines 2; fixed for `BitsPerComponent` 1, 2, 4, 8 and 16 (row
+  padding included), other widths report an error.
   Unknown predictor values now error instead of being silently treated as PNG.
 - **Predictor ignored `BitsPerComponent`**: the row stride was `Columns * Colors`, but 7.4.4.4
   says `ceil(Columns * Colors * BitsPerComponent / 8)`; the PNG left-pixel offset is
@@ -44,6 +45,20 @@ are regression guards, not evidence of a bug.
 - **`JBIG2Globals`** streams are prepended to the page stream with a synthetic file header; the
   spec leaves the embedding to the implementation, but the segment layout here is a heuristic —
   documents with a real `/JBIG2Globals` header may mis-decode.
+
+## BrotliDecode (not in PDF 32000)
+
+Neither ISO 32000-1 nor -2 defines a `/BrotliDecode` filter; it is a de-facto
+extension (some compressors write it, pdf.js and others read it). It is
+accepted here with the same `/DecodeParms` as Flate — `Predictor`, `Columns`,
+`Colors`, `BitsPerComponent` — so PNG and TIFF prediction behave identically,
+and `to_primitive` writes it back as `/BrotliDecode`. Decoding is
+`brotli-decompressor`, which takes raw and large-window streams and needs no
+external dictionary, and the output is capped at `object_size_limit` like every
+other filter (`read_limited`, so a decompression bomb is an error, not an OOM).
+Image XObjects with this filter are handled by `xobject.rs` alongside Flate.
+`encode()` does not implement it: a writer that wants Brotli has to compress
+the data itself and set the filter.
 
 ## Deliberate deviations (tolerant)
 
