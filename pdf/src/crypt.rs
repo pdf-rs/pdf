@@ -620,8 +620,8 @@ impl Decoder {
                 }
             };
 
-            let zero_iv = Array::from_slice(&[0u8; 16]);
-            let key_slice = t!(Aes256CbcDec::new(&intermediate_key, zero_iv)
+            let zero_iv = Array::default();
+            let key_slice = t!(Aes256CbcDec::new(&intermediate_key, &zero_iv)
                 .decrypt_padded_inout::<NoPadding>(InOutBuf::from(wrapped_key.as_mut_slice()))
                 .map_err(|_| PdfError::InvalidPassword));
 
