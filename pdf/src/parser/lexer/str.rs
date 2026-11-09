@@ -5,7 +5,7 @@ use crate::error::*;
 /// It's also possible to get the number of indices of the original array that was traversed by the
 /// Iterator.
 ///
-/// ```
+/// ```text
 /// let mut string: Vec<u8> = Vec::new();
 /// let bytes_traversed = {
 ///     let mut string_lexer = StringLexer::new(lexer.get_remaining_slice());
