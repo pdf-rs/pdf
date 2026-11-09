@@ -686,7 +686,7 @@ impl ObjectWrite for Name {
 }
 
 impl<T: Object> Object for Vec<T> {
-    /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
+    /// Will try to convert `p` to `T` first, then try to convert `p` to `Vec<T>`
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         Ok(match p {
             Primitive::Array(_) => p
@@ -724,7 +724,7 @@ impl Object for Data {
     fn serialize<W: io::Write>(&self, out: &mut W) -> Result<()> {
         unimplemented!()
     }
-    /// Will try to convert `p` to `T` first, then try to convert `p` to Vec<T>
+    /// Will try to convert `p` to `T` first, then try to convert `p` to `Vec<T>`
     fn from_primitive(p: Primitive, r: &impl Resolve) -> Result<Self> {
         match p {
             Primitive::Array(_) => {

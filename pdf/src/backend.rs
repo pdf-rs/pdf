@@ -30,8 +30,8 @@ pub trait Backend: Sized {
     /// `read` still returns what it does have (see `File`), so a parse of an
     /// object that is only partly here fails at the point the bytes stop.
     /// That failure says nothing about the document; the caller is going to
-    /// fetch `range` and try again. [`crate::file::Storage::resolve_ref`]
-    /// asks this question when a parse fails, and answers `null` for the
+    /// fetch `range` and try again. `Storage::resolve_ref` (private) asks this
+    /// question when a parse fails, and answers `null` for the
     /// object instead of an error, so the rest of a pass keeps going and
     /// finds the *other* ranges it needs in the same round.
     ///

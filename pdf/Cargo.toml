@@ -13,6 +13,13 @@ documentation = "https://docs.rs/pdf"
 edition = "2021"
 description = "PDF reader"
 
+[package.metadata.docs.rs]
+# The features only add types (`mmap`, `dump`) or switch the cache, so the
+# documentation can show all of them; docs.rs builds this with the same
+# `-D warnings` the local docs build uses.
+all-features = true
+rustdoc-args = ["-D", "warnings"]
+
 [features]
 mmap = ["memmap2"]
 dump = ["tempfile"]
