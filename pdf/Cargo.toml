@@ -67,6 +67,8 @@ zune-jpeg = { version = "0.5.15", default-features = false, features = ["neon"] 
 
 [dev-dependencies]
 glob = "0.3.0"
+# the `read` example writes decoded images as PNG (issue #206)
+png = "0.17"
 
 [lib]
 doctest = false

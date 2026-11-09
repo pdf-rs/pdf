@@ -38,20 +38,42 @@ impl Object for Encoding {
                     Some(p) => BaseEncoding::from_primitive(p, resolve)?,
                     None => BaseEncoding::None,
                 };
-                let mut gid = 0;
+                let mut gid = 0u32;
                 let mut differences = HashMap::new();
                 if let Some(p) = dict.remove("Differences") {
+                    let mut valid = true;
                     for part in p.resolve(resolve)?.into_array()? {
                         match part {
                             Primitive::Integer(code) => {
-                                gid = code as u32;
+                                // A differences code is a character code, 0..=255 in every
+                                // real-world encoding, but tolerate larger values. A negative one
+                                // is nonsense; it used to wrap around and overflow `gid` on the
+                                // next name, which panicked (issue #189).
+                                match u32::try_from(code) {
+                                    Ok(code) => gid = code,
+                                    Err(_) => {
+                                        valid = false;
+                                        break;
+                                    }
+                                }
                             }
-                            Primitive::Name(name) => {
-                                differences.insert(gid, name);
-                                gid += 1;
-                            }
+                            Primitive::Name(name) => match gid.checked_add(1) {
+                                Some(next) => {
+                                    differences.insert(gid, name);
+                                    gid = next;
+                                }
+                                None => {
+                                    valid = false;
+                                    break;
+                                }
+                            },
                             _ => bail!("Unknown part primitive in dictionary: {:?}", part),
                         }
+                    }
+                    if !valid {
+                        // Malformed code sequence: rather than refusing the whole font, fall
+                        // back to the base encoding alone.
+                        differences.clear();
                     }
                 }
                 Ok(Encoding { base, differences })

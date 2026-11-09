@@ -23,8 +23,16 @@ To build additional parts, pass `--package=read` to build the subcrate you are i
 Examples are located in `pdf/examples/` and can be executed using:
 
 ```
-cargo run --example {content,metadata,names,read,text} -- <files/{choose a pdf}>
+cargo run --example {content,metadata,names,read} -- <files/{choose a pdf}>
 ```
+
+`read` prints what it found in a file and writes out the images it contains
+(JPEG as is, CCITT as TIFF, everything else as PNG) and the embedded fonts.
+
+Text extraction is not an example here any more: it lives in
+[pdf_render](https://github.com/pdf-rs/pdf_render) (`render/examples/trace.rs`)
+and in [pdf_text](https://github.com/pdf-rs/pdf_text), which also puts the
+glyphs back together into words and lines.
 
 # Renderer and Viewer
 A library for rendering PDFs via [Pathfinder](https://github.com/servo/pathfinder) and minimal viewer can be found [here](https://github.com/pdf-rs/pdf_render).

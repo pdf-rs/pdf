@@ -1568,3 +1568,45 @@ fn c35_type3_glyph_width_and_bbox_operator_d1() {
     );
 }
 
+#[test]
+fn c36_encoding_differences_with_bad_code_does_not_panic() {
+    // #189: a negative code in /Differences was cast to u32, so `gid += 1` on
+    // the name after it overflowed and panicked — on a file other viewers open.
+    // Neither a negative code nor one at the top of the u32 range may panic;
+    // the malformed array is dropped and the base encoding stays.
+    let contents = {
+        let data = b"BT /F1 24 Tf 20 100 Td (AB) Tj ET";
+        let mut v = format!("<< /Length {} >>\nstream\n", data.len()).into_bytes();
+        v.extend_from_slice(data);
+        v.extend_from_slice(b"\nendstream");
+        v
+    };
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] \
+          /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>"
+            .to_vec(),
+        contents,
+        // code 65 is a character code, -9 is not
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+          /Encoding << /Type /Encoding /Differences [-9 /A /B 65 /A /B] >> >>"
+            .to_vec(),
+        // the next code after this one cannot exist
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+          /Encoding << /Type /Encoding /Differences [4294967295 /A] >> >>"
+            .to_vec(),
+    ];
+    let bytes = build_pdf(&objects, 1);
+    write_case("c36-differences-bad-code", &bytes);
+    let read = pdf_rs_read(&bytes, "c36-differences-bad-code");
+    assert_eq!(read.text, "AB", "c36: the page still reads");
+    let mut fonts = read.fonts_available;
+    fonts.sort();
+    assert_eq!(
+        fonts,
+        vec!["F1".to_owned(), "F2".to_owned()],
+        "c36: both fonts, including the malformed one, stay usable"
+    );
+}
+
