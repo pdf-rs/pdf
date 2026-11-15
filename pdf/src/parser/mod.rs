@@ -223,8 +223,12 @@ fn parse_lexeme<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Re
         // First backup position
         let pos_bk = lexer.get_pos();
 
-        let second_lexeme = t!(lexer.next());
-        if second_lexeme.is_integer() {
+        let second_lexeme = match lexer.next() {
+            Ok(l) => Some(l),
+            Err(PdfError::EOF) => None,
+            Err(e) => return Err(e),
+        };
+        if let Some(second_lexeme) = second_lexeme.filter(|l| l.is_integer()) {
             let third_lexeme = t!(lexer.next());
             if third_lexeme.equals(b"R") {
                 // It is indeed a reference to an indirect object
