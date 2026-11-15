@@ -582,3 +582,12 @@ fn clone_page_keeps_color_spaces_and_patterns() {
         copy.resources.pattern.keys().collect::<Vec<_>>()
     );
 }
+
+// 7.5.4: object 0 is the head of the free list, so a writer must not give it
+// to an object; readers treat a reference to it as null.
+#[test]
+fn pdf_builder_does_not_use_object_0() {
+    let mut builder = PdfBuilder::new(FileOptions::cached());
+    let first = builder.create(Primitive::Integer(1)).expect("create");
+    assert_eq!(first.get_ref().get_inner().id, 1);
+}

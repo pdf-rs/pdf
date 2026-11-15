@@ -56,7 +56,8 @@ impl XRefTable {
     pub fn new(num_objects: ObjNr) -> XRefTable {
         let mut entries = Vec::with_capacity(num_objects as usize);
         entries.push(XRef::Free { next_obj_nr: 0, gen_nr: 0xffff });
-        entries.resize(num_objects as usize, XRef::Invalid);
+        // keep the free entry for object 0 when the table starts empty
+        entries.resize((num_objects as usize).max(1), XRef::Invalid);
         XRefTable {
             entries,
         }
