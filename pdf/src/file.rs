@@ -482,9 +482,6 @@ where
                     }
                 }
                 XRef::Stream {stream_id, index} => {
-                    if !flags.contains(ParseFlags::STREAM) {
-                        return Err(PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, allowed: flags });
-                    }
                     // use get to cache the object stream
                     let obj_stream = match resolve.get::<ObjectStream>(Ref::from_id(stream_id)) {
                         Ok(s) => s,

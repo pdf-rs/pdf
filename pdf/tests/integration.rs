@@ -205,6 +205,17 @@ fn unsigned_permissions() {
     }
 }
 
+// Ghostscript stores the /Length of each content stream as an integer object
+// inside an object stream.
+#[cfg(feature = "cache")]
+#[test]
+fn stream_length_in_object_stream() {
+    let file = run!(FileOptions::cached().open(file_path("ghostscript-objstm.pdf")));
+    let page = run!(file.get_page(0));
+    let contents = page.contents.as_ref().expect("contents");
+    assert!(!run!(contents.operations(&file.resolver())).is_empty());
+}
+
 // /Contents as an indirect reference to an array of content streams, see #297.
 fn contents_reference_to_array_pdf() -> Vec<u8> {
     let objs = [
