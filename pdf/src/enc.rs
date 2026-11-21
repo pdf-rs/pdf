@@ -517,6 +517,26 @@ pub fn dct_decode(data: &[u8], _params: &DCTDecodeParams, options: &ParseOptions
     let requested = info.height as usize * info.width as usize * info.components as usize;
     check_limits!(requested, options.object_size_limit);
 
+    // Four components is Adobe CMYK or YCCK. zune-jpeg converts those to RGB
+    // itself, and what it produces for white paper is black: the samples in
+    // these files are the ink amounts, and its YCCK path reads the K plane as
+    // if it were stored inverted (very-nearly-white -> 0 * k -> 0). LLGM.pdf
+    // page 4 is a 39 px spine scan that came out solid black while poppler and
+    // mupdf draw light grey.
+    //
+    // jpeg-decoder decodes all four samples and inverts them into Adobe's
+    // convention (255 = no ink). DeviceCMYK is the other way round, so flip
+    // once more and hand the renderer the ink amounts it expects.
+    if info.components == 4 {
+        let mut d = jpeg_decoder::Decoder::new(std::io::Cursor::new(data));
+        let mut pixels = d.decode().map_err(|e| PdfError::Other { msg: format!("JPEG: {e}") })?;
+        check_limits!(pixels.len(), options.object_size_limit);
+        for b in pixels.iter_mut() {
+            *b = 255 - *b;
+        }
+        return Ok(pixels);
+    }
+
     let pixels = decoder.decode()?;
     Ok(pixels)
 }
