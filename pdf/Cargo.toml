@@ -47,6 +47,10 @@ md5 = "0.7"
 # `std::error::Error` impl, which only exists with zune-jpeg's `std`
 # feature. Re-adding the features per target (below) only covered x86,
 # so any aarch64 build — an Apple Silicon mac — failed to compile.
+# Four-component (Adobe CMYK / YCCK) JPEGs: zune-jpeg turns those into RGB
+# and gets the ink inversion wrong, so those go through jpeg-decoder instead
+# (see `dct_decode`). No rayon: one page, one thread.
+jpeg-decoder = { version = "0.3.2", default-features = false }
 zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"] }
 aes = "0.9.1"
 cbc = "0.2"
