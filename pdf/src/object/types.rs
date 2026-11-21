@@ -178,7 +178,13 @@ pub struct Resources {
     #[pdf(key = "Pattern")]
     pub pattern: HashMap<Name, Ref<Pattern>>,
 
-    // shading: Option<Shading>,
+    /// `/Shading` (§8.7.4.3): name -> shading object. Kept raw on purpose: the
+    /// shading types in §8.7.4.5 are plain dictionaries except the mesh ones,
+    /// which are streams, so a typed map would have to model all eight and
+    /// would pull every one of them in when a page is opened. `pdf_render`
+    /// reads this when it meets the `sh` operator.
+    #[pdf(key = "Shading")]
+    pub shading: HashMap<Name, Primitive>,
     #[pdf(key = "XObject")]
     pub xobjects: HashMap<Name, Ref<XObject>>,
     // /XObject is a dictionary that map arbitrary names to XObjects
