@@ -546,10 +546,18 @@ where
                     let (data, range) = t!(obj_stream.get_object_slice(index, resolve));
                     let slice = data.get(range.clone()).ok_or_else(|| other!("invalid range {:?}, but only have {} bytes", range, data.len()))?;
                     // 7.5.7: "an object stream shall not contain stream
-                    // objects"; such an object is to be treated as null.
+                    // objects"; such an object is to be treated as null. The
+                    // parser says exactly that — and only that — when the caller
+                    // did not allow a stream, so ask once more with STREAM
+                    // allowed: an object that really is a stream becomes null,
+                    // while a stream nested deeper (or any other failure) keeps
+                    // its error instead of turning the whole entry into null.
                     match parse(slice, resolve, flags) {
-                        Err(PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, .. }) => {
-                            Ok(Primitive::Null)
+                        Err(e @ PdfError::PrimitiveNotAllowed { found: ParseFlags::STREAM, .. }) => {
+                            match parse(slice, resolve, flags | ParseFlags::STREAM) {
+                                Ok(Primitive::Stream(_)) => Ok(Primitive::Null),
+                                _ => Err(e),
+                            }
                         }
                         other => other,
                     }
