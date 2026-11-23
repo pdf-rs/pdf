@@ -205,14 +205,26 @@ fn unsigned_permissions() {
     }
 }
 
-// Ghostscript stores the /Length of each content stream as an integer object
-// inside an object stream.
-#[cfg(feature = "cache")]
+// Ghostscript writes the /Length of a content stream as an integer object
+// stored inside an object stream (7.5.7). Object 6 0 R, the length, therefore
+// has an `XRef::Stream` entry, and resolving it used to be refused with
+// `PrimitiveNotAllowed { found: STREAM }` — the caller (the stream dictionary
+// parser) only asked for an integer. The stream never got its length and the
+// page had no contents.
 #[test]
 fn stream_length_in_object_stream() {
-    let file = run!(FileOptions::cached().open(file_path("ghostscript-objstm.pdf")));
+    let file = run!(FileOptions::uncached().open(file_path("ghostscript-objstm.pdf")));
+
+    // The object stream (7 0 obj) holds "6 0" — the /Length — and "2 0", the /Info.
+    let length = run!(file.resolver().resolve(PlainRef { id: 6, gen: 0 }));
+    assert_eq!(run!(length.as_integer()), 42);
+
     let page = run!(file.get_page(0));
     let contents = page.contents.as_ref().expect("contents");
+    assert_eq!(contents.parts.len(), 1);
+    // `/Length` counts the encoded bytes, and the parser sliced the stream out
+    // of the file with it; decoding those 42 bytes gives 53 bytes of operators.
+    assert_eq!(run!(contents.parts[0].data(&file.resolver())).len(), 53);
     assert!(!run!(contents.operations(&file.resolver())).is_empty());
 }
 

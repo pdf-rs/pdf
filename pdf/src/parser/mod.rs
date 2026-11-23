@@ -223,25 +223,37 @@ fn parse_lexeme<'a>(lexer: &mut Lexer<'a>, first_lexeme: Substr<'a>, r: &impl Re
         // First backup position
         let pos_bk = lexer.get_pos();
 
+        // An integer that ends the data is still an integer: a truncated file,
+        // a content stream or an object stream can stop right after one. Running
+        // out of bytes where the next token would be is not an error here.
         let second_lexeme = match lexer.next() {
-            Ok(l) => Some(l),
-            Err(PdfError::EOF) => None,
+            Ok(l) => l,
+            Err(PdfError::EOF) => {
+                check(flags, ParseFlags::INTEGER)?;
+                return Ok(Primitive::Integer(t!(first_lexeme.to::<i64>())));
+            }
             Err(e) => return Err(e),
         };
-        if let Some(second_lexeme) = second_lexeme.filter(|l| l.is_integer()) {
-            let third_lexeme = t!(lexer.next());
-            if third_lexeme.equals(b"R") {
-                // It is indeed a reference to an indirect object
-                check(flags, ParseFlags::REF)?;
-                Primitive::Reference (PlainRef {
-                    id: t!(first_lexeme.to::<ObjNr>()),
-                    gen: t!(second_lexeme.to::<GenNr>()),
-                })
-            } else {
-                check(flags, ParseFlags::INTEGER)?;
-                // We are probably in an array of numbers - it's not a reference anyway
-                lexer.set_pos(pos_bk); // (roll back the lexer first)
-                Primitive::Integer(t!(first_lexeme.to::<i64>()))
+        if second_lexeme.is_integer() {
+            match lexer.next() {
+                Ok(third_lexeme) if third_lexeme.equals(b"R") => {
+                    // It is indeed a reference to an indirect object
+                    check(flags, ParseFlags::REF)?;
+                    Primitive::Reference (PlainRef {
+                        id: t!(first_lexeme.to::<ObjNr>()),
+                        gen: t!(second_lexeme.to::<GenNr>()),
+                    })
+                }
+                // `12 0` decides nothing yet; only `12 0 R` is a reference. The
+                // third lexeme can also be missing at the end of the data,
+                // which is no more a reference than a different token is.
+                Ok(_) | Err(PdfError::EOF) => {
+                    check(flags, ParseFlags::INTEGER)?;
+                    // We are probably in an array of numbers - it's not a reference anyway
+                    lexer.set_pos(pos_bk); // (roll back the lexer first)
+                    Primitive::Integer(t!(first_lexeme.to::<i64>()))
+                }
+                Err(e) => return Err(e),
             }
         } else {
             check(flags, ParseFlags::INTEGER)?;
@@ -477,5 +489,27 @@ mod tests {
         );
         assert_eq!(lx.next().unwrap().as_str().unwrap(), "TJ");
         assert!(lx.next().unwrap_err().is_eof());
+
+    }
+    // Data can end right after an integer: a truncated file, an object stream,
+    // a content stream. Running out of bytes where the next token would be is
+    // not an error, and the integer must survive. This used to fail on the
+    // third token of what merely looked like a reference.
+    #[test]
+    fn integer_at_end_of_data() {
+        use crate::object::NoResolve;
+        use super::{ParseFlags, parse_with_lexer};
+        use super::lexer::Lexer;
+
+        for data in [&b"12"[..], &b"12 0"[..]] {
+            let primitive = parse_with_lexer(&mut Lexer::new(data), &NoResolve, ParseFlags::INTEGER);
+            assert_eq!(primitive.unwrap_or_else(|e| panic!("{:?}: {}", data, e)).as_i64().unwrap(), 12);
+        }
+
+        // The second token of `12 0` is given back for the next parse, not
+        // swallowed as part of a reference that never came.
+        let mut lexer = Lexer::new(b"12 0 7");
+        assert_eq!(parse_with_lexer(&mut lexer, &NoResolve, ParseFlags::INTEGER).unwrap().as_i64().unwrap(), 12);
+        assert_eq!(lexer.next().unwrap().as_str().unwrap(), "0");
     }
 }
