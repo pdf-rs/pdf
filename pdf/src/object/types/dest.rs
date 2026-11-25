@@ -68,10 +68,10 @@ impl Dest {
             },
             "Fit" => DestView::Fit,
             "FitH" => DestView::FitH {
-                top: try_opt!(array.get(2)).as_number()?,
+                top: number_or_none(array.get(2))?,
             },
             "FitV" => DestView::FitV {
-                left: try_opt!(array.get(2)).as_number()?,
+                left: number_or_none(array.get(2))?,
             },
             "FitR" => DestView::FitR(Rectangle {
                 left: try_opt!(array.get(2)).as_number()?,
@@ -81,7 +81,7 @@ impl Dest {
             }),
             "FitB" => DestView::FitB,
             "FitBH" => DestView::FitBH {
-                top: try_opt!(array.get(2)).as_number()?,
+                top: number_or_none(array.get(2))?,
             },
             name => {
                 return Err(PdfError::UnknownVariant {
@@ -93,6 +93,15 @@ impl Dest {
         Ok(Dest { page, view })
     }
 }
+/// A FitH, FitV or FitBH operand: `null` or a missing value means "keep the
+/// current one", which is not the same as 0 — hence the Option.
+fn number_or_none(p: Option<&Primitive>) -> Result<Option<f32>> {
+    match p {
+        None | Some(Primitive::Null) => Ok(None),
+        Some(p) => p.as_number().map(Some),
+    }
+}
+
 impl Object for MaybeNamedDest {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let p = match p {
@@ -131,11 +140,11 @@ impl ObjectWrite for Dest {
             }
             DestView::FitH { top } => {
                 arr.push(Primitive::Name("FitH".into()));
-                arr.push(Primitive::Number(top));
+                arr.push(top.to_primitive(update)?);
             }
             DestView::FitV { left } => {
                 arr.push(Primitive::Name("FitV".into()));
-                arr.push(Primitive::Number(left));
+                arr.push(left.to_primitive(update)?);
             }
             DestView::FitR(rect) => {
                 arr.push(Primitive::Name("FitR".into()));
@@ -149,9 +158,106 @@ impl ObjectWrite for Dest {
             }
             DestView::FitBH { top } => {
                 arr.push(Primitive::Name("FitBH".into()));
-                arr.push(Primitive::Number(top));
+                arr.push(top.to_primitive(update)?);
             }
         }
         Ok(Primitive::Array(arr))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Dest, DestView};
+    use crate::object::{Action, Either, Lazy, NoResolve, NoUpdate, Object, ObjectWrite};
+    use crate::primitive::Primitive;
+
+    fn dest(array: Vec<Primitive>) -> Dest {
+        Dest::from_primitive(Primitive::Array(array), &NoResolve).unwrap()
+    }
+
+    fn name(s: &str) -> Primitive {
+        Primitive::Name(s.into())
+    }
+
+    /// The operand of the view we got, whichever view it is.
+    fn operand(d: Dest) -> Option<f32> {
+        match d.view {
+            DestView::FitH { top } | DestView::FitBH { top } => top,
+            DestView::FitV { left } => left,
+            v => panic!("unexpected view {:?}", v),
+        }
+    }
+
+    #[test]
+    fn fith_fitv_fitbh_with_null_or_missing_operand() {
+        // A null or absent operand means "keep the current position", which is
+        // not the same as 0.
+        for view in ["FitH", "FitV", "FitBH"] {
+            for array in [
+                vec![Primitive::Null, name(view), Primitive::Null],
+                vec![Primitive::Null, name(view)],
+            ] {
+                assert_eq!(operand(dest(array)), None, "{} with null/missing", view);
+            }
+        }
+    }
+
+    #[test]
+    fn fith_fitv_fitbh_with_number() {
+        for view in ["FitH", "FitV", "FitBH"] {
+            for operand in [Primitive::Integer(720), Primitive::Number(720.5)] {
+                let want = operand.as_number().ok();
+                let got = operand_of(vec![Primitive::Null, name(view), operand]);
+                assert_eq!(got, want, "{} with a number", view);
+            }
+        }
+    }
+
+    fn operand_of(array: Vec<Primitive>) -> Option<f32> {
+        operand(dest(array))
+    }
+
+    #[test]
+    fn fith_round_trips_through_null() {
+        let mut d = NoUpdate;
+        for view in ["FitH", "FitV", "FitBH"] {
+            let p = dest(vec![Primitive::Null, name(view)])
+                .to_primitive(&mut d)
+                .unwrap();
+            assert_eq!(
+                p,
+                Primitive::Array(vec![Primitive::Null, name(view), Primitive::Null])
+            );
+            // and back: the null we wrote must read as None again
+            assert_eq!(operand(Dest::from_primitive(p, &NoResolve).unwrap()), None);
+        }
+    }
+
+    #[test]
+    fn fith_with_junk_still_errors() {
+        assert!(Dest::from_primitive(
+            Primitive::Array(vec![Primitive::Null, name("FitH"), name("nope")]),
+            &NoResolve
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn open_action_is_lazy() {
+        // A dest this crate cannot decode must not take the Catalog with it:
+        // the field keeps the raw primitive and only load() may fail.
+        let bad = Primitive::Array(vec![Primitive::Null, Primitive::Integer(7)]);
+        let l: Lazy<Option<Either<Action, Dest>>> =
+            Lazy::from_primitive(bad.clone(), &NoResolve).unwrap();
+        assert_eq!(l.primitive, bad);
+        assert!(l.load(&NoResolve).is_err());
+
+        // ... and a good one still loads on demand.
+        let good = Primitive::Array(vec![Primitive::Null, name("Fit")]);
+        let l: Lazy<Option<Either<Action, Dest>>> = Lazy::from_primitive(good, &NoResolve).unwrap();
+        assert!(
+            matches!(*l.load(&NoResolve).unwrap(), Some(Either::Right(ref d))
+            if matches!(d.view, DestView::Fit))
+        );
     }
 }

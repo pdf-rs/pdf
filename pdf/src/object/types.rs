@@ -84,8 +84,10 @@ pub struct Catalog {
     #[pdf(key = "Outlines")]
     pub outlines: Option<Outlines>,
     // Threads: array
+    // Lazy: an OpenAction this crate cannot decode must not make the whole
+    // Catalog unreadable — the rest of the document is still fine.
     #[pdf(key = "OpenAction")]
-    pub open_action: Option<Either<Action, Dest>>,
+    pub open_action: Lazy<Option<Either<Action, Dest>>>,
     // OpenAction: array or dict
     // AA: dict
     // URI: dict
@@ -334,15 +336,15 @@ pub enum DestView {
     },
     Fit,
     FitH {
-        top: f32,
+        top: Option<f32>,
     },
     FitV {
-        left: f32,
+        left: Option<f32>,
     },
     FitR(Rectangle),
     FitB,
     FitBH {
-        top: f32,
+        top: Option<f32>,
     },
 }
 
