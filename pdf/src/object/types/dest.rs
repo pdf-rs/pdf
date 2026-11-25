@@ -83,6 +83,9 @@ impl Dest {
             "FitBH" => DestView::FitBH {
                 top: number_or_none(array.get(2))?,
             },
+            "FitBV" => DestView::FitBV {
+                left: number_or_none(array.get(2))?,
+            },
             name => {
                 return Err(PdfError::UnknownVariant {
                     id: "Dest",
@@ -160,6 +163,10 @@ impl ObjectWrite for Dest {
                 arr.push(Primitive::Name("FitBH".into()));
                 arr.push(top.to_primitive(update)?);
             }
+            DestView::FitBV { left } => {
+                arr.push(Primitive::Name("FitBV".into()));
+                arr.push(left.to_primitive(update)?);
+            }
         }
         Ok(Primitive::Array(arr))
     }
@@ -183,16 +190,16 @@ mod tests {
     fn operand(d: Dest) -> Option<f32> {
         match d.view {
             DestView::FitH { top } | DestView::FitBH { top } => top,
-            DestView::FitV { left } => left,
+            DestView::FitV { left } | DestView::FitBV { left } => left,
             v => panic!("unexpected view {:?}", v),
         }
     }
 
     #[test]
-    fn fith_fitv_fitbh_with_null_or_missing_operand() {
+    fn fith_fitv_fitbh_fitbv_with_null_or_missing_operand() {
         // A null or absent operand means "keep the current position", which is
         // not the same as 0.
-        for view in ["FitH", "FitV", "FitBH"] {
+        for view in ["FitH", "FitV", "FitBH", "FitBV"] {
             for array in [
                 vec![Primitive::Null, name(view), Primitive::Null],
                 vec![Primitive::Null, name(view)],
@@ -203,8 +210,8 @@ mod tests {
     }
 
     #[test]
-    fn fith_fitv_fitbh_with_number() {
-        for view in ["FitH", "FitV", "FitBH"] {
+    fn fith_fitv_fitbh_fitbv_with_number() {
+        for view in ["FitH", "FitV", "FitBH", "FitBV"] {
             for operand in [Primitive::Integer(720), Primitive::Number(720.5)] {
                 let want = operand.as_number().ok();
                 let got = operand_of(vec![Primitive::Null, name(view), operand]);
@@ -220,7 +227,7 @@ mod tests {
     #[test]
     fn fith_round_trips_through_null() {
         let mut d = NoUpdate;
-        for view in ["FitH", "FitV", "FitBH"] {
+        for view in ["FitH", "FitV", "FitBH", "FitBV"] {
             let p = dest(vec![Primitive::Null, name(view)])
                 .to_primitive(&mut d)
                 .unwrap();
