@@ -346,6 +346,9 @@ pub enum DestView {
     FitBH {
         top: Option<f32>,
     },
+    FitBV {
+        left: Option<f32>,
+    },
 }
 
 /// There is one `NameDictionary` associated with each PDF file.
