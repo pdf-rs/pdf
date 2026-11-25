@@ -20,6 +20,7 @@ use crate::object::Catalog;
 use crate::object::Cloner;
 use crate::object::DeepClone;
 use crate::object::InfoDict;
+use crate::object::Lazy;
 use crate::object::Object;
 use crate::object::ObjectWrite;
 use crate::object::Page;
@@ -191,7 +192,7 @@ impl CatalogBuilder {
             forms: None,
             page_labels: None,
             page_layout: None,
-            open_action: None
+            open_action: Lazy::default()
         })
     }
 }

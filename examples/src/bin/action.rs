@@ -292,7 +292,7 @@ fn main() -> Result<(), PdfError> {
 
     if let Some(action) = action {
         if args.trigger.open == true {
-            catalog.open_action = Some(Either::Left(action));
+            catalog.open_action = Lazy::new(Some(Either::Left(action)), &mut file).unwrap();
         } else if let Some(page_nr) = args.trigger.page_view {
             let page_ref = file.get_page(page_nr).unwrap();
             let mut page = (*page_ref).clone();
