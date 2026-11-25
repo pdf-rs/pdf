@@ -68,10 +68,10 @@ impl Dest {
             },
             "Fit" => DestView::Fit,
             "FitH" => DestView::FitH {
-                top: try_opt!(array.get(2)).as_number()?,
+                top: number_or_zero(array.get(2))?,
             },
             "FitV" => DestView::FitV {
-                left: try_opt!(array.get(2)).as_number()?,
+                left: number_or_zero(array.get(2))?,
             },
             "FitR" => DestView::FitR(Rectangle {
                 left: try_opt!(array.get(2)).as_number()?,
@@ -81,7 +81,7 @@ impl Dest {
             }),
             "FitB" => DestView::FitB,
             "FitBH" => DestView::FitBH {
-                top: try_opt!(array.get(2)).as_number()?,
+                top: number_or_zero(array.get(2))?,
             },
             name => {
                 return Err(PdfError::UnknownVariant {
@@ -93,6 +93,15 @@ impl Dest {
         Ok(Dest { page, view })
     }
 }
+/// A FitH, FitV or FitBH operand: `null` or a missing value means "keep the
+/// current one", read as 0 like the XYZ zoom above.
+fn number_or_zero(p: Option<&Primitive>) -> Result<f32> {
+    match p {
+        None | Some(Primitive::Null) => Ok(0.0),
+        Some(p) => p.as_number(),
+    }
+}
+
 impl Object for MaybeNamedDest {
     fn from_primitive(p: Primitive, resolve: &impl Resolve) -> Result<Self> {
         let p = match p {
@@ -153,5 +162,23 @@ impl ObjectWrite for Dest {
             }
         }
         Ok(Primitive::Array(arr))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Dest, DestView};
+    use crate::object::{NoResolve, Object};
+    use crate::primitive::Primitive;
+
+    #[test]
+    fn fith_with_null_or_missing_top() {
+        for array in [
+            vec![Primitive::Null, Primitive::Name("FitH".into()), Primitive::Null],
+            vec![Primitive::Null, Primitive::Name("FitH".into())],
+        ] {
+            let dest = Dest::from_primitive(Primitive::Array(array), &NoResolve).unwrap();
+            assert!(matches!(dest.view, DestView::FitH { top } if top == 0.0));
+        }
     }
 }
